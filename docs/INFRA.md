@@ -53,3 +53,18 @@ then `git add .gitattributes` is already done; commit the asset normally.
    and set the repo variable STEAM_ENABLED=true.
 4. The persistent self-hosted runner keeps the Steam login alive across builds (steamcmd sentry),
    which is why Steam deploys run there and not on ephemeral hosted runners.
+
+## 6. Public URL via Cloudflare Tunnel (pinball.virusgaming.org)
+The demo is served by nginx on the VM at :8080 on the LAN. To expose it publicly over HTTPS with no
+port-forwarding, a `cloudflared` connector runs in the compose (profile: tunnel) and connects to a
+Cloudflare-managed tunnel. Steps:
+1. Cloudflare Zero Trust dashboard -> Networks -> Tunnels -> Create a tunnel (Cloudflared). Name it
+   e.g. "gamedev". Choose the Docker option and COPY the connector TOKEN (the long eyJ... string).
+2. In that tunnel add a Public Hostname:
+     Subdomain: pinball   Domain: virusgaming.org
+     Service: HTTP   URL: demo-web:80
+   (cloudflared shares the compose network, so it resolves the nginx container named "demo-web".)
+3. On the VM put the token in ~/pinball-runner/.env as  CF_TUNNEL_TOKEN=eyJ...
+4. cd ~/pinball-runner && sudo docker compose --profile tunnel up -d
+5. pinball.virusgaming.org goes live over HTTPS; Cloudflare auto-manages the DNS.
+Image pinned to cloudflare/cloudflared:2026.6.0 (bump deliberately, never :latest).

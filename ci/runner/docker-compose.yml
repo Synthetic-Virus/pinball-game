@@ -31,5 +31,14 @@ services:
     volumes:
       - /srv/www/pinball-demo:/usr/share/nginx/html:ro
 
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.0
+    container_name: pinball-cloudflared
+    restart: unless-stopped
+    profiles: ["tunnel"]            # only starts with: docker compose --profile tunnel up -d
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+
 volumes:
   runner-work:
