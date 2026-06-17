@@ -12,7 +12,7 @@ jobs:
         run: |
           mkdir -p build/windows build/linux
           godot --headless --path . --export-release "Windows Desktop" "$PWD/build/windows/pinball.exe"
-          godot --headless --path . --export-release "Linux/X11"       "$PWD/build/linux/pinball.x86_64"
+          godot --headless --path . --export-release "Linux"       "$PWD/build/linux/pinball.x86_64"
       - name: Package
         run: |
           cd build
