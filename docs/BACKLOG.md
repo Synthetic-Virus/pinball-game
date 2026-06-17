@@ -22,3 +22,4 @@ pull from here. Keep items small and finishable. Each task names an owner agent 
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.
+- INFRA (deferred 2026-06-17): activate the public demo URL via the prepped Cloudflare tunnel (docs/INFRA.md section 6). Needs the connector token from the CF Zero Trust dashboard pasted into the VM .env as CF_TUNNEL_TOKEN, then `docker compose --profile tunnel up -d`. Demo is LAN-only at 10.1.1.214:8080 until then. NOT needed to start dev.
