@@ -1,0 +1,29 @@
+name: Deploy Demo
+on:
+  push:
+    branches: [main]
+
+# Builds the Godot web export on the homelab runner and publishes it to the demo URL.
+# Requires: an export preset named "Web", and the DEMO_DEPLOY_TARGET secret (rsync target on the
+# homelab web host, e.g. user@host:/srv/www/pinball-demo/). See docs/INFRA.md.
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: true
+jobs:
+  web-demo:
+    runs-on: [self-hosted, godot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export web build (headless)
+        run: |
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" "$PWD/build/web/index.html"
+      - name: Publish to homelab demo URL
+        run: |
+          if [ -z "${DEMO_DEPLOY_TARGET}" ]; then
+            echo "DEMO_DEPLOY_TARGET secret not set - see docs/INFRA.md 'Web demo target'."
+            exit 1
+          fi
+          rsync -av --delete build/web/ "${DEMO_DEPLOY_TARGET}"
+        env:
+          DEMO_DEPLOY_TARGET: ${{ secrets.DEMO_DEPLOY_TARGET }}

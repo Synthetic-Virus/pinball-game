@@ -1,0 +1,36 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  native:
+    runs-on: [self-hosted, godot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export native builds (headless)
+        run: |
+          mkdir -p build/windows build/linux
+          godot --headless --path . --export-release "Windows Desktop" "$PWD/build/windows/pinball.exe"
+          godot --headless --path . --export-release "Linux/X11"       "$PWD/build/linux/pinball.x86_64"
+      - name: Package
+        run: |
+          cd build
+          zip -r pinball-windows.zip windows
+          zip -r pinball-linux.zip   linux
+      - name: GitHub Release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" build/pinball-windows.zip build/pinball-linux.zip             --title "${GITHUB_REF_NAME}" --notes "Automated build from ${GITHUB_REF_NAME}."           || gh release upload "${GITHUB_REF_NAME}" build/pinball-windows.zip build/pinball-linux.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  steam:
+    # STUBBED. Enable only when a Steamworks App ID exists. To turn on:
+    #   1. Add repo secrets: STEAM_APP_ID, STEAM_BUILD_ACCOUNT, STEAM_CONFIG_VDF, depot IDs.
+    #   2. Change the line below to:  if: ${{ vars.STEAM_ENABLED == 'true' }}
+    #   3. Follow docs/INFRA.md "Enabling Steam".
+    if: false
+    needs: native
+    runs-on: [self-hosted, godot]
+    steps:
+      - run: echo "Steam deploy is stubbed until a Steamworks App ID is configured. See docs/INFRA.md."

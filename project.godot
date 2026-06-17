@@ -1,0 +1,18 @@
+; Godot 4 project file. Working title - rename config/name freely.
+config_version=5
+
+[application]
+config/name="Pinball (working title)"
+config/description="A pinball game targeting a commercial Steam release. Built by a team of specialized agents (docs/TEAM.md). Built on the homelab, deployed by git push (docs/INFRA.md)."
+config/features=PackedStringArray("4.3")
+
+[display]
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+
+[physics]
+; Pinball is physics-first. High tick rate + continuous_cd on the ball are mandatory to stop a
+; fast ball tunneling through flippers and walls. See .claude/CLAUDE.md and gamedev-physics-programmer.
+common/physics_ticks_per_second=120
+2d/default_gravity=980

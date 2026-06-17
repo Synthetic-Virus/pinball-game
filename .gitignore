@@ -1,0 +1,20 @@
+# Godot 4
+.godot/
+/build/
+/export/
+
+# Build outputs
+*.exe
+*.pck
+*.zip
+*.app
+*.dmg
+*.x86_64
+
+# Runner / CI local env
+ci/runner/.env
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/

@@ -1,0 +1,29 @@
+# Self-hosted Godot build runner. Deploy on a homelab Docker host.
+# Provision:
+#   1. Mint a registration token (short-lived):
+#        gh api -X POST repos/Synthetic-Virus/pinball-game/actions/runners/registration-token --jq .token
+#      OR use a fine-grained PAT via ACCESS_TOKEN for auto-renewal (preferred for long-running).
+#   2. Copy .env.example to .env and fill RUNNER_TOKEN (or ACCESS_TOKEN).
+#   3. docker compose up -d --build
+# See docs/INFRA.md.
+services:
+  godot-runner:
+    build:
+      context: .
+      args:
+        GODOT_VERSION: "4.3.1"
+    image: pinball-godot-runner:local
+    container_name: pinball-godot-runner
+    restart: unless-stopped
+    environment:
+      REPO_URL: https://github.com/Synthetic-Virus/pinball-game
+      RUNNER_NAME: pinball-godot-runner
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      LABELS: self-hosted,godot
+      RUNNER_SCOPE: repo
+      RUNNER_WORKDIR: /tmp/runner/work
+    volumes:
+      - runner-work:/tmp/runner/work
+volumes:
+  runner-work:

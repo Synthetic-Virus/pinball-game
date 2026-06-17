@@ -1,0 +1,34 @@
+name: CI
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# All jobs run on the homelab self-hosted runner (label: godot). The laptop stays lean.
+# See docs/INFRA.md for runner provisioning.
+jobs:
+  lint:
+    runs-on: [self-hosted, godot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: GDScript lint (gdtoolkit, advisory)
+        run: |
+          if command -v gdlint >/dev/null 2>&1; then
+            gdlint scripts/ || echo "gdlint reported issues (advisory for now)"
+          else
+            echo "gdlint not installed on runner - see docs/INFRA.md"
+          fi
+
+  test:
+    runs-on: [self-hosted, godot]
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: GUT headless tests
+        run: |
+          if [ -d addons/gut ]; then
+            godot --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit
+          else
+            echo "GUT addon not yet installed (addons/gut). Skipping until it lands. See BACKLOG.md."
+          fi
