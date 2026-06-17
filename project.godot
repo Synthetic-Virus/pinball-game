@@ -3,6 +3,7 @@ config_version=5
 
 [application]
 config/name="Pinball (working title)"
+run/main_scene="res://scenes/Main.tscn"
 config/description="A pinball game targeting a commercial Steam release. Built by a team of specialized agents (docs/TEAM.md). Built on the homelab, deployed by git push (docs/INFRA.md)."
 config/features=PackedStringArray("4.6")
 
