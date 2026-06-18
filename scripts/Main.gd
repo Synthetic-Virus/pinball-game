@@ -1,159 +1,193 @@
-extends Node2D
-## Gray-box pinball v2, built procedurally. ORIGINAL generic table of primitives.
+extends Node3D
+## Gray-box 3D pinball, built procedurally. ORIGINAL generic table of primitives.
+## A tilted playfield: gravity rolls the ball toward the flipper (near) end.
 ## Controls: LEFT flipper = A / Left-Arrow, RIGHT flipper = D / Right-Arrow, LAUNCH/RESET = Space.
 
-const W := 720.0
-const H := 1280.0
-const BALL_R := 13.0
-const L_REST := 0.42
-const L_UP := -0.45
-const R_REST := -0.42
-const R_UP := 0.45
-const FLIP_SPEED := 26.0
-const LAUNCH_SPEED := 1850.0
+const TILT_DEG := 7.0
+const HALF_W := 0.26          # table half-width in X
+const NEAR_Z := 0.55          # low end (flippers, drain, camera) at +Z
+const FAR_Z := -0.55          # high end at -Z
+const BALL_R := 0.013
+const WALL_H := 0.05
+const FLIP_SPEED := 16.0
 
 var score := 0
 var balls := 3
 var ball_live := false
-var ball: RigidBody2D
-var lflip: AnimatableBody2D
-var rflip: AnimatableBody2D
+var pf: Node3D                # playfield (tilted)
+var ball: RigidBody3D
+var lflip: AnimatableBody3D
+var rflip: AnimatableBody3D
 var lbl_score: Label
 var lbl_balls: Label
 var lbl_msg: Label
-var launch_at := Vector2(662, 1150)
+var ball_start := Vector3(0.215, BALL_R + 0.01, 0.45)   # in the right shooter lane
 
 func _ready() -> void:
-    _bg()
-    # Cabinet: left wall, top, right outer wall, and the launch-lane floor.
-    _wall(PackedVector2Array([
-        Vector2(320, 1238), Vector2(150, 1150), Vector2(24, 1000), Vector2(24, 24),
-        Vector2(696, 24), Vector2(696, 1180), Vector2(628, 1180),
-    ]))
-    # Lane divider (right boundary of play, open above y=260) + bottom-right funnel to the drain.
-    _wall(PackedVector2Array([
-        Vector2(628, 260), Vector2(628, 1130), Vector2(440, 1238),
-    ]))
+    _environment()
+    _light()
+    _camera()
+    pf = Node3D.new()
+    pf.rotation_degrees = Vector3(TILT_DEG, 0, 0)
+    add_child(pf)
+    _surface()
+    _walls()
     _bumpers()
-    lflip = _flipper(Vector2(245, 1115), L_REST, false)
-    rflip = _flipper(Vector2(515, 1115), R_REST, true)
-    _ball_and_drain()
+    lflip = _flipper(Vector3(-0.085, 0.018, 0.44), -0.55, 0.15, false)
+    rflip = _flipper(Vector3(0.085, 0.018, 0.44), 0.55, -0.15, true)
+    _ball()
     _ui()
     _reset_ball()
 
-func _bg() -> void:
-    var r := ColorRect.new()
-    r.size = Vector2(W, H)
-    r.color = Color(0.06, 0.07, 0.10)
-    r.z_index = -10
-    add_child(r)
+func _mat(c: Color) -> StandardMaterial3D:
+    var m := StandardMaterial3D.new()
+    m.albedo_color = c
+    m.roughness = 0.6
+    return m
 
-func _circle(rad: float) -> PackedVector2Array:
-    var p := PackedVector2Array()
-    for i in 24:
-        p.append(Vector2(cos(TAU * i / 24.0), sin(TAU * i / 24.0)) * rad)
-    return p
+func _environment() -> void:
+    var we := WorldEnvironment.new()
+    var env := Environment.new()
+    env.background_mode = Environment.BG_COLOR
+    env.background_color = Color(0.04, 0.05, 0.08)
+    env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+    env.ambient_light_color = Color(0.65, 0.67, 0.78)
+    env.ambient_light_energy = 1.0
+    we.environment = env
+    add_child(we)
 
-func _wall(points: PackedVector2Array) -> void:
-    var body := StaticBody2D.new()
-    var mat := PhysicsMaterial.new()
-    mat.bounce = 0.15
-    mat.friction = 0.2
-    body.physics_material_override = mat
-    for i in points.size() - 1:
-        var seg := SegmentShape2D.new()
-        seg.a = points[i]
-        seg.b = points[i + 1]
-        var cs := CollisionShape2D.new()
-        cs.shape = seg
-        body.add_child(cs)
-    add_child(body)
-    var line := Line2D.new()
-    line.points = points
-    line.width = 4.0
-    line.default_color = Color(0.35, 0.5, 0.75)
-    add_child(line)
+func _light() -> void:
+    var l := DirectionalLight3D.new()
+    l.rotation_degrees = Vector3(-58, -28, 0)
+    l.light_energy = 1.4
+    add_child(l)
+
+func _camera() -> void:
+    var cam := Camera3D.new()
+    cam.fov = 52.0
+    cam.position = Vector3(0, 0.62, 1.02)
+    add_child(cam)
+    cam.look_at(Vector3(0, -0.04, -0.15), Vector3.UP)
+    cam.current = true
+
+func _box_body(parent: Node3D, center: Vector3, size: Vector3, c: Color) -> void:
+    var b := StaticBody3D.new()
+    var col := CollisionShape3D.new()
+    var bs := BoxShape3D.new()
+    bs.size = size
+    col.shape = bs
+    b.add_child(col)
+    var mi := MeshInstance3D.new()
+    var bm := BoxMesh.new()
+    bm.size = size
+    mi.mesh = bm
+    mi.material_override = _mat(c)
+    b.add_child(mi)
+    b.position = center
+    parent.add_child(b)
+
+func _surface() -> void:
+    _box_body(pf, Vector3(0, -0.01, 0), Vector3(HALF_W * 2.0, 0.02, 1.1), Color(0.10, 0.12, 0.18))
+
+func _walls() -> void:
+    var h := WALL_H
+    _box_body(pf, Vector3(-HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))      # left
+    _box_body(pf, Vector3(HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))       # right outer
+    _box_body(pf, Vector3(0, h / 2.0, FAR_Z), Vector3(HALF_W * 2.0, h, 0.02), Color(0.30, 0.40, 0.60)) # far end
+    _box_body(pf, Vector3(0.17, h / 2.0, 0.1), Vector3(0.02, h, 0.9), Color(0.30, 0.40, 0.60))        # shooter-lane divider
+    _box_body(pf, Vector3(-0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))  # near-left stub
+    _box_body(pf, Vector3(0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))   # near-right stub
 
 func _bumpers() -> void:
-    for c in [Vector2(235, 380), Vector2(W - 235, 380), Vector2(W / 2.0, 560)]:
-        var area := Area2D.new()
-        area.position = c
-        var ash := CircleShape2D.new()
-        ash.radius = 38.0
-        var acs := CollisionShape2D.new()
-        acs.shape = ash
-        area.add_child(acs)
-        var vis := Polygon2D.new()
-        vis.polygon = _circle(38.0)
-        vis.color = Color(0.9, 0.45, 0.35)
-        area.add_child(vis)
-        var center: Vector2 = c
-        area.body_entered.connect(func(b: Node) -> void: _bump(b, center))
-        add_child(area)
+    for c in [Vector3(-0.10, 0, -0.18), Vector3(0.06, 0, -0.28), Vector3(-0.02, 0, 0.02)]:
+        var area := Area3D.new()
+        var col := CollisionShape3D.new()
+        var cyl := CylinderShape3D.new()
+        cyl.radius = 0.034
+        cyl.height = 0.06
+        col.shape = cyl
+        area.add_child(col)
+        var mi := MeshInstance3D.new()
+        var cm := CylinderMesh.new()
+        cm.top_radius = 0.034
+        cm.bottom_radius = 0.034
+        cm.height = 0.06
+        mi.mesh = cm
+        mi.material_override = _mat(Color(0.90, 0.45, 0.35))
+        area.add_child(mi)
+        area.position = c + Vector3(0, 0.03, 0)
+        var a := area
+        area.body_entered.connect(func(b: Node) -> void: _bump(b, a))
+        pf.add_child(area)
 
-func _bump(b: Node, center: Vector2) -> void:
+func _bump(b: Node, area: Area3D) -> void:
     if b != ball:
         return
     score += 100
     _update_ui()
-    var dir := ball.global_position - center
-    if dir.length() < 1.0:
-        dir = Vector2.UP
-    dir = dir.normalized()
-    var spd: float = max(ball.linear_velocity.length(), 520.0) + 160.0
-    ball.linear_velocity = dir * spd
+    var d := ball.global_position - area.global_position
+    d.y = 0.0
+    if d.length() < 0.001:
+        d = Vector3(0, 0, 1)
+    ball.linear_velocity = d.normalized() * 1.5
 
-func _flipper(pivot: Vector2, rest: float, mirrored: bool) -> AnimatableBody2D:
-    var f := AnimatableBody2D.new()
-    f.position = pivot
-    f.rotation = rest
+func _flipper(pos: Vector3, rest: float, up: float, mirrored: bool) -> AnimatableBody3D:
+    var f := AnimatableBody3D.new()
     f.sync_to_physics = true
+    f.position = pos
+    f.rotation.y = rest
+    f.set_meta("rest", rest)
+    f.set_meta("up", up)
     var d := -1.0 if mirrored else 1.0
-    var pts := PackedVector2Array([
-        Vector2(0, -11), Vector2(130 * d, -7), Vector2(130 * d, 7), Vector2(0, 11),
-    ])
-    var sh := ConvexPolygonShape2D.new()
-    sh.points = pts
-    var cs := CollisionShape2D.new()
-    cs.shape = sh
-    f.add_child(cs)
-    var vis := Polygon2D.new()
-    vis.polygon = pts
-    vis.color = Color(0.85, 0.85, 0.4)
-    f.add_child(vis)
-    add_child(f)
+    var size := Vector3(0.11, 0.022, 0.028)
+    var col := CollisionShape3D.new()
+    var bs := BoxShape3D.new()
+    bs.size = size
+    col.shape = bs
+    col.position = Vector3(0.055 * d, 0, 0)
+    f.add_child(col)
+    var mi := MeshInstance3D.new()
+    var bm := BoxMesh.new()
+    bm.size = size
+    mi.mesh = bm
+    mi.position = Vector3(0.055 * d, 0, 0)
+    mi.material_override = _mat(Color(0.88, 0.86, 0.40))
+    f.add_child(mi)
+    pf.add_child(f)
     return f
 
-func _ball_and_drain() -> void:
-    ball = RigidBody2D.new()
-    ball.continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
-    ball.mass = 0.1
-    ball.gravity_scale = 1.0
-    var mat := PhysicsMaterial.new()
-    mat.bounce = 0.2
-    mat.friction = 0.2
-    ball.physics_material_override = mat
-    var sh := CircleShape2D.new()
-    sh.radius = BALL_R
-    var cs := CollisionShape2D.new()
-    cs.shape = sh
-    ball.add_child(cs)
-    var vis := Polygon2D.new()
-    vis.polygon = _circle(BALL_R)
-    vis.color = Color(0.85, 0.92, 1.0)
-    ball.add_child(vis)
-    add_child(ball)
-    var drain := Area2D.new()
-    drain.position = Vector2(W / 2.0, H + 50.0)
-    var dsh := RectangleShape2D.new()
-    dsh.size = Vector2(W * 2.0, 60)
-    var dcs := CollisionShape2D.new()
-    dcs.shape = dsh
-    drain.add_child(dcs)
-    add_child(drain)
-    drain.body_entered.connect(_on_drain_body)
+func _ball() -> void:
+    ball = RigidBody3D.new()
+    ball.continuous_cd = true
+    ball.mass = 0.08
+    var pm := PhysicsMaterial.new()
+    pm.bounce = 0.15
+    pm.friction = 0.4
+    ball.physics_material_override = pm
+    var col := CollisionShape3D.new()
+    var s := SphereShape3D.new()
+    s.radius = BALL_R
+    col.shape = s
+    ball.add_child(col)
+    var mi := MeshInstance3D.new()
+    var sm := SphereMesh.new()
+    sm.radius = BALL_R
+    sm.height = BALL_R * 2.0
+    mi.mesh = sm
+    mi.material_override = _mat(Color(0.85, 0.92, 1.0))
+    ball.add_child(mi)
+    pf.add_child(ball)
+    var drain := Area3D.new()
+    var dc := CollisionShape3D.new()
+    var db := BoxShape3D.new()
+    db.size = Vector3(1.4, 0.5, 0.3)
+    dc.shape = db
+    drain.add_child(dc)
+    drain.position = Vector3(0, 0, 0.85)
+    pf.add_child(drain)
+    drain.body_entered.connect(_on_drain)
 
-func _on_drain_body(b: Node) -> void:
+func _on_drain(b: Node) -> void:
     if b == ball:
         _drain()
 
@@ -169,8 +203,8 @@ func _ui() -> void:
     lbl_balls.add_theme_font_size_override("font_size", 30)
     layer.add_child(lbl_balls)
     lbl_msg = Label.new()
-    lbl_msg.position = Vector2(150, H / 2.0 - 40.0)
-    lbl_msg.add_theme_font_size_override("font_size", 34)
+    lbl_msg.position = Vector2(150, 1180)
+    lbl_msg.add_theme_font_size_override("font_size", 32)
     layer.add_child(lbl_msg)
     _update_ui()
 
@@ -180,9 +214,9 @@ func _update_ui() -> void:
 
 func _reset_ball() -> void:
     ball_live = false
-    ball.linear_velocity = Vector2.ZERO
-    ball.angular_velocity = 0.0
-    ball.global_position = launch_at
+    ball.linear_velocity = Vector3.ZERO
+    ball.angular_velocity = Vector3.ZERO
+    ball.position = ball_start
     ball.sleeping = false
     lbl_msg.text = "SPACE to launch"
 
@@ -199,11 +233,12 @@ func _drain() -> void:
     _reset_ball()
 
 func _physics_process(delta: float) -> void:
-    var lt := L_UP if (Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)) else L_REST
-    lflip.rotation = move_toward(lflip.rotation, lt, FLIP_SPEED * delta)
-    var rt := R_UP if (Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) else R_REST
-    rflip.rotation = move_toward(rflip.rotation, rt, FLIP_SPEED * delta)
+    var lt: float = lflip.get_meta("up") if (Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)) else lflip.get_meta("rest")
+    lflip.rotation.y = move_toward(lflip.rotation.y, lt, FLIP_SPEED * delta)
+    var rt: float = rflip.get_meta("up") if (Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) else rflip.get_meta("rest")
+    rflip.rotation.y = move_toward(rflip.rotation.y, rt, FLIP_SPEED * delta)
     if not ball_live and Input.is_key_pressed(KEY_SPACE):
         ball_live = true
         lbl_msg.text = ""
-        ball.linear_velocity = Vector2(-0.2, -1.0).normalized() * LAUNCH_SPEED
+        var up_table := (pf.global_transform.basis * Vector3(0, 0, -1)).normalized()
+        ball.linear_velocity = up_table * 2.3
