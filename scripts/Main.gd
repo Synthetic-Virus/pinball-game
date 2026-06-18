@@ -98,7 +98,7 @@ func _bumpers() -> void:
         acs.shape = ash
         area.add_child(acs)
         b.add_child(area)
-        var center := c
+        var center: Vector2 = c
         area.body_entered.connect(func(body: Node) -> void: _bump(body, center))
         add_child(b)
 
