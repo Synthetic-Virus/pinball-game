@@ -20,39 +20,108 @@ extends GutTest
 ##
 ## INDEPENDENT ORACLE: we measure the BALL's resulting speed (Ball.current_speed()), not
 ## the flipper's self-reported tip_speed(), for the momentum comparison. The ball speed
-## is the ground truth the player experiences.
+## is the ground truth the player experiences. tip_speed() is used ONLY for the snap-timing
+## check, never for the momentum comparison.
 ##
-## NOTE FOR THE PHYSICS-PROGRAMMER: test_full_swing_outthrows_a_tap and
-## test_flipper_reaches_full_swing_quickly will only pass once flipper.gd implements the
-## hinge + driven force + return spring in _physics_process. The skeleton stubs return 0.
-## That is intentional; CI marks them FAIL until the implementation lands.
+## TEST HOOK: GUT cannot synthesize persistent Input events across physics frames, so the
+## flipper exposes force_energized(true)/clear_force_energized() (inert in normal play). The
+## Tier-2 tests below DRIVE that hook, wait the swing frames, and measure the real bodies.
+## These instance the shipping Flipper.tscn + Ball.tscn; a green result on a stand-in body
+## does not satisfy the gate.
 
 ## Physics tick duration in seconds. At 240 Hz one tick = 1/240 s.
 const PHYSICS_TICK_S: float = 1.0 / 240.0
 ## DESIGN target: flipper reaches full swing in ~50 ms. At 240 Hz that is 12 ticks.
-## We allow a generous 80 ms (19 ticks) as the pass threshold.
+## We allow a generous 80 ms (20 ticks) as the pass threshold.
 const SNAP_TIME_MS: float = 80.0
 const SNAP_FRAMES: int = int(SNAP_TIME_MS / 1000.0 / PHYSICS_TICK_S) + 1  ## = 20 frames
+
+## A "tap": the action is held for only a couple of physics frames, so the bat barely starts
+## to move before the spring takes over. A full swing holds for the whole snap window.
+const TAP_FRAMES: int = 2
+
+## DESIGN floor: a full swing must impart ball speed >= 1.5x a tap. A smaller ratio means the
+## flip does not feel like the player's decision (DESIGN.md "REAL MOMENTUM").
+const MOMENTUM_RATIO_FLOOR: float = 1.5
 
 var _flipper: Node3D = null
 var _ball: RigidBody3D = null
 
 func before_each() -> void:
-	## Build a minimal world: one Flipper node and one Ball above its face.
+	## Build a minimal world: one Flipper node and one Ball resting in its swing path.
 	var world := Node3D.new()
 	add_child_autofree(world)
 
-	## Instance the Flipper scene skeleton.
+	## Instance the REAL Flipper scene (force-driven hinge + solenoid + return spring).
 	var flipper_scene: PackedScene = load("res://scenes/elements/Flipper.tscn")
 	_flipper = flipper_scene.instantiate()
 	world.add_child(_flipper)
 	## Configure for the left flipper (non-mirrored side).
 	_flipper.configure("left_flipper", false)
 
-	## Instance the Ball for use in physics trials.
+	## Instance the REAL shipping Ball for the physics trials.
 	var ball_scene: PackedScene = load("res://scenes/elements/Ball.tscn")
 	_ball = ball_scene.instantiate() as RigidBody3D
 	world.add_child(_ball)
+	## Isolate the momentum-transfer measurement from gravity. The trials compare the speed
+	## the BAT imparts on a tap vs a full swing; on this minimal flat world (no tilted
+	## playfield) gravity would just drop the ball off the bat over the swing window and add
+	## noise to both trials. Zeroing it is a test-setup choice that isolates the variable under
+	## test (swing energy), NOT a re-tune of the ball - the shipping ball keeps gravity_scale 1.
+	_ball.gravity_scale = 0.0
+
+# ---- Trial helpers (shared by the Tier-2 physics tests) -----------------------------
+
+## Place the ball in the LEFT flipper's swing path, at rest, ready to be struck.
+##
+## Geometry (matches flipper.gd's convention): the bat lies flat and swings about the
+## flipper's local +Y. A point at radius r along the bat at swing angle theta is at local
+## (r*cos(theta), 0, -r*sin(theta)). The bat sweeps from FLIPPER_REST_ANGLE up to
+## FLIPPER_UP_ANGLE, and the leading face moves toward -Z. We seat the ball near the tip at
+## an angle a little past rest (toward -Z, the leading side) and lifted to the bat's mid
+## height, so the rising bat sweeps INTO it. Both trials use this exact placement, so the
+## tap vs full-swing comparison changes only the swing energy, nothing else.
+func _seat_ball_in_swing_path() -> void:
+	var radius: float = TableConfig.FLIPPER_LENGTH * 0.75
+	## A little past the rest angle, on the leading (-Z) side the bat sweeps toward.
+	var seat_angle: float = TableConfig.FLIPPER_REST_ANGLE + 0.18
+	var local_pos := Vector3(
+		radius * cos(seat_angle),
+		TableConfig.FLIPPER_HEIGHT * 0.5,
+		-radius * sin(seat_angle),
+	)
+	## The flipper is at the world origin in these tests, so flipper-local == world here, but
+	## go through the flipper transform so the seat stays correct if that ever changes.
+	_ball.global_position = _flipper.global_transform * local_pos
+	_ball.linear_velocity = Vector3.ZERO
+	_ball.angular_velocity = Vector3.ZERO
+	_ball.sleeping = false
+
+
+## Run ONE swing trial: seat the ball, force the flipper energized for hold_frames physics
+## frames (then release), let the strike resolve, and return the ball's resulting speed.
+## Uses force_energized()/clear_force_energized() because headless GUT cannot hold a real key.
+func _run_swing_trial(hold_frames: int) -> float:
+	## Make sure the bat has returned to its rest angle from any previous trial before we
+	## seat the ball, so every trial starts from the same resting flipper. The override is
+	## already cleared (false reads as not-pressed headless), so the spring holds it at rest.
+	_flipper.clear_force_energized()
+	await wait_physics_frames(SNAP_FRAMES)
+
+	_seat_ball_in_swing_path()
+	## Let the seat settle for one frame so contact is registered before the swing fires.
+	await wait_physics_frames(1)
+
+	_flipper.force_energized(true)
+	await wait_physics_frames(hold_frames)
+	## Release: hand control back to the (un-pressed) input action so the spring returns the bat.
+	_flipper.clear_force_energized()
+
+	## Let the struck ball fly free of the bat and reach its post-strike speed.
+	await wait_physics_frames(SNAP_FRAMES)
+
+	return _ball.current_speed()
+
 
 # ---- Tier 1: contract checks (pass with skeleton) -----------------------------------
 
@@ -100,40 +169,66 @@ func test_flipper_body_is_not_animatable_body() -> void:
 # ---- Tier 2: physics-driven checks (require physics-programmer implementation) ------
 
 func test_full_swing_outthrows_a_tap() -> void:
-	## NOTE: requires physics-programmer to implement the hinge + solenoid in flipper.gd
-	## and physics collision in ball.gd. Will FAIL with stubs - that is expected.
+	## DESIGN's single most important feel test, made objective: a full swing must noticeably
+	## out-throw a tap. Drives the force_energized() hook on the REAL Flipper + Ball.
 	##
-	## Trial A (tap): place ball on flipper face at rest angle. Simulate 2 frames with
-	## the "left_flipper" action held (simulating a tap by running very few frames), then
-	## measure ball speed.
+	## Trial A (tap): hold the flipper energized for only TAP_FRAMES, then release.
+	## Trial B (full swing): hold for the full SNAP_FRAMES window.
+	## Both use the identical ball placement, so the ONLY difference is swing energy.
 	##
-	## Trial B (full swing): place ball on flipper face at rest angle. Simulate SNAP_FRAMES
-	## with action held (full swing time), then measure ball speed.
+	## INDEPENDENT ORACLE: we compare the BALL's measured current_speed(), never the
+	## flipper's self-reported tip_speed(). Ball speed is the ground truth the player feels.
 	##
-	## Assert: Trial B ball speed >= 1.5 * Trial A ball speed.
-	##
-	## Because we cannot inject real Input events in a headless test, we skip this test if
-	## tip_speed() returns 0 (skeleton not yet implemented) to avoid a misleading pass.
-	var initial_tip: float = _flipper.tip_speed()
-	if initial_tip == 0.0:
-		## Skeleton not implemented yet. Mark a pending note and exit gracefully.
-		pending("Skipped: flipper.gd not yet implemented. tip_speed() returns 0.")
-		return
+	## PASS: full-swing ball speed >= MOMENTUM_RATIO_FLOOR (1.5x) the tap ball speed.
 
-	## If the physics-programmer's implementation returns meaningful tip_speed values,
-	## run the comparison.
-	assert_true(
-		_flipper.tip_speed() >= 0.0,
-		"tip_speed() must be >= 0 when flipper is energized"
+	## Trial A: the tap.
+	var tap_speed: float = await _run_swing_trial(TAP_FRAMES)
+
+	## Trial B: the full swing. Re-seating happens inside the trial helper.
+	var swing_speed: float = await _run_swing_trial(SNAP_FRAMES)
+
+	## A full swing must actually move the ball, or there is nothing to compare.
+	assert_gt(
+		swing_speed,
+		0.0,
+		"A full swing must impart measurable ball speed (got %f)." % swing_speed
+	)
+
+	## The headline assert: the full swing out-throws the tap by at least the design floor.
+	assert_gte(
+		swing_speed,
+		MOMENTUM_RATIO_FLOOR * tap_speed,
+		"Full swing must out-throw a tap by >= %.1fx. tap=%f, swing=%f, ratio=%f" % [
+			MOMENTUM_RATIO_FLOOR,
+			tap_speed,
+			swing_speed,
+			(swing_speed / tap_speed) if tap_speed > 0.0 else INF,
+		]
 	)
 
 func test_flipper_reaches_full_swing_quickly() -> void:
-	## NOTE: requires physics-programmer implementation. Pending until then.
+	## DESIGN "FLIPPER SNAP": the flip reaches full swing fast (~50 ms target). We drive the
+	## force_energized() hook and assert the bat's tip_speed() rises above zero within the
+	## generous SNAP_FRAMES (80 ms) window - i.e. the solenoid is actually snapping the bat,
+	## not crawling. tip_speed() is the RIGHT oracle here: this test is about the flipper's
+	## own swing speed (timing), not the ball, so the self-reported tip speed is exactly what
+	## "reaches full swing quickly" means.
 	##
-	## Desired: tip_speed() > 0 within SNAP_FRAMES of the action being pressed, meaning
-	## the flipper is moving toward its up-stop. Full angular travel in <= 80 ms.
-	##
-	## Because headless GUT cannot synthesize real Input events that persist across
-	## physics frames, the physics-programmer must expose a test hook (e.g. a method
-	## to directly energize the flipper for a frame count). For now we mark pending.
-	pending("Skipped: flipper snap timing requires Input injection hook (physics-programmer task).")
+	## No ball is needed; we just energize and watch the bat accelerate.
+	_flipper.force_energized(true)
+
+	var peak_tip: float = 0.0
+	## Sample the tip speed once per physics frame across the snap window and keep the peak.
+	for _i in range(SNAP_FRAMES):
+		await wait_physics_frames(1)
+		peak_tip = maxf(peak_tip, _flipper.tip_speed())
+
+	_flipper.clear_force_energized()
+
+	assert_gt(
+		peak_tip,
+		0.0,
+		"tip_speed() must rise above 0 within the %.0f ms snap window (peak=%f)." % [
+			SNAP_TIME_MS, peak_tip
+		]
+	)

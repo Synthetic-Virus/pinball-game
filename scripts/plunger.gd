@@ -34,6 +34,11 @@ var _charging: bool = false
 var _charge_phase: float = 0.0
 var _power: float = 0.0
 var _ball: RigidBody3D = null
+## Release latch (QA BUG-008): when a ball arms while the player still happens to be holding "launch"
+## (e.g. they held it through the previous ball draining), we must NOT start charging on a held key
+## the player never pressed for THIS ball. We require a release first: charging is blocked until the
+## action has been seen released at least once since arm(). Set false by arm(), set true on release.
+var _release_seen: bool = false
 
 ## How fast the meter oscillates. CHARGE_RATE of 2.5 makes a full 0->1->0 sweep take 0.8 s,
 ## which sits comfortably in the DESIGN feel target of 0.5-1.0 s.
@@ -52,6 +57,11 @@ func arm() -> void:
 	_charging = false
 	_charge_phase = 0.0
 	_power = 0.0
+	# Require the player to RELEASE before this ball can charge. If "launch" is already held at arm
+	# time (held through the previous drain), _physics_process will wait for a release rather than
+	# auto-charging a key the player never pressed for this ball (QA BUG-008). A press from a clean
+	# released state is allowed immediately.
+	_release_seen = not Input.is_action_pressed("launch")
 	# Emit immediately so the HUD meter resets to zero on the same frame the ball resets.
 	power_changed.emit(0.0)
 
@@ -78,7 +88,12 @@ func _physics_process(delta: float) -> void:
 
 	var holding: bool = Input.is_action_pressed("launch")
 
-	if holding:
+	# Latch the first release after arm(). Until we have seen the key released once, a held key is
+	# stale input from before this ball armed and must not charge (QA BUG-008).
+	if not holding:
+		_release_seen = true
+
+	if holding and _release_seen:
 		# Build up the oscillating charge phase each physics frame.
 		# pingpong maps the unbounded _charge_phase to a triangle wave on [0, 1].
 		_charging = true

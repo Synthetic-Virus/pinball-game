@@ -15,15 +15,14 @@ extends GutTest
 ## We use 2 * LAUNCH_SPEED_MAX as a generous upper bound so the test is strictly harder
 ## than anything the physics-programmer will tune for in gameplay.
 ##
-## STRUCTURE: we build our own minimal world inside the test (a StaticBody3D wall and a
-## RigidBody3D ball with CCD) so the test does not depend on the rest of the table scene
-## being complete. This keeps it deterministic and isolated.
-##
-## NOTE FOR THE PHYSICS-PROGRAMMER: this test will only pass once ball.gd enables
-## continuous_cd = true in _ready. The skeleton currently passes through because the
-## ball body has no collision layers set; the physics programmer fills that in.
-## The test is written now (before implementation) so CI marks it FAIL until the
-## implementation lands - that is intentional and correct.
+## STRUCTURE: we build a minimal world inside the test (a StaticBody3D wall) and then drop
+## the REAL shipping ball into it. The ball is an instanced res://scenes/elements/Ball.tscn,
+## NOT a hand-built RigidBody3D, so this gate validates the actual shipping body as a SYSTEM
+## (mass, shape, PhysicsMaterial, continuous_cd, and collision layers all set by ball.gd in
+## _ready). A green result on a stand-in body would not satisfy the gate (it could pass while
+## the real ball regressed); firing the real ball is the whole point of the resubmission.
+## The wall stays hand-built so the test does not depend on the full table scene being present;
+## that keeps it deterministic and isolated.
 
 const TEST_ITERATIONS: int = 100
 ## Number of 240 Hz physics frames to simulate per shot. At 240 Hz, 30 frames = 125 ms.
@@ -40,10 +39,15 @@ const BALL_START_Z: float = -5.0  ## Ball starts 5 units in front of the wall.
 ## Worst-case speed: 2x the maximum launch speed. This is strictly harder than gameplay.
 var _test_speed: float = 0.0
 
-## The minimal physics world nodes, created fresh for each iteration.
+## The minimal physics world nodes, created fresh for each test.
 var _world: Node3D = null
+## The REAL shipping ball, instanced from Ball.tscn. ball.gd._ready() sets CCD, layers, mass,
+## shape, and PhysicsMaterial from TableConfig, so this body is the exact one the player flips.
 var _ball_body: RigidBody3D = null
 var _wall_body: StaticBody3D = null
+
+## The shipping ball scene. Loaded once; instanced per test.
+const BALL_SCENE: PackedScene = preload("res://scenes/elements/Ball.tscn")
 
 func before_all() -> void:
 	_test_speed = 2.0 * TableConfig.LAUNCH_SPEED_MAX
@@ -71,36 +75,23 @@ func before_each() -> void:
 	wall_shape_node.position.z = WALL_Z + TableConfig.WALL_THICKNESS * 0.5
 	_wall_body.add_child(wall_shape_node)
 
-	# --- Ball -------------------------------------------------------------------------
-	# A RigidBody3D with CCD enabled and the correct layer/mask from PhysicsLayers.
-	# We build this by hand (not by instancing the scene) so the test is independent
-	# of the scene file and the physics-programmer's _ready implementation; the test
-	# sets the properties it needs directly and the CCD sub-test checks the scene.
-	_ball_body = RigidBody3D.new()
-	_ball_body.continuous_cd = true  ## The non-negotiable CCD property.
-	_ball_body.collision_layer = PhysicsLayers.BALLS
-	_ball_body.collision_mask = PhysicsLayers.BALL_COLLISION_MASK
-	_ball_body.mass = TableConfig.BALL_MASS
-
-	var ball_physics_mat := PhysicsMaterial.new()
-	ball_physics_mat.bounce = TableConfig.BALL_BOUNCE
-	ball_physics_mat.friction = TableConfig.BALL_FRICTION
-	_ball_body.physics_material_override = ball_physics_mat
-
+	# --- Ball (the REAL shipping body) ------------------------------------------------
+	# Instance res://scenes/elements/Ball.tscn instead of hand-building a RigidBody3D, so
+	# the gate fires the exact body the player flips. ball.gd._ready() runs as soon as the
+	# instance enters the tree and sets continuous_cd, collision_layer/mask, mass, the
+	# PhysicsMaterial (bounce/friction), and the SphereShape3D radius from TableConfig.
+	# If the physics-programmer ever regresses CCD or the layers on the real ball, THIS
+	# loop catches it positionally - not a stand-in that can pass while the ship body fails.
+	_ball_body = BALL_SCENE.instantiate() as RigidBody3D
 	_world.add_child(_ball_body)
-
-	var ball_shape_node := CollisionShape3D.new()
-	var ball_sphere := SphereShape3D.new()
-	ball_sphere.radius = TableConfig.BALL_RADIUS
-	ball_shape_node.shape = ball_sphere
-	_ball_body.add_child(ball_shape_node)
+	# ball.gd._ready() calls reset_to_start(), which parks the ball at BALL_START. Each test
+	# repositions it in front of the wall before firing, so the start spot does not matter.
 
 func test_ccd_is_enabled_on_ball() -> void:
 	## Cheap guard: instance the actual Ball scene and confirm continuous_cd is true.
 	## If the physics-programmer turns CCD off a regression is caught immediately,
 	## not just statistically through the position check.
-	var ball_scene: PackedScene = load("res://scenes/elements/Ball.tscn")
-	var ball_instance: RigidBody3D = ball_scene.instantiate()
+	var ball_instance: RigidBody3D = BALL_SCENE.instantiate()
 	add_child_autofree(ball_instance)
 	## _ready will have run by the time add_child returns.
 	assert_true(
@@ -122,6 +113,9 @@ func test_full_speed_ball_never_tunnels_a_wall() -> void:
 		_ball_body.position = Vector3(0.0, 0.0, BALL_START_Z)
 		_ball_body.linear_velocity = Vector3.ZERO
 		_ball_body.angular_velocity = Vector3.ZERO
+		## The shipping ball has can_sleep = true; force it awake so a worst-case shot is never
+		## swallowed by a sleeping body (which would falsely "never tunnel" by never moving).
+		_ball_body.sleeping = false
 
 		## Fire toward the wall at worst-case speed.
 		_ball_body.linear_velocity = Vector3(0.0, 0.0, _test_speed)
@@ -150,6 +144,7 @@ func test_ball_stays_in_front_of_wall_after_bounce() -> void:
 	_ball_body.position = Vector3(0.0, 0.0, BALL_START_Z)
 	_ball_body.linear_velocity = Vector3.ZERO
 	_ball_body.angular_velocity = Vector3.ZERO
+	_ball_body.sleeping = false
 	_ball_body.linear_velocity = Vector3(0.0, 0.0, _test_speed)
 
 	## Give extra frames so the ball has clearly bounced back.

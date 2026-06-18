@@ -33,17 +33,21 @@ CCD + tuning) -> gameplay-programmer (plunger power meter, drain, scoring) -> te
 (GUT tests; the CI test job currently SKIPS because addons/gut is missing - install it) -> peer review board
 -> producer (scope/finish gate).
 
-Acceptance:
-- [ ] Force-driven flippers (hinge + driven force + return spring), NOT kinematic; do not overlap; impart
-      real momentum to the ball.
-- [ ] Action-based input map (left_flipper/right_flipper/launch/nudge).
-- [ ] Ball with continuous_cd; a GUT stress test asserts zero tunneling at full flip speed.
-- [ ] Rounded top arch guides the launched ball into the playfield.
-- [ ] Plunger power meter (hold to charge an oscillating meter, release to launch at that power).
-- [ ] Open center drain + ball count + basic score.
-- [ ] Physics layers (Playfield / Static Obstacles / Kinematic Obstacles / Balls).
-- [ ] addons/gut installed so the CI test job runs real tests instead of skipping.
-- [ ] A chosen, documented world scale (pinhead uses gravity 200 with a larger scale; pick and write it down).
+Acceptance (resubmission: the finish gate hangs on EXACTLY the two test blockers below):
+- [~] Force-driven flippers (hinge + driven force + return spring), NOT kinematic; do not overlap; impart
+      real momentum to the ball. (BLOCKER: test_flipper_momentum.gd must drive force_energized() with REAL
+      assertions - full swing >= 1.5x a tap (ball current_speed, not tip_speed), tip_speed rises within the
+      ~50 ms snap window - and run GREEN on the runner, NOT pending().)
+- [x] Action-based input map (left_flipper/right_flipper/launch/nudge).
+- [~] Ball with continuous_cd; a GUT stress test asserts zero tunneling at full flip speed. (BLOCKER: the
+      100-iteration stress loop in test_ball_tunneling.gd must fire an instanced REAL Ball.tscn, not a
+      hand-built RigidBody3D, and run GREEN on the runner.)
+- [x] Rounded top arch guides the launched ball into the playfield. (sealed overlapping-segment arch.)
+- [x] Plunger power meter (hold to charge an oscillating meter, release to launch at that power).
+- [x] Open center drain + ball count + basic score. (center drain + OOB failsafe + targets, all wired.)
+- [x] Physics layers (Playfield / Static Obstacles / Kinematic Obstacles / Balls).
+- [x] addons/gut installed so the CI test job runs real tests instead of skipping. (vendored v9.4.0, MIT.)
+- [x] A chosen, documented world scale (pinhead uses gravity 200 with a larger scale; pick and write it down).
 References: docs/pinhead-tech-notes.md, docs/REFERENCES.md, docs/old-software-analysis.md.
 
 ### Architecture LANDED (lead-programmer) - see docs/ARCHITECTURE.md
@@ -76,7 +80,28 @@ Tasks (pull from here):
       DONE 2026-06-17: game_flow.gd - explicit State enum, all guards in place, no phantom scores,
       restart only from GAME_OVER. hud.gd - full Control tree built in code, meter color lerp,
       game-over panel. tests/test_game_flow.gd filled with 15 concrete assertions.
-- [ ] LEAD: scripts/table_geometry.gd (surface/walls/arch/lane) + table.gd build+wire bodies; fill the
+- [x] LEAD: scripts/table_geometry.gd (surface/walls/arch/lane) + table.gd build+wire bodies; fill the
       element-instancing TODOs once ball/flipper land. Owner: gamedev-lead-programmer.
-- [ ] TEST/QA: fill the tests/*.gd stubs against the stable signatures; confirm CI test job runs GUT.
+      DONE 2026-06-18 (polish pass): table_geometry.gd builds the surface (PLAYFIELD layer), full-length
+      side walls + top wall (bottom OPEN for the drain), lane divider, and an overlapping-segment arch
+      that seals (no gap a fast ball squeezes through). table.gd instances Ball/2x Flipper/Plunger/3x
+      Target/Drain + a failsafe OOB catch-plane, calls set_ball on every detector, and wires ALL signals
+      in one place incl. game_over -> show_game_over and a JUST-PRESSED restart poll that hides the panel
+      via _on_request_new_ball. Folded-in hardening (QA findings): BUG-001 right-flipper mirror (bat now
+      extends toward center on both sides) in flipper.gd; FLIPPER_PIVOT_SPREAD 5->7 so the inverted-V
+      leaves a positive gap (was crossing center, gap -1.9 -> +2.07); DRAIN_Z moved inside the field so
+      no naive bottom wall can block it (BUG-004); OOB failsafe drain (BUG-006); target now PRESERVES
+      momentum + has a re-trigger cooldown (BUG-007); plunger requires release-before-charge after arm
+      (BUG-008); tip_speed() projects onto the hinge axis (BUG-010).
+- [~] TEST/QA: fill the tests/*.gd stubs against the stable signatures; confirm CI test job runs GUT.
       Owner: gamedev-test-builder + gamedev-qa-lead.
+      RESUBMISSION SCOPE (the slice signs off only when BOTH run GREEN on the homelab godot runner,
+      NOT pending/skipped):
+        1. test_ball_tunneling.gd - the 100-iteration stress loop fires an instanced REAL Ball.tscn
+           (mass/shape/material/CCD/layers as the shipping system), not a hand-built RigidBody3D. DONE.
+        2. test_flipper_momentum.gd - the two headline asserts (test_full_swing_outthrows_a_tap,
+           test_flipper_reaches_full_swing_quickly) drive flipper.force_energized() with REAL assertions
+           (full swing >= 1.5x a tap on ball current_speed; tip_speed rises within the ~50 ms snap
+           window), replacing the pending() stubs. DONE.
+      DEFERRED to BACKLOG Next / QA_BACKLOG (do NOT block this resubmission): test_table_integration.gd,
+      test_target_no_double_score.gd, test_flipper_no_overlap.gd, the BUG-009 bounce-tolerance relax.
