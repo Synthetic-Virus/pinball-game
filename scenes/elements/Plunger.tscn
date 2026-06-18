@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballplunger01"]
+
+; Launch control. Gameplay-programmer fills scripts/plunger.gd: hold "launch" to charge an
+; oscillating meter, release to call ball.launch(up_table, speed). Emits power_changed + ball_launched.
+
+[ext_resource type="Script" path="res://scripts/plunger.gd" id="1_plunger"]
+
+[node name="Plunger" type="Node3D"]
+script = ExtResource("1_plunger")

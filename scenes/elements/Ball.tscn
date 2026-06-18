@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3 uid="uid://b0pinballball01"]
+
+; The pinball. Physics-programmer fills scripts/ball.gd (CCD, mass, material, shape from TableConfig).
+; A CollisionShape3D child is provided so the script can set its SphereShape3D radius in _ready.
+
+[ext_resource type="Script" path="res://scripts/ball.gd" id="1_ball"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_ball"]
+radius = 0.6
+
+[node name="Ball" type="RigidBody3D"]
+script = ExtResource("1_ball")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_ball")

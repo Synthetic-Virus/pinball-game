@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballtable01"]
+
+; Root orchestrator scene. table.gd builds the playfield, instances the element scenes, and wires
+; the cross-system signals. See scripts/table.gd header for the full scene-tree + signal contract.
+
+[ext_resource type="Script" path="res://scripts/table.gd" id="1_table"]
+
+[node name="Table" type="Node3D"]
+script = ExtResource("1_table")

@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballtarget01"]
+
+; One scoring target/bumper. Gameplay-programmer fills scripts/target.gd: detects the ball, emits
+; scored(points), and kicks the ball back for a legible response. table.gd places several of these.
+
+[ext_resource type="Script" path="res://scripts/target.gd" id="1_target"]
+
+[node name="Target" type="Area3D"]
+script = ExtResource("1_target")

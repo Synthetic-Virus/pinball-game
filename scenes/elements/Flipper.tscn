@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballflipper01"]
+
+; One force-driven flipper. Physics-programmer fills scripts/flipper.gd: builds the RigidBody bat +
+; HingeJoint3D + driven solenoid force + return spring (NOT kinematic). table.gd calls configure()
+; with the action name and handedness and positions this node at the pivot from TableConfig.
+
+[ext_resource type="Script" path="res://scripts/flipper.gd" id="1_flipper"]
+
+[node name="Flipper" type="Node3D"]
+script = ExtResource("1_flipper")
