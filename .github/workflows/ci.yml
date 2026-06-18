@@ -27,8 +27,37 @@ jobs:
       - uses: actions/checkout@v4
       - name: GUT headless tests
         run: |
-          if [ -d addons/gut ]; then
-            godot --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit
-          else
-            echo "GUT addon not yet installed (addons/gut). Skipping until it lands. See BACKLOG.md."
+          set -euo pipefail
+          if [ ! -d addons/gut ]; then
+            echo "FAIL: addons/gut is missing - the test gate cannot run. It must be vendored."
+            exit 1
+          fi
+
+          # IMPORT PASS (required): on a clean CI checkout the .godot/ import cache does not
+          # exist, so Godot has not registered GUT's class_name scripts (GutTest, GutMain, ...).
+          # Without this, gut_cmdln.gd aborts at _init with "Some GUT class_names have not been
+          # imported" and runs ZERO tests - yet exits 0, silently passing the gate on a non-run.
+          # We import first so the class_names resolve. '|| true' because a headless import can
+          # return non-zero on benign resource warnings; the real gate is the GUT run below.
+          echo "::group::Godot import pass"
+          godot --headless --path . --import || true
+          echo "::endgroup::"
+
+          # GUT run. -gexit makes Godot's exit code reflect the test results (non-zero on any
+          # failure), and set -e fails the job on that. We additionally GREP the output for the
+          # import-abort signature and for a real run summary, so a future regression to the
+          # "0 tests ran but exit 0" state FAILS LOUDLY instead of passing green.
+          echo "::group::GUT run"
+          godot --headless --path . -s addons/gut/gut_cmdln.gd \
+            -gdir=res://tests -ginclude_subdirs -gexit 2>&1 | tee gut_output.txt
+          echo "::endgroup::"
+
+          if grep -q "class_names have not been imported" gut_output.txt; then
+            echo "FAIL: GUT aborted before running tests (class_names not imported)."
+            exit 1
+          fi
+          # GUT prints a Totals/scripts summary only when it actually discovered and ran tests.
+          if ! grep -qiE "Totals|[0-9]+ of [0-9]+ passed|Tests[[:space:]]+[0-9]+" gut_output.txt; then
+            echo "FAIL: no GUT run summary found - tests did not execute."
+            exit 1
           fi
