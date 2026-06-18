@@ -77,7 +77,9 @@ func test_is_energized_returns_false_by_default() -> void:
 func test_tip_speed_returns_float() -> void:
 	## tip_speed() must exist and return a float (even 0.0 from the skeleton is fine).
 	var speed = _flipper.tip_speed()
-	assert_is(speed, TYPE_FLOAT, "tip_speed() must return a float")
+	## typeof() returns TYPE_FLOAT (= 3) for a float value. This is a plain int comparison
+	## so we do not need assert_is (which requires an Object, not a primitive).
+	assert_eq(typeof(speed), TYPE_FLOAT, "tip_speed() must return a float")
 
 func test_flipper_body_is_not_animatable_body() -> void:
 	## The architecture explicitly forbids a kinematic/AnimatableBody3D approach.
