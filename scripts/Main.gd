@@ -1,16 +1,16 @@
 extends Node2D
-## Gray-box pinball prototype, built procedurally (no editor needed).
+## Gray-box pinball v2, built procedurally. ORIGINAL generic table of primitives.
 ## Controls: LEFT flipper = A / Left-Arrow, RIGHT flipper = D / Right-Arrow, LAUNCH/RESET = Space.
-## This is an ORIGINAL basic table of primitives, not a recreation of any specific board.
 
 const W := 720.0
 const H := 1280.0
-const BALL_R := 14.0
-const L_REST := 0.45
-const L_UP := -0.40
-const R_REST := -0.45
-const R_UP := 0.40
-const FLIP_SPEED := 22.0
+const BALL_R := 13.0
+const L_REST := 0.42
+const L_UP := -0.45
+const R_REST := -0.42
+const R_UP := 0.45
+const FLIP_SPEED := 26.0
+const LAUNCH_SPEED := 1850.0
 
 var score := 0
 var balls := 3
@@ -21,14 +21,22 @@ var rflip: AnimatableBody2D
 var lbl_score: Label
 var lbl_balls: Label
 var lbl_msg: Label
-var launch_at := Vector2(W / 2.0, 150.0)
+var launch_at := Vector2(662, 1150)
 
 func _ready() -> void:
     _bg()
-    _walls()
+    # Cabinet: left wall, top, right outer wall, and the launch-lane floor.
+    _wall(PackedVector2Array([
+        Vector2(320, 1238), Vector2(150, 1150), Vector2(24, 1000), Vector2(24, 24),
+        Vector2(696, 24), Vector2(696, 1180), Vector2(628, 1180),
+    ]))
+    # Lane divider (right boundary of play, open above y=260) + bottom-right funnel to the drain.
+    _wall(PackedVector2Array([
+        Vector2(628, 260), Vector2(628, 1130), Vector2(440, 1238),
+    ]))
     _bumpers()
-    lflip = _flipper(Vector2(235, 1090), L_REST, false)
-    rflip = _flipper(Vector2(W - 235, 1090), R_REST, true)
+    lflip = _flipper(Vector2(250, 1120), L_REST, false)
+    rflip = _flipper(Vector2(470, 1120), R_REST, true)
     _ball_and_drain()
     _ui()
     _reset_ball()
@@ -42,72 +50,58 @@ func _bg() -> void:
 
 func _circle(rad: float) -> PackedVector2Array:
     var p := PackedVector2Array()
-    for i in 20:
-        var a := TAU * i / 20.0
-        p.append(Vector2(cos(a), sin(a)) * rad)
+    for i in 24:
+        p.append(Vector2(cos(TAU * i / 24.0), sin(TAU * i / 24.0)) * rad)
     return p
 
-func _walls() -> void:
+func _wall(points: PackedVector2Array) -> void:
     var body := StaticBody2D.new()
     var mat := PhysicsMaterial.new()
-    mat.bounce = 0.2
-    mat.friction = 0.3
+    mat.bounce = 0.15
+    mat.friction = 0.2
     body.physics_material_override = mat
-    add_child(body)
-    var pts := PackedVector2Array([
-        Vector2(24, 24), Vector2(W - 24, 24),
-        Vector2(W - 24, H - 220),
-        Vector2(W - 250, H - 70),
-        Vector2(250, H - 70),
-        Vector2(24, H - 220),
-        Vector2(24, 24),
-    ])
-    for i in pts.size() - 1:
+    for i in points.size() - 1:
         var seg := SegmentShape2D.new()
-        seg.a = pts[i]
-        seg.b = pts[i + 1]
+        seg.a = points[i]
+        seg.b = points[i + 1]
         var cs := CollisionShape2D.new()
         cs.shape = seg
         body.add_child(cs)
+    add_child(body)
     var line := Line2D.new()
-    line.points = pts
+    line.points = points
     line.width = 4.0
     line.default_color = Color(0.35, 0.5, 0.75)
     add_child(line)
 
 func _bumpers() -> void:
-    for c in [Vector2(230, 360), Vector2(W - 230, 360), Vector2(W / 2.0, 520)]:
-        var b := StaticBody2D.new()
-        b.position = c
-        var mat := PhysicsMaterial.new()
-        mat.bounce = 0.6
-        b.physics_material_override = mat
-        var sh := CircleShape2D.new()
-        sh.radius = 36.0
-        var cs := CollisionShape2D.new()
-        cs.shape = sh
-        b.add_child(cs)
-        var vis := Polygon2D.new()
-        vis.polygon = _circle(36.0)
-        vis.color = Color(0.9, 0.45, 0.35)
-        b.add_child(vis)
+    for c in [Vector2(235, 380), Vector2(W - 235, 380), Vector2(W / 2.0, 560)]:
         var area := Area2D.new()
+        area.position = c
         var ash := CircleShape2D.new()
-        ash.radius = 40.0
+        ash.radius = 38.0
         var acs := CollisionShape2D.new()
         acs.shape = ash
         area.add_child(acs)
-        b.add_child(area)
+        var vis := Polygon2D.new()
+        vis.polygon = _circle(38.0)
+        vis.color = Color(0.9, 0.45, 0.35)
+        area.add_child(vis)
         var center: Vector2 = c
-        area.body_entered.connect(func(body: Node) -> void: _bump(body, center))
-        add_child(b)
+        area.body_entered.connect(func(b: Node) -> void: _bump(b, center))
+        add_child(area)
 
-func _bump(body: Node, center: Vector2) -> void:
-    if body == ball:
-        score += 100
-        _update_ui()
-        var dir := (ball.global_position - center).normalized()
-        ball.apply_central_impulse(dir * ball.mass * 700.0)
+func _bump(b: Node, center: Vector2) -> void:
+    if b != ball:
+        return
+    score += 100
+    _update_ui()
+    var dir := ball.global_position - center
+    if dir.length() < 1.0:
+        dir = Vector2.UP
+    dir = dir.normalized()
+    var spd: float = max(ball.linear_velocity.length(), 520.0) + 160.0
+    ball.linear_velocity = dir * spd
 
 func _flipper(pivot: Vector2, rest: float, mirrored: bool) -> AnimatableBody2D:
     var f := AnimatableBody2D.new()
@@ -116,10 +110,7 @@ func _flipper(pivot: Vector2, rest: float, mirrored: bool) -> AnimatableBody2D:
     f.sync_to_physics = true
     var d := -1.0 if mirrored else 1.0
     var pts := PackedVector2Array([
-        Vector2(0, -11),
-        Vector2(130 * d, -7),
-        Vector2(130 * d, 7),
-        Vector2(0, 11),
+        Vector2(0, -11), Vector2(130 * d, -7), Vector2(130 * d, 7), Vector2(0, 11),
     ])
     var sh := ConvexPolygonShape2D.new()
     sh.points = pts
@@ -153,9 +144,9 @@ func _ball_and_drain() -> void:
     ball.add_child(vis)
     add_child(ball)
     var drain := Area2D.new()
-    drain.position = Vector2(W / 2.0, H + 40.0)
+    drain.position = Vector2(W / 2.0, H + 50.0)
     var dsh := RectangleShape2D.new()
-    dsh.size = Vector2(W, 60)
+    dsh.size = Vector2(W * 2.0, 60)
     var dcs := CollisionShape2D.new()
     dcs.shape = dsh
     drain.add_child(dcs)
@@ -215,4 +206,4 @@ func _physics_process(delta: float) -> void:
     if not ball_live and Input.is_key_pressed(KEY_SPACE):
         ball_live = true
         lbl_msg.text = ""
-        ball.apply_central_impulse(Vector2(0.2, 1.0).normalized() * ball.mass * 260.0)
+        ball.linear_velocity = Vector2(-0.2, -1.0).normalized() * LAUNCH_SPEED
