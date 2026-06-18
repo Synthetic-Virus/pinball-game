@@ -35,8 +35,8 @@ func _ready() -> void:
         Vector2(628, 260), Vector2(628, 1130), Vector2(440, 1238),
     ]))
     _bumpers()
-    lflip = _flipper(Vector2(250, 1120), L_REST, false)
-    rflip = _flipper(Vector2(470, 1120), R_REST, true)
+    lflip = _flipper(Vector2(245, 1115), L_REST, false)
+    rflip = _flipper(Vector2(515, 1115), R_REST, true)
     _ball_and_drain()
     _ui()
     _reset_ball()
