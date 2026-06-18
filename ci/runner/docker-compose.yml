@@ -1,6 +1,4 @@
-# Self-hosted Godot build runner + nginx demo server. Deploy on a homelab Docker host.
-# The runner writes the web export to /demo-web (bind mount); nginx serves the same dir at :8080.
-# Provision: see docs/INFRA.md. Mint a registration token into .env (RUNNER_TOKEN) before `up`.
+# Self-hosted Godot build runner + nginx demo server (HTTP + self-signed HTTPS) + optional Cloudflare tunnel.
 services:
   godot-runner:
     build:
@@ -20,7 +18,7 @@ services:
       RUNNER_WORKDIR: /tmp/runner/work
     volumes:
       - runner-work:/tmp/runner/work
-      - /srv/www/pinball-demo:/demo-web        # web-demo deploy target (DEMO_DEPLOY_TARGET=/demo-web/)
+      - /srv/www/pinball-demo:/demo-web
 
   demo-web:
     image: nginx:stable
@@ -28,14 +26,17 @@ services:
     restart: unless-stopped
     ports:
       - "8080:80"
+      - "443:443"
     volumes:
       - /srv/www/pinball-demo:/usr/share/nginx/html:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./nginx-default.conf:/etc/nginx/conf.d/default.conf:ro
 
   cloudflared:
     image: cloudflare/cloudflared:2026.6.0
     container_name: pinball-cloudflared
     restart: unless-stopped
-    profiles: ["tunnel"]            # only starts with: docker compose --profile tunnel up -d
+    profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
