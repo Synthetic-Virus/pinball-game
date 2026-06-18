@@ -1,27 +1,37 @@
 extends Node3D
-## Gray-box 3D pinball, built procedurally. ORIGINAL generic table of primitives.
-## A tilted playfield: gravity rolls the ball toward the flipper (near) end.
-## Controls: LEFT flipper = A / Left-Arrow, RIGHT flipper = D / Right-Arrow, LAUNCH/RESET = Space.
+## Gray-box 3D pinball. ORIGINAL generic table of primitives.
+## Tilted playfield: gravity rolls the ball toward the flipper (near) end.
+## Controls: LEFT flipper = A / Left-Arrow, RIGHT flipper = D / Right-Arrow.
+## Plunger: HOLD Space to charge the power meter (it oscillates), RELEASE to launch.
 
 const TILT_DEG := 7.0
-const HALF_W := 0.26          # table half-width in X
-const NEAR_Z := 0.55          # low end (flippers, drain, camera) at +Z
-const FAR_Z := -0.55          # high end at -Z
+const HALF_W := 0.26
+const NEAR_Z := 0.55
+const FAR_Z := -0.55
 const BALL_R := 0.013
 const WALL_H := 0.05
 const FLIP_SPEED := 16.0
+const LAUNCH_MIN := 1.3
+const LAUNCH_MAX := 3.2
+const CHARGE_RATE := 1.7
+const VW := 720.0
 
 var score := 0
 var balls := 3
 var ball_live := false
-var pf: Node3D                # playfield (tilted)
+var charging := false
+var power := 0.0
+var charge_phase := 0.0
+var pf: Node3D
 var ball: RigidBody3D
 var lflip: AnimatableBody3D
 var rflip: AnimatableBody3D
 var lbl_score: Label
 var lbl_balls: Label
 var lbl_msg: Label
-var ball_start := Vector3(0.215, BALL_R + 0.01, 0.45)   # in the right shooter lane
+var meter_bg: ColorRect
+var meter_fill: ColorRect
+var ball_start := Vector3(0.215, BALL_R + 0.01, 0.45)
 
 func _ready() -> void:
     _environment()
@@ -32,6 +42,7 @@ func _ready() -> void:
     add_child(pf)
     _surface()
     _walls()
+    _dome()
     _bumpers()
     lflip = _flipper(Vector3(-0.11, 0.018, 0.44), -0.55, 0.15, false)
     rflip = _flipper(Vector3(0.11, 0.018, 0.44), 0.55, -0.15, true)
@@ -86,17 +97,50 @@ func _box_body(parent: Node3D, center: Vector3, size: Vector3, c: Color) -> void
     b.position = center
     parent.add_child(b)
 
+func _seg_wall(a: Vector3, b: Vector3) -> void:
+    var mid := (a + b) * 0.5
+    var length := (b - a).length()
+    if length < 0.001:
+        return
+    var body := StaticBody3D.new()
+    var col := CollisionShape3D.new()
+    var bs := BoxShape3D.new()
+    bs.size = Vector3(length, WALL_H, 0.02)
+    col.shape = bs
+    body.add_child(col)
+    var mi := MeshInstance3D.new()
+    var bm := BoxMesh.new()
+    bm.size = Vector3(length, WALL_H, 0.02)
+    mi.mesh = bm
+    mi.material_override = _mat(Color(0.30, 0.40, 0.60))
+    body.add_child(mi)
+    body.position = mid
+    body.rotation.y = atan2(-(b.z - a.z), b.x - a.x)
+    pf.add_child(body)
+
 func _surface() -> void:
     _box_body(pf, Vector3(0, -0.01, 0), Vector3(HALF_W * 2.0, 0.02, 1.1), Color(0.10, 0.12, 0.18))
 
 func _walls() -> void:
     var h := WALL_H
-    _box_body(pf, Vector3(-HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))      # left
-    _box_body(pf, Vector3(HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))       # right outer
-    _box_body(pf, Vector3(0, h / 2.0, FAR_Z), Vector3(HALF_W * 2.0, h, 0.02), Color(0.30, 0.40, 0.60)) # far end
-    _box_body(pf, Vector3(0.17, h / 2.0, 0.1), Vector3(0.02, h, 0.9), Color(0.30, 0.40, 0.60))        # shooter-lane divider
-    _box_body(pf, Vector3(-0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))  # near-left stub
-    _box_body(pf, Vector3(0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))   # near-right stub
+    _box_body(pf, Vector3(-HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))
+    _box_body(pf, Vector3(HALF_W, h / 2.0, 0), Vector3(0.02, h, 1.1), Color(0.30, 0.40, 0.60))
+    _box_body(pf, Vector3(0.17, h / 2.0, 0.1), Vector3(0.02, h, 0.9), Color(0.30, 0.40, 0.60))
+    _box_body(pf, Vector3(-0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))
+    _box_body(pf, Vector3(0.175, h / 2.0, NEAR_Z), Vector3(0.17, h, 0.02), Color(0.30, 0.40, 0.60))
+
+func _dome() -> void:
+    # Rounded top arch: ball launched up the right lane follows the curve into the playfield.
+    var rx := 0.255
+    var rz := 0.18
+    var cz := -0.30
+    var n := 12
+    var pts := PackedVector3Array()
+    for i in n + 1:
+        var ang := PI * float(i) / float(n)
+        pts.append(Vector3(rx * cos(ang), WALL_H / 2.0, cz - rz * sin(ang)))
+    for i in pts.size() - 1:
+        _seg_wall(pts[i], pts[i + 1])
 
 func _bumpers() -> void:
     for c in [Vector3(-0.10, 0, -0.18), Vector3(0.06, 0, -0.28), Vector3(-0.02, 0, 0.02)]:
@@ -203,22 +247,40 @@ func _ui() -> void:
     lbl_balls.add_theme_font_size_override("font_size", 30)
     layer.add_child(lbl_balls)
     lbl_msg = Label.new()
-    lbl_msg.position = Vector2(150, 1180)
-    lbl_msg.add_theme_font_size_override("font_size", 32)
+    lbl_msg.position = Vector2(150, 1108)
+    lbl_msg.add_theme_font_size_override("font_size", 30)
     layer.add_child(lbl_msg)
+    meter_bg = ColorRect.new()
+    meter_bg.position = Vector2(VW / 2.0 - 150.0, 1170)
+    meter_bg.size = Vector2(300, 26)
+    meter_bg.color = Color(0.15, 0.16, 0.20)
+    layer.add_child(meter_bg)
+    meter_fill = ColorRect.new()
+    meter_fill.position = meter_bg.position
+    meter_fill.size = Vector2(0, 26)
+    meter_fill.color = Color(0.40, 0.85, 0.50)
+    layer.add_child(meter_fill)
     _update_ui()
 
 func _update_ui() -> void:
     lbl_score.text = "SCORE  %d" % score
     lbl_balls.text = "BALLS  %d" % balls
 
+func _update_meter() -> void:
+    meter_fill.size = Vector2(300.0 * power, 26)
+    meter_fill.color = Color(0.40, 0.85, 0.50).lerp(Color(0.95, 0.45, 0.30), power)
+
 func _reset_ball() -> void:
     ball_live = false
+    charging = false
+    power = 0.0
+    charge_phase = 0.0
     ball.linear_velocity = Vector3.ZERO
     ball.angular_velocity = Vector3.ZERO
     ball.position = ball_start
     ball.sleeping = false
-    lbl_msg.text = "SPACE to launch"
+    lbl_msg.text = "HOLD SPACE, release to launch"
+    _update_meter()
 
 func _drain() -> void:
     if not ball_live:
@@ -229,16 +291,30 @@ func _drain() -> void:
         balls = 3
         score = 0
         _update_ui()
-        lbl_msg.text = "GAME OVER - SPACE to restart"
     _reset_ball()
+
+func _launch(p: float) -> void:
+    ball_live = true
+    lbl_msg.text = ""
+    var up_table := (pf.global_transform.basis * Vector3(0, 0, -1)).normalized()
+    var speed := lerpf(LAUNCH_MIN, LAUNCH_MAX, clampf(p, 0.0, 1.0))
+    ball.linear_velocity = up_table * speed
 
 func _physics_process(delta: float) -> void:
     var lt: float = lflip.get_meta("up") if (Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)) else lflip.get_meta("rest")
     lflip.rotation.y = move_toward(lflip.rotation.y, lt, FLIP_SPEED * delta)
     var rt: float = rflip.get_meta("up") if (Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)) else rflip.get_meta("rest")
     rflip.rotation.y = move_toward(rflip.rotation.y, rt, FLIP_SPEED * delta)
-    if not ball_live and Input.is_key_pressed(KEY_SPACE):
-        ball_live = true
-        lbl_msg.text = ""
-        var up_table := (pf.global_transform.basis * Vector3(0, 0, -1)).normalized()
-        ball.linear_velocity = up_table * 2.3
+    if not ball_live:
+        if Input.is_key_pressed(KEY_SPACE):
+            charging = true
+            charge_phase += delta * CHARGE_RATE
+            power = pingpong(charge_phase, 1.0)
+            lbl_msg.text = "release to launch"
+            _update_meter()
+        elif charging:
+            charging = false
+            _launch(power)
+            charge_phase = 0.0
+            power = 0.0
+            _update_meter()
