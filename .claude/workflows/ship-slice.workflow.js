@@ -18,6 +18,7 @@ export const meta = {
     { title: 'Build' },
     { title: 'QA' },
     { title: 'Polish' },
+    { title: 'Deliver' },
     { title: 'Review board' },
     { title: 'Producer gate' },
   ],
@@ -93,6 +94,39 @@ const polish = await agent(
   { agentType: 'gamedev-lead-programmer', model: 'opus', phase: 'Polish', label: 'polish' }
 )
 
+// 5b) DELIVER (commit -> push -> PR -> wait for GREEN CI) ----------------------
+// WHY THIS PHASE EXISTS: without it the coders leave their work in the working tree and the
+// producer gate judges an uncommitted/broken state with no CI artifact (the recurring SEND_BACK).
+// The devops engineer turns the working tree into a pushed, CI-tested PR so the board and producer
+// judge the REAL state. Thin client: CI on the homelab runner is the only test oracle.
+phase('Deliver')
+const DELIVER_SCHEMA = {
+  type: 'object',
+  required: ['branch', 'head_sha', 'pr_url', 'ci_conclusion', 'ci_run_id', 'clean', 'summary'],
+  properties: {
+    branch: { type: 'string' },
+    head_sha: { type: 'string' },
+    pr_url: { type: 'string' },
+    ci_conclusion: { type: 'string', description: 'success or failure (the gh run conclusion)' },
+    ci_run_id: { type: 'string' },
+    clean: { type: 'boolean', description: 'true only if git status is clean after the commit' },
+    summary: { type: 'string' },
+  },
+  additionalProperties: true,
+}
+const delivery = await agent(
+  `${DOCS}\n\nYou are the devops/release engineer. DELIVER this slice so the review board and producer can judge the REAL, CI-tested state. The gamedev coders left their work in the working tree; get it committed, pushed, on a PR, and GREEN on the homelab godot runner. Do these IN ORDER:\n` +
+  `1. 'git status'. If on 'main', create and switch to a branch slice/<short-kebab-slug-of-the-slice>. If already on a slice/* branch, stay on it.\n` +
+  `2. Stage and commit ALL of the slice's working-tree changes (scripts, scenes, tests, docs). Do NOT commit .claude/settings.json, gdlintrc, or other local-only junk. Then run 'git status' again and CONFIRM the tree is clean of slice files - leaving the polish pass uncommitted is the #1 recurring failure of this workflow; do NOT repeat it. Set clean=true only if it is genuinely clean.\n` +
+  `3. Push the branch to origin.\n` +
+  `4. Open a PR to main with gh (or reuse the open PR for this branch). Do NOT merge to main - the human merges after the producer PASS.\n` +
+  `5. Find the CI run for the pushed head sha and WAIT with 'gh run watch <id> --exit-status'. Capture conclusion, run id, head sha.\n` +
+  `6. If CI is RED: read the failing job log, report the failures plainly, STOP (do NOT edit code - that is the coders' job; the producer will SEND_BACK). If GREEN: report the green run as the artifact.\n` +
+  `You have no Godot locally; CI is the only test oracle. Return the structured delivery result.\n\nSlice: ${SLICE}`,
+  { agentType: 'gamedev-devops-engineer', model: 'sonnet', phase: 'Deliver', label: 'deliver', schema: DELIVER_SCHEMA }
+)
+log('deliver: branch=' + (delivery && delivery.branch) + ' ci=' + (delivery && delivery.ci_conclusion) + ' clean=' + (delivery && delivery.clean))
+
 // 6) REVIEW BOARD (parallel, one verdict per lens) ----------------------------
 phase('Review board')
 const REVIEWERS = [
@@ -115,9 +149,11 @@ phase('Producer gate')
 const verdict = await agent(
   `${DOCS}\n\nYou are the producer and you hold the scope/finish gate. Review the slice, the board verdicts, and the kill/keep gates in docs/GATES.md.\n` +
   `Board verdicts:\n${JSON.stringify(reviews)}\n\n` +
-  `Decide PASS (in-scope, finishable, board satisfied; append a one-line dated approval note to docs/GATES.md naming this slice) or SEND_BACK (list exactly what must change). Enforce the cut list; reject scope creep. Return PASS or SEND_BACK with reasoning.`,
+  `Delivery result (the REAL pushed + CI-tested state - judge against THIS, not the working tree):\n${JSON.stringify(delivery)}\n\n` +
+  `HARD GATE on delivery: a PASS REQUIRES delivery.ci_conclusion == "success" AND delivery.clean == true (the whole slice is committed and pushed, nothing left in the working tree) AND a real PR exists. If CI is not green, or the tree was not fully committed/pushed, you MUST SEND_BACK and name the delivery gap - the green runner log is the artifact, never a doc claim. ` +
+  `If delivery is good, then judge scope and finishability: PASS (in-scope, finishable, board satisfied; append a one-line dated approval note to docs/GATES.md naming this slice) or SEND_BACK (list exactly what must change). Enforce the cut list; reject scope creep. Return PASS or SEND_BACK with reasoning.`,
   { agentType: 'gamedev-producer', model: 'opus', phase: 'Producer gate', label: 'producer' }
 )
 
 log('ship-slice complete; producer verdict captured.')
-return { slice: SLICE, design, plan, build, qa, polish, reviews, verdict }
+return { slice: SLICE, design, plan, build, qa, polish, delivery, reviews, verdict }
