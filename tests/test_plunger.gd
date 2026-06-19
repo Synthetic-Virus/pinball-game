@@ -1,28 +1,31 @@
 extends GutTest
-## Test matrix entry: PLUNGER power meter + launch mapping.
-## Owner: test-builder + gameplay-programmer.
+## Test matrix entry: PLUNGER power meter + the physical-strike CONTRACT.
+## Owner: test-builder + gameplay-programmer + physics-programmer.
+##
+## WHAT THIS COVERS (unit tier): the charge/oscillation logic and the stable contract
+## (arm/disarm/is_armed, power_changed/ball_launched, the release-latch). These run by calling
+## _physics_process manually so we do not need a running scene tree.
+##
+## WHAT MOVED OUT: the plunger no longer SETS the ball's velocity via ball.launch(); it now STRIKES
+## the ball with a physical AnimatableBody3D face and the momentum comes from the contact. The
+## velocity-transfer assertions (a strike imparts speed, full out-throws weak, no tunneling) need a
+## real physics world and live in tests/test_plunger_launch.gd. Here we only assert that a release
+## BEGINS a stroke and keeps the meter/arm contract.
 ##
 ## HOW THESE TESTS WORK (for a non-expert reader):
-##   - We create a real Plunger node and a lightweight stub ball (FakeBall) that records the
-##     speed passed to launch() without doing any physics. This is NOT a mock of game infrastructure;
-##     it is a minimal stand-in for the physics-programmer's ball.gd, which does not run without
-##     Godot's physics server being driven by frames. Using a stub here is the right boundary.
+##   - We create a real Plunger node and a lightweight stub ball (FakeBall). The plunger no longer
+##     calls anything on the ball (it strikes it physically), so the stub just stands in as the
+##     RigidBody3D handle set_ball() expects. It is NOT a mock of game infrastructure.
 ##   - _physics_process is called manually (simulate frames) so we do not need a running scene tree.
 ##   - All power_changed values are collected via signal connection.
 
 # ---------------------------------------------------------------------------
-# FakeBall: minimal stand-in so plunger.gd can call _ball.launch(direction, speed)
-# without needing real ball physics. Records the last launch arguments for assertions.
+# FakeBall: minimal RigidBody3D stand-in so set_ball() has a typed handle. The physical plunger does
+# not call back into the ball, so this records nothing; it just exists to satisfy the contract.
 # ---------------------------------------------------------------------------
 class FakeBall extends RigidBody3D:
-	var last_launch_direction: Vector3 = Vector3.ZERO
-	var last_launch_speed: float = 0.0
-	var launch_call_count: int = 0
-
-	func launch(direction: Vector3, speed: float) -> void:
-		last_launch_direction = direction
-		last_launch_speed = speed
-		launch_call_count += 1
+	## Marker so the class body is non-empty; the physical plunger never reads it.
+	const IS_FAKE_BALL: bool = true
 
 # ---------------------------------------------------------------------------
 # Shared test state
@@ -35,8 +38,8 @@ var _power_values: Array = []     # Collects every power_changed emission.
 var _launched_count: int = 0       # Counts ball_launched signal firings.
 
 ## Step size used when we want to simulate a meaningful number of physics frames.
-## Matches project.godot physics/common/physics_ticks_per_second = 120.
-const FRAME_DELTA: float = 1.0 / 120.0
+## Matches project.godot physics/common/physics_ticks_per_second = 240.
+const FRAME_DELTA: float = 1.0 / 240.0
 
 func before_each() -> void:
 	plunger = preload("res://scripts/plunger.gd").new()
@@ -96,9 +99,9 @@ func test_meter_oscillates_between_zero_and_one() -> void:
 	_power_values.clear()
 
 	# Hold the launch button for enough frames to complete at least one full oscillation.
-	# CHARGE_RATE = 2.5 -> sweep time = 0.8 s -> 96 frames at 120 Hz.
-	# We run 160 frames (~1.33 s) to guarantee at least one full triangle cycle.
-	_simulate_frames(160, true)
+	# CHARGE_RATE = 2.5 -> sweep time = 0.8 s -> 192 frames at 240 Hz.
+	# We run 320 frames (~1.33 s) to guarantee at least one full triangle cycle.
+	_simulate_frames(320, true)
 
 	assert_true(_power_values.size() > 0, "power_changed should fire every frame while charging")
 
@@ -129,49 +132,70 @@ func test_release_launches_and_disarms() -> void:
 
 	assert_eq(_launched_count, 1, "ball_launched should fire exactly once on release")
 	assert_false(plunger.is_armed(), "plunger should be disarmed after launch")
-	assert_eq(fake_ball.launch_call_count, 1, "ball.launch() should be called exactly once")
-
-func test_release_speed_within_bounds() -> void:
-	plunger.arm()
-	_simulate_frames(30, true)
-	_release_launch()
-
-	var speed: float = fake_ball.last_launch_speed
-	assert_true(
-		speed >= TableConfig.LAUNCH_SPEED_MIN and speed <= TableConfig.LAUNCH_SPEED_MAX,
-		"launch speed %f must be within [LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX]" % speed
-	)
-
-func test_higher_power_maps_to_higher_speed() -> void:
-	# Launch at low power (hold briefly - charge stays near the low end of the wave).
-	# CHARGE_RATE = 2.5, so after just a few frames the phase is small and power is near 0.
-	plunger.arm()
-	_simulate_frames(4, true)   # Very brief hold -> low power (phase ~= 4/120 * 2.5 ~= 0.083)
-	_release_launch()
-	var low_speed: float = fake_ball.last_launch_speed
-
-	# Reset and launch at higher power (hold long enough to climb toward the peak).
-	plunger.arm()
-	# 48 frames = 0.4 s -> phase ~= 0.4 * 2.5 = 1.0 -> pingpong(1.0,1.0) = 1.0 (the peak)
-	_simulate_frames(48, true)
-	_release_launch()
-	var high_speed: float = fake_ball.last_launch_speed
-
-	assert_true(high_speed > low_speed,
-		"higher power (speed %f) must produce a higher launch speed than lower power (speed %f)" % [
-			high_speed, low_speed
-		])
+	assert_true(plunger.is_stroking(),
+		"release must BEGIN a physical stroke (is_stroking() true right after release)")
 
 func test_launch_direction_is_up_table() -> void:
+	# The physical face is driven UP-TABLE (local -Z). After a release, the face must have moved to a
+	# SMALLER z than its rest position (toward the arch), confirming the stroke direction.
+	var rest_z: float = TableConfig.PLUNGER_REST_POS.z
 	plunger.arm()
 	_simulate_frames(20, true)
 	_release_launch()
-	# TableConfig.up_table_local() returns Vector3(0, 0, -1).
-	var expected: Vector3 = TableConfig.up_table_local()
+	# Step a few frames so the forward stroke advances measurably.
+	_simulate_frames(5, false)
+	assert_lt(
+		plunger.face_position().z,
+		rest_z,
+		"plunger face must drive up-table (smaller z) on a strike; rest z=%f, now=%f" % [
+			rest_z, plunger.face_position().z
+		]
+	)
+
+func test_face_returns_to_rest_after_stroke() -> void:
+	# After the full forward + return stroke the face must come back to its rest position so it is
+	# ready for the next ball and does not sit blocking the lane.
+	plunger.arm()
+	_simulate_frames(20, true)
+	_release_launch()
+	# Step generously: forward stroke (PLUNGER_STROKE_LENGTH at >=30 u/s) + return at RETURN_SPEED.
+	# At 240 Hz, 240 frames = 1.0 s, far longer than the whole stroke needs.
+	_simulate_frames(240, false)
+	assert_false(plunger.is_stroking(), "stroke should have finished after 1 s of frames")
 	assert_true(
-		fake_ball.last_launch_direction.is_equal_approx(expected),
-		"launch direction should be TableConfig.up_table_local() = %s, got %s" % [
-			str(expected), str(fake_ball.last_launch_direction)
+		plunger.face_position().is_equal_approx(TableConfig.PLUNGER_REST_POS),
+		"face should return to PLUNGER_REST_POS %s, got %s" % [
+			str(TableConfig.PLUNGER_REST_POS), str(plunger.face_position())
+		]
+	)
+
+func test_higher_power_strokes_faster() -> void:
+	# The power->stroke mapping must be monotonic: a higher charge produces a faster forward stroke,
+	# which is what makes a full strike out-throw a weak one. We measure the face's forward speed by
+	# how far it travels in a fixed number of frames right after release.
+	var rest_z: float = TableConfig.PLUNGER_REST_POS.z
+
+	# Low power: brief hold (phase ~= 4/240 * 2.5 ~= 0.042 -> power near 0).
+	plunger.arm()
+	_simulate_frames(4, true)
+	_release_launch()
+	_simulate_frames(3, false)
+	var low_travel: float = rest_z - plunger.face_position().z
+	# Let the low stroke finish so it does not bleed into the next measurement.
+	_simulate_frames(240, false)
+
+	# High power: hold to the peak (96 frames = 0.4 s -> phase 1.0 -> pingpong = 1.0).
+	plunger.arm()
+	_simulate_frames(96, true)
+	_release_launch()
+	_simulate_frames(3, false)
+	var high_travel: float = rest_z - plunger.face_position().z
+
+	assert_gt(
+		high_travel,
+		low_travel,
+		"higher power must drive the face faster (more travel in 3 frames): high=%f, low=%f" % [
+			high_travel, low_travel
 		]
 	)
 

@@ -11,8 +11,11 @@ extends RefCounted
 ##
 ## DESIGN LAYOUT honored (DESIGN.md): upright frame, launch lane up the RIGHT side, a rounded top
 ## ARCH that turns the launched ball into the playfield, perimeter walls, and an OPEN bottom for the
-## drain. The bottom edge is deliberately left WALL-LESS so the ball can fall into the drain volume
-## (scripts/drain.gd) that table.gd places at TableConfig.DRAIN_Z. Do not add a bottom wall here.
+## drain. The CENTER bottom edge is deliberately left WALL-LESS so a missed ball falls into the
+## drain volume (scripts/drain.gd) that table.gd places at TableConfig.DRAIN_Z. Do not add a center
+## bottom wall here. The ONE exception is _build_lane_pocket: a short stop that closes ONLY the
+## launch-lane bottom (x in [LANE_INNER_X, HALF_WIDTH]) so the parked ball does not roll off the
+## open lane bottom; it leaves the center drain region open.
 ##
 ## COORDINATE CONVENTION (local to the tilted Playfield, per TableConfig):
 ##   +X = right, -X = left, -Z = up-table (toward the arch), +Z = down-table (toward the drain).
@@ -23,6 +26,7 @@ static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_perimeter_walls(playfield)
 	_build_lane_divider(playfield)
+	_build_lane_pocket(playfield)
 	_build_arch(playfield)
 
 
@@ -130,6 +134,33 @@ static func _build_lane_divider(parent: Node3D) -> void:
 		"LaneDivider",
 		Vector3(t, h, length),
 		Vector3(TableConfig.LANE_INNER_X, h * 0.5, center_z),
+		PhysicsLayers.STATIC_OBSTACLES
+	)
+
+
+## The launch-lane bottom POCKET: a short static wall that closes ONLY the bottom of the launch lane
+## so the ball placed at BALL_START rests in the chute instead of rolling off the open bottom edge
+## (the table is tilted drain-end-down and there is deliberately NO bottom perimeter wall). It spans
+## ONLY the lane in X (from the lane divider at LANE_INNER_X out to the right wall at HALF_WIDTH);
+## the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) is left OPEN so a drained ball still
+## falls into the drain. The wall stands WALL_HEIGHT tall like the perimeter; its up-table face sits
+## at TableConfig.LANE_POCKET_FACE_Z, just down-table of the ball's rest, so the ball rests on it.
+static func _build_lane_pocket(parent: Node3D) -> void:
+	var h: float = TableConfig.WALL_HEIGHT
+	var t: float = TableConfig.LANE_POCKET_THICKNESS
+	var inner_x: float = TableConfig.LANE_INNER_X
+	var hw: float = TableConfig.HALF_WIDTH
+	# Width spans the lane plus the wall thickness on each side so it seals against the right wall and
+	# the lane divider with no corner gap a ball could squeeze through.
+	var width: float = (hw - inner_x) + t
+	var center_x: float = (inner_x + hw) * 0.5
+	# Center the box in Z so its UP-TABLE face lands exactly at LANE_POCKET_FACE_Z.
+	var center_z: float = TableConfig.LANE_POCKET_FACE_Z + t * 0.5
+	_make_box_body(
+		parent,
+		"LanePocket",
+		Vector3(width, h, t),
+		Vector3(center_x, h * 0.5, center_z),
 		PhysicsLayers.STATIC_OBSTACLES
 	)
 

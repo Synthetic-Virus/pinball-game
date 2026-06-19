@@ -1,7 +1,10 @@
 [gd_scene load_steps=2 format=3 uid="uid://b0pinballplunger01"]
 
-; Launch control. Gameplay-programmer fills scripts/plunger.gd: hold "launch" to charge an
-; oscillating meter, release to call ball.launch(up_table, speed). Emits power_changed + ball_launched.
+; Launch control. scripts/plunger.gd builds a PHYSICAL plunger face (AnimatableBody3D on the
+; KINEMATIC_OBSTACLES layer, like the flippers) seated in the launch lane. Hold "launch" to charge an
+; oscillating meter; release to DRIVE the face up-table so it STRIKES the ball and imparts velocity
+; through the collision (no coded velocity set). Emits power_changed + ball_launched. table.gd places
+; this node at the playfield origin; the face seats itself at TableConfig.PLUNGER_REST_POS.
 
 [ext_resource type="Script" path="res://scripts/plunger.gd" id="1_plunger"]
 

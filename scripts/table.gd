@@ -232,9 +232,12 @@ func _build_dynamic_elements() -> void:
 		targets.append(target)
 
 	# --- Plunger ----------------------------------------------------------------------------------
+	# The plunger is now a PHYSICAL device: it builds an AnimatableBody3D face that SEATS ITSELF at
+	# TableConfig.PLUNGER_REST_POS (a full playfield-local coordinate in the launch lane). So this node
+	# sits at the playfield ORIGIN and the face carries the lane position; do not offset the node here.
 	plunger = PlungerScene.instantiate()
 	plunger.name = "Plunger"
-	plunger.position = TableConfig.BALL_START
+	plunger.position = Vector3.ZERO
 	playfield.add_child(plunger)
 	plunger.set_ball(ball)
 

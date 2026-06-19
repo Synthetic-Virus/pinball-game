@@ -93,13 +93,79 @@ const DRAIN_DEPTH: float = 6.0
 ## normal play the ball never reaches it; it only fires when something has already gone wrong.
 const OOB_DRAIN_Y: float = -20.0
 
+## ---- LAUNCH-LANE BOTTOM POCKET -----------------------------------------------------------------
+## The table is tilted (drain end, +Z, down) and the perimeter has NO bottom wall (the center drain
+## lives at the open bottom). Without a stop the ball placed at BALL_START rolls down +Z and falls
+## off the open bottom edge of the LAUNCH LANE (QA: "ball falls out the bottom of the lane").
+## The fix is a short static wall that closes ONLY the bottom of the launch lane (x in
+## [LANE_INNER_X, HALF_WIDTH]); the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) stays
+## OPEN so a drained ball still falls into the drain. table_geometry.gd builds this from these.
+##
+## The pocket wall stands at the lane's bottom edge. Its up-table face must sit BELOW (greater Z
+## than) the ball's rest position so the resting ball leans against it. We place the wall's INNER
+## face at LANE_POCKET_FACE_Z and give it a small thickness; it stands WALL_HEIGHT tall.
+const LANE_POCKET_FACE_Z: float = HALF_LENGTH - 0.5  ## Inner (up-table) face of the pocket wall.
+const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perimeter walls.
+
 ## ---- LAUNCH / PLUNGER --------------------------------------------------------------------------
-## Ball rest position at the bottom of the launch lane (local playfield coords).
+## Ball rest position at the bottom of the launch lane (local playfield coords). It sits just
+## up-table of the pocket wall (LANE_POCKET_FACE_Z) so the resting ball is trapped between the
+## pocket and the plunger face. WHY z here: with ball radius 0.6 and the pocket face at
+## HALF_LENGTH - 0.5 = 24.5, a rest z of HALF_LENGTH - 2.0 = 23.0 leaves the ball's down-table
+## surface (z ~= 23.6) just shy of the pocket face, so it settles against the pocket, no overlap.
 const BALL_START: Vector3 = Vector3(10.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
-## Launch impulse speed range mapped from the power meter (0..1). Tuned at this scale/gravity so a
-## min launch dribbles and a max launch clears the arch. Physics/gameplay may retune within reason.
+
+## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
+## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
+## target the physical plunger strike is calibrated against; the HUD/tests still read these bounds.
 const LAUNCH_SPEED_MIN: float = 30.0
 const LAUNCH_SPEED_MAX: float = 90.0
+
+## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
+## The plunger is now a PHYSICAL body (AnimatableBody3D on KINEMATIC_OBSTACLES, like the flippers)
+## that STRIKES the ball and transfers momentum through the collision, instead of code setting the
+## ball's velocity directly. On release the plunger body is driven up-table (local -Z) at a stroke
+## speed mapped from the power meter; the moving face collides with the resting ball and throws it.
+##
+## WHY these stroke speeds (mapped from power 0..1): for a head-on strike of a kinematic face into
+## a low-restitution steel ball (BALL_BOUNCE 0.15), the ball leaves at roughly the face speed (a
+## little more from the slight bounce, a little less from contact losses), so the stroke-speed range
+## is set CLOSE TO the desired ball-speed range LAUNCH_SPEED_MIN..MAX but trimmed at the top so a
+## max strike does not overshoot the 90 u/s feel target. The transfer is solver-dependent, so these
+## are the first on-device tuning knobs: verify in the browser build that a full strike clears the
+## arch and a min strike dribbles, and nudge these two numbers (only) if needed. Tests assert the
+## MAPPING is monotonic and meaningful and that the ball lands in-range, not an exact value.
+const PLUNGER_STROKE_SPEED_MIN: float = 30.0  ## Power 0.0: a gentle dribble out of the lane.
+const PLUNGER_STROKE_SPEED_MAX: float = 78.0  ## Power 1.0: a hard strike that clears the arch.
+
+## How far (world units) the plunger face travels up-table on a full stroke before it returns home.
+## It only needs to travel far enough to stay in solid contact with the ball through the strike; a
+## short firm stroke avoids the face overshooting up the lane and re-hitting the ball it just threw.
+const PLUNGER_STROKE_LENGTH: float = 2.0
+
+## Plunger face box dimensions (local). It must be WIDER than the ball so an off-center rest still
+## gets struck squarely, and TALLER than the ball center so it cannot slip over/under. The face is
+## seated IN CONTACT with the resting ball (no gap), so the strike pushes an already-touching ball
+## and there is no gap to tunnel across on the first step. At 240 Hz a 78 u/s face moves 0.325
+## u/step, so a 0.8 u thickness still gives ~2.5 steps of overlap depth AND the ball's own
+## continuous_cd sweeps against the face; head-on tunneling is not possible. The thickness is also
+## chosen so the plunger rest body sits just UP-TABLE of the lane pocket (no overlap, see REST_POS).
+const PLUNGER_FACE_WIDTH: float = LANE_WIDTH - 0.6  ## Fits inside the lane with clearance.
+const PLUNGER_FACE_HEIGHT: float = 2.0              ## Spans the ball center (ball center y ~= 0.8).
+const PLUNGER_FACE_THICKNESS: float = 0.8           ## Tiles between the ball and the lane pocket.
+
+## The plunger's REST position (local playfield coords). It seats in the lane just DOWN-TABLE of the
+## ball (greater Z) so its up-table face is in light contact with the ball's down-table surface. The
+## face sits at ball_down_surface_z = BALL_START.z + BALL_RADIUS; the body center is half a
+## thickness further down-table. With BALL_START.z 23.0, radius 0.6, thickness 0.8: face up-edge =
+## 23.6 (touches the ball), body center z = 24.0, body back edge = 24.4 - just up-table of the lane
+## pocket front face (LANE_POCKET_FACE_Z = 24.5), so kinematic plunger and static pocket do not
+## overlap. X is centered in the lane; Y centers the face on the ball.
+const PLUNGER_REST_POS: Vector3 = Vector3(
+	(LANE_INNER_X + HALF_WIDTH) * 0.5,                          ## Centered across the lane width.
+	BALL_RADIUS + 0.2,                                         ## Same height as the ball center.
+	BALL_START.z + BALL_RADIUS + PLUNGER_FACE_THICKNESS * 0.5  ## Face just behind the ball.
+)
 
 ## ---- HELPERS -----------------------------------------------------------------------------------
 
