@@ -20,12 +20,13 @@ extends GutTest
 ## assert the cooldown bounds the score count.
 
 const PHYSICS_TICK_S: float = 1.0 / 240.0
-## Frames to let a kicked ball clearly separate from the bumper and reach a steady outgoing
-## velocity.
-const APPROACH_FRAMES: int = 30
 ## A deliberately SLOW incoming speed: the whole point is that an active kick still fires it away
-## fast.
+## fast even when the ball arrives slowly.
 const SLOW_FIRE_SPEED: float = 8.0
+## Frames needed for the slow ball to travel from its start position to the bumper and then let
+## the kick + outgoing velocity settle. Start offset = POP_BUMPER_RADIUS + BALL_RADIUS + 3.0 ~= 5.2
+## units; at 8 u/s and 240 Hz that is ~156 frames. Use 200 frames for a comfortable margin.
+const APPROACH_FRAMES: int = 200
 ## Hold window for the cooldown-farming check.
 const CONTACT_HOLD_FRAMES: int = 120
 

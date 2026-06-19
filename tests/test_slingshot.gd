@@ -13,8 +13,11 @@ extends GutTest
 ## measured
 ## velocity (independent oracle). A kick that pointed at the drain (+Z) would FAIL.
 
-const APPROACH_FRAMES: int = 30
 const SLOW_FIRE_SPEED: float = 8.0
+## Frames needed for the slow ball to travel from its start position (z ~= BALL_RADIUS + 2.0 = 2.6)
+## to the slingshot face at z ~= 0 and let the kick + outgoing velocity settle. At 8 u/s and
+## 240 Hz that is ~78 frames. Use 120 frames for a comfortable margin.
+const APPROACH_FRAMES: int = 120
 
 const SLINGSHOT_SCENE: PackedScene = preload("res://scenes/elements/Slingshot.tscn")
 const BALL_SCENE: PackedScene = preload("res://scenes/elements/Ball.tscn")
