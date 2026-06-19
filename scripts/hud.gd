@@ -25,14 +25,6 @@ extends CanvasLayer
 ##   func show_game_over(final_score: int) -> void
 ##   func hide_game_over() -> void
 
-# --- Node references (assigned in _ready) ---
-var _lbl_score: Label
-var _lbl_balls: Label
-var _lbl_msg: Label
-var _meter_fill: ColorRect   # The coloured fill portion of the power meter bar.
-var _pnl_game_over: PanelContainer
-var _lbl_game_over: Label
-
 ## Width of the power meter bar in pixels. Chosen to be readable at 1080p without being obtrusive.
 const METER_BAR_WIDTH: float = 200.0
 const METER_BAR_HEIGHT: float = 24.0
@@ -41,6 +33,14 @@ const METER_BAR_HEIGHT: float = 24.0
 ## lerp-ing between these gives the player immediate visual feedback on their power level.
 const METER_COLOR_LOW: Color = Color(0.2, 0.85, 0.2)    ## Green - safe, low power.
 const METER_COLOR_HIGH: Color = Color(0.9, 0.15, 0.15)  ## Red - high power.
+
+# --- Node references (assigned in _ready) ---
+var _lbl_score: Label
+var _lbl_balls: Label
+var _lbl_msg: Label
+var _meter_fill: ColorRect   # The coloured fill portion of the power meter bar.
+var _pnl_game_over: PanelContainer
+var _lbl_game_over: Label
 
 func _ready() -> void:
 	_build_ui()

@@ -39,15 +39,16 @@ const BallScene := preload("res://scenes/elements/Ball.tscn")
 const FlipperScene := preload("res://scenes/elements/Flipper.tscn")
 const PlungerScene := preload("res://scenes/elements/Plunger.tscn")
 const TargetScene := preload("res://scenes/elements/Target.tscn")
+const PopBumperScene := preload("res://scenes/elements/PopBumper.tscn")
+const SlingshotScene := preload("res://scenes/elements/Slingshot.tscn")
 
-## Local (playfield-space) positions of the scoring targets in the upper-middle of the table. A
-## small handful so a flip has something worth aiming at (DESIGN: at least one rewarding target). Z
-## values are up-table (negative) so they sit above the flippers; X spreads them across the field.
-const TARGET_POSITIONS: Array[Vector3] = [
-	Vector3(-5.0, 0.0, -6.0),
-	Vector3(5.0, 0.0, -6.0),
-	Vector3(0.0, 0.0, -12.0),
-]
+## The standup target bank positions now come from TableConfig.STANDUP_BANK_POSITIONS (SLICE "real
+## pinball furniture"): the 3 physical targets are re-homed into a readable mid-field bank a
+## deliberate
+## flip can reach (validated by tools/table_viz.py against the flipper-tip sweep). The old scattered
+## TARGET_POSITIONS const is removed; table.gd reads the bank from the world-scale contract instead
+## so
+## the placement lives in one source of truth with the rest of the furniture geometry.
 
 ## Camera framing tunables. The camera POSITION is computed at runtime by _frame_camera (it fits
 ## the table bounds via the engine's real projection); only the viewing FEEL lives here - pitch and
@@ -67,6 +68,14 @@ var oob_drain: Area3D
 var game_flow: Node
 var hud: CanvasLayer
 var targets: Array[Area3D] = []
+## Active-kick furniture (SLICE "real pinball furniture"). Both are Area3D detectors (pop_bumper.gd
+## /
+## slingshot.gd extend active_kicker.gd) with the same scored/kicked/set_ball contract as targets,
+## so
+## they wire the same way. Kept as separate typed handles so tests and wiring can address each
+## family.
+var pop_bumpers: Array[Area3D] = []
+var slingshots: Array[Area3D] = []
 var _camera: Camera3D
 
 
@@ -194,7 +203,8 @@ func _build_static_geometry() -> void:
 	TableGeometry.build(playfield)
 
 
-## Instance Ball, two Flippers, Plunger, Targets, Drain (+ failsafe OobDrain) under the playfield and
+## Instance Ball, two Flippers, Plunger, Targets, Drain (+ failsafe OobDrain) under the playfield
+## and
 ## assign the typed handles. Each element's BEHAVIOR is owned by its file; this only places them and
 ## hands each the ball it must track (set_ball), which is required for drain/scoring to fire at all.
 func _build_dynamic_elements() -> void:
@@ -222,20 +232,61 @@ func _build_dynamic_elements() -> void:
 	playfield.add_child(right_flipper)
 	right_flipper.configure("right_flipper", true)
 
-	# --- Targets ----------------------------------------------------------------------------------
+	# --- Standup target bank (re-homed physical targets, SLICE "real pinball furniture") ----------
+	# The 3 existing physical targets become a readable mid-field BANK at a flipper-makeable position
+	# (TableConfig.STANDUP_BANK_POSITIONS, validated by table_viz). Same target.gd body + contract.
 	targets.clear()
-	for pos: Vector3 in TARGET_POSITIONS:
+	for pos: Vector3 in TableConfig.STANDUP_BANK_POSITIONS:
 		var target: Area3D = TargetScene.instantiate()
 		target.position = pos
 		playfield.add_child(target)
 		target.set_ball(ball)
 		targets.append(target)
 
+	# --- Pop bumpers (active kickers, upper-middle cluster) ---------------------------------------
+	# 2-3 round active bumpers that fire the ball radially outward on contact. Each is configured from
+	# TableConfig and handed the ball, exactly like a target; the active kick + cap + cooldown live in
+	# active_kicker.gd (physics-programmer's half). configure() runs before add_child so _ready sees
+	# the resolved geometry.
+	pop_bumpers.clear()
+	for pos: Vector3 in TableConfig.POP_BUMPER_POSITIONS:
+		var bumper: Area3D = PopBumperScene.instantiate()
+		bumper.position = pos
+		if bumper.has_method("configure"):
+			bumper.configure()
+		playfield.add_child(bumper)
+		bumper.set_ball(ball)
+		pop_bumpers.append(bumper)
+
+	# --- Slingshots (active kickers, one above each flipper) --------------------------------------
+	# Left and right angled kickers that fire a side-falling ball UP-table and toward center (into
+	# play, never the drain). configure(mirrored) picks the per-side kick direction from TableConfig.
+	slingshots.clear()
+	var left_sling: Area3D = SlingshotScene.instantiate()
+	left_sling.name = "LeftSlingshot"
+	left_sling.position = TableConfig.SLINGSHOT_LEFT_POS
+	if left_sling.has_method("configure"):
+		left_sling.configure(false)
+	playfield.add_child(left_sling)
+	left_sling.set_ball(ball)
+	slingshots.append(left_sling)
+
+	var right_sling: Area3D = SlingshotScene.instantiate()
+	right_sling.name = "RightSlingshot"
+	right_sling.position = TableConfig.SLINGSHOT_RIGHT_POS
+	if right_sling.has_method("configure"):
+		right_sling.configure(true)
+	playfield.add_child(right_sling)
+	right_sling.set_ball(ball)
+	slingshots.append(right_sling)
+
 	# --- Plunger ----------------------------------------------------------------------------------
 	# CONTRACT (QA BUG-013): the Plunger node MUST sit at the playfield origin (Vector3.ZERO). Its
-	# child face (plunger.gd._build_face) seats itself at the playfield-LOCAL TableConfig.PLUNGER_REST_POS
+	# child face (plunger.gd._build_face) seats itself at the playfield-LOCAL
+	# TableConfig.PLUNGER_REST_POS
 	# and, like every other element here, treats its own local space as playfield space. Parenting the
-	# Plunger anywhere else (the old code set it to BALL_START) double-offsets the face: it would land at
+	# Plunger anywhere else (the old code set it to BALL_START) double-offsets the face: it would land
+	# at
 	# BALL_START + PLUNGER_REST_POS, off the table, and the strike would never contact the ball.
 	# tests/test_plunger_launch.gd sets the plunger to ZERO for exactly this reason; honor that here.
 	plunger = PlungerScene.instantiate()
@@ -296,6 +347,13 @@ func _wire_signals() -> void:
 		if target.has_signal("scored") and game_flow.has_method("on_target_scored"):
 			target.scored.connect(game_flow.on_target_scored)
 
+	# Active-kick furniture -> score (same scored(points) contract as targets; reuse the handler).
+	# Pop bumpers and slingshots score on their kick; GameFlow.on_target_scored adds the flat points,
+	# so no new GameFlow method is needed (the active kick is invisible to the flow behind the signal).
+	for kicker: Area3D in (pop_bumpers + slingshots):
+		if kicker.has_signal("scored") and game_flow.has_method("on_target_scored"):
+			kicker.scored.connect(game_flow.on_target_scored)
+
 	# Plunger -> launch + HUD meter.
 	if plunger != null:
 		if plunger.has_signal("ball_launched") and game_flow.has_method("on_ball_launched"):
@@ -317,7 +375,8 @@ func _wire_signals() -> void:
 
 
 ## GameFlow asked for a fresh ball (start, or after a non-final drain). Reset the ball to the launch
-## lane, arm the plunger, and HIDE the game-over panel. Hiding here covers BOTH a normal new ball and
+## lane, arm the plunger, and HIDE the game-over panel. Hiding here covers BOTH a normal new ball
+## and
 ## a restart (restart() -> start_game() -> request_new_ball), so the panel is never left over a live
 ## ball (QA BUG-002 / #5). hide_game_over is harmless when the panel is already hidden.
 func _on_request_new_ball() -> void:
@@ -340,10 +399,13 @@ func _on_oob_body_entered(body: Node) -> void:
 		game_flow.on_ball_drained()
 
 
-## Poll for the restart input. Only meaningful in GAME_OVER; GameFlow.restart() ignores it otherwise.
+## Poll for the restart input. Only meaningful in GAME_OVER; GameFlow.restart() ignores it
+## otherwise.
 ## We poll here (not in GameFlow) because input belongs to the orchestrator, and we use the JUST-
-## PRESSED edge so holding "launch" through game over does not instantly restart and re-fire (it must
-## be a deliberate fresh press). The new ball's plunger then also requires its own release (BUG-008).
+## PRESSED edge so holding "launch" through game over does not instantly restart and re-fire (it
+## must
+## be a deliberate fresh press). The new ball's plunger then also requires its own release
+## (BUG-008).
 func _physics_process(_delta: float) -> void:
 	if game_flow == null or not game_flow.has_method("current_state"):
 		return

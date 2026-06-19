@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballpopbumper01"]
+
+; Active pop bumper (the "bell thingy"). Root is an Area3D detector (scripts/pop_bumper.gd, extends
+; scripts/active_kicker.gd): on ball contact it fires the ball RADIALLY OUTWARD with a capped, cooled
+; active impulse and scores. The solid bounce body is a child StaticBody3D built in code. table.gd
+; instances 2-3 of these in the upper-middle and calls configure() + set_ball().
+
+[ext_resource type="Script" path="res://scripts/pop_bumper.gd" id="1_pop_bumper"]
+
+[node name="PopBumper" type="Area3D"]
+script = ExtResource("1_pop_bumper")

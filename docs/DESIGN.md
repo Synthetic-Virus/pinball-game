@@ -150,6 +150,136 @@ confirms the intent below; the physics-programmer owns correctness and the stres
 - DELIVERY: push to a branch / open a PR. Do NOT merge to main inside the slice; the producer runs
   the scope/finish gate and CI on the runner is the source of truth for "green", not any doc claim.
 
+## Slice design intent: "real pinball furniture" (gray-box, 2026-06-19)
+This slice adds the first REAL pinball FURNITURE on top of the physics foundation: rubber-wrapped
+flippers, active pop bumpers, slingshots, a standup target bank, and inlane/outlane guides, in a
+representative (NOT commercial-complete) layout. It is the slice that turns "a ball, two flippers and
+three posts" into something that reads as a pinball table and gives the ball somewhere to go when it
+leaves a flipper. Every interaction is PHYSICS-BASED; nothing is faked. The designer confirms the
+intent below. The physics-programmer owns correctness and the tunneling stress tests; the lead owns
+the shared-physics layers and the TableConfig placement constants; the test-builder/QA own the
+independent-oracle behavioral suite. References consulted: docs/REFERENCES.md (the two open-source
+repos, the CAD-shot-planning discipline). Build on what is already on main (force-driven flippers,
+physical striking plunger, lane pocket, physical bouncing targets, auto-framed camera).
+
+### Player-facing goal (what the player should be able to do and feel)
+- LIVELY PLAY: a ball that reaches the upper-middle field gets BATTED AROUND by pop bumpers - it does
+  not just trickle back down. Each bumper hit is a little jolt of action and a score tick. The bumper
+  cluster is the "something worth shooting for" up top.
+- SAVED BY THE SLINGS: a ball dropping toward the gap between a flipper and the side gets KICKED back
+  up into play by a slingshot, so the lower field feels active and a near-drain can be rescued by the
+  table itself (not only by the player's flip). The slings also add chaos: a ball can rattle between
+  a sling and a flipper, which is classic pinball texture.
+- A SHOT WORTH MAKING: from a flipper at rest, a well-timed flip can reach the standup target bank
+  (a deliberate, makeable shot), and can feed the ball up toward the bumper cluster. The player can
+  AIM, not just survive.
+- LANES THAT FUNNEL: a ball coming down the side is guided down an inlane/outlane past the flipper.
+  An outlane that feeds the drain is a risk; an inlane that feeds back to the flipper is a save. This
+  is the first time the lower field has structured paths instead of one open mouth.
+- RUBBER THAT REBOUNDS: the ball bounces off the flipper face/edge like a real rubber-sleeved flipper
+  (a live, slightly springy contact), not like a dead board. A ball can be bounced off a flipper, not
+  only swung at.
+
+### Must-feel qualities (the bar the engineers hit, gray boxes only)
+1. ACTIVE KICK, NOT A LIMP BOUNCE. A pop bumper and a slingshot fire the ball AWAY with authority on
+   contact, even if the ball arrived slowly. The developer's words: it "contracts to shoot the ball
+   away" - a solenoid kick, not a passive rubber bounce. The OUTGOING speed off an active element has
+   a clear floor (a crawl in still comes out fast enough to travel), and the kick direction is
+   legibly AWAY from the element (pop bumper: radially outward from its center along the ball's
+   contact normal; slingshot: outward and UP-table, back into play, never down toward the drain).
+   PASSIVE-ONLY (PhysicsMaterial restitution alone) is explicitly NOT acceptable for these elements -
+   that is the prior-art pattern we are deliberately improving on (docs/REFERENCES.md).
+2. NO MACHINE-GUN FARMING. A ball resting against or jittering on a pop bumper or slingshot must NOT
+   re-fire every physics frame and rack up points. Each active element has a short re-trigger cooldown
+   (the same family as the target BUG-007 cooldown): one legible kick + score, then a brief dead time
+   before it can fire again. A resting ball gets pushed off ONCE, not strobed.
+3. RUBBER FLIPPER REBOUND THAT KEEPS MOMENTUM. A ball striking a flipper face rebounds off it with a
+   live, slightly-springy feel (a rubber-sleeve PhysicsMaterial / rubber edge on the flipper
+   collider), not a dead thud and not an energy-adding trampoline. A fast ball that glances a flipper
+   stays fast; the rebound preserves the ball's momentum (the same fun risk as the targets: a contact
+   that kills speed ends the loop). This is layered on the EXISTING force/hinge/return-spring drive
+   WITHOUT touching that drive.
+4. NO REGRESSION IN FLIPPER FEEL. The slice's standing #1 feel test stays true: a full swing still
+   noticeably out-throws a tap. Adding a rubber surface/material to the flipper collider must not
+   change the force drive, the snap timing (~50 ms), the cradle, or the merged momentum tests. Those
+   tests stay GREEN exactly as they are.
+5. SHOTS ARE GEOMETRICALLY MAKEABLE (validated, not eyeballed). The standup target bank and the pop
+   bumper cluster sit where a flipper-tip sweep can actually REACH them, and the slingshots kick the
+   ball into play, not into a wall or the drain. This is asserted deterministically by the extended
+   table_viz tool + geometry tests, in the spirit of CAD shot-planning - NOT by looking at a picture.
+6. NOTHING TUNNELS, EVER. At the top ball speed the table produces (a full flip, a full plunge, a
+   stacked bumper/sling kick - so >= ~2x LAUNCH_SPEED_MAX), the ball never passes through a flipper
+   (now with its rubber surface), a pop bumper body, a slingshot body, a standup target, a lane
+   guide, a wall, or the arch. Hard gate, proven by GUT stress tests against REAL instanced bodies
+   measuring real position/velocity, not a soft target. The active kick must not be tuned so hot that
+   it shoves the ball through a neighbouring wall before CCD resolves; the physics-programmer caps the
+   kick impulse so the post-kick speed stays inside the CCD-safe envelope the stress tests cover.
+
+### Layout intent (representative subset - the GUIDE, not the full board)
+Follow the shared flame-skull CAD reference as a GUIDE for PLACEMENT and FEEL only (the image is not
+in the repo; if docs/reference/playfield-guide.png is later added, the engineers may open it). Build a
+BASIC subset, NOT a commercial board. The lead-programmer picks exact positions in TableConfig within
+this intent and validates them with table_viz:
+- FLIPPERS at the bottom forming the inverted V (UNCHANGED geometry: FLIPPER_PIVOT_SPREAD/Z,
+  REST/UP angles, length all stay as the existing world-scale contract; only the rubber surface is
+  added). Keep the existing ~2.1-unit drain mouth.
+- SLINGSHOTS: ONE above each flipper, on the outer side, angled so a ball falling down that side is
+  kicked back UP and toward center (into play), never down into the drain. Two slingshots total.
+- POP BUMPERS: 2-3 in the UPPER-MIDDLE field (above the flippers, below the arch), clustered so a ball
+  entering the cluster bounces between them a few times. Each scores on its kick.
+- ONE STANDUP TARGET BANK: a small bank (reuse/extend the existing physical target body) of standup
+  targets, placed on the mid-field where a deliberate flip can reach it. This MAY reuse / re-home the
+  existing 3 targets into a readable bank rather than adding a fourth element type, at the lead's
+  discretion - the requirement is "a standup bank that is a makeable shot", not a new target class.
+- INLANE/OUTLANE GUIDES: minimal lane guides down BOTH sides that funnel a ball past the flippers -
+  an outlane (outer, feeds the drain = risk) and an inlane (inner, feeds back toward the flipper =
+  save) per side. Keep them minimal; do not light them, gate them, or add ball-save logic.
+- The launch lane, lane pocket, arch, plunger, and drain are UNCHANGED from the foundation.
+
+### Design constraints the engineers must honor (do NOT re-litigate)
+- SCOPE IS REPRESENTATIVE, NOT COMMERCIAL. Build exactly: rubber flippers + 2-3 pop bumpers + 2
+  slingshots + 1 standup bank + minimal inlane/outlane guides, in a representative layout. NO ramps,
+  no second board, no rollover SCORING modes, no spinners, no drop-target drop logic, no kickback, no
+  magnets, no multiball, no multipliers, no mode toggles, no art, no audio. Rollover lanes appear in
+  the reference image; they are OUT of this slice (the cut list keeps "outlanes/inlanes with lights"
+  and "rollovers" deferred - we add only the unlit physical guide walls, not scoring rollovers).
+- ACTIVE KICK IS AN IMPULSE, CAPPED AND COOLED. Pop bumpers and slingshots apply a coded outward
+  IMPULSE on contact (not pure PhysicsMaterial restitution), directed away from the element, with
+  (a) a minimum outgoing speed so a slow ball still travels, (b) a CAP so the post-kick speed stays
+  inside the CCD-safe envelope (no tunneling), and (c) a per-element re-trigger cooldown so a resting
+  ball cannot farm. Reuse the target BUG-007 cooldown pattern; do not invent a new one.
+- RUBBER IS A SURFACE, NOT A REDESIGN. The rubber feel is added via the flipper collider's
+  PhysicsMaterial / a rubber edge, NOT by changing the force/hinge/return-spring drive. The merged
+  flipper momentum/snap/no-overlap tests stay green unchanged. If the rubber material would alter
+  those numbers, tune the material - not the drive - until they pass.
+- WORLD SCALE IS LOCKED. Every new body honors the TableConfig world-scale contract (gravity 200,
+  ball radius 0.6, half-width 12, half-length 25, the existing flipper geometry). New placement
+  constants (bumper centers/radius, sling positions/angles, standup bank positions, lane-guide
+  geometry, kick impulse magnitudes, cooldown seconds) are ADDED to TableConfig by the lead; no
+  existing value changes. Once written, those numbers are the contract for the slice.
+- SCORE-ON-CONTACT, MOMENTUM-PRESERVED. Pop bumpers, slingshots, and standup targets score on the
+  physics contact (a flat placeholder value each, e.g. ~100; bumpers may use their own flat value but
+  no multipliers). The contact must PRESERVE/IMPART momentum (active kick), never kill the ball's
+  speed. A green suite that never asserts outward velocity is a FAIL.
+- VALIDATE SHOTS DETERMINISTICALLY (CAD discipline). Extend tools/table_viz.py to PLOT and VALIDATE:
+  the flipper-tip sweep arc (does it reach the standup bank / feed the bumper cluster?), each pop
+  bumper and slingshot kick DIRECTION vector (does it point into play, not into the drain/a wall?),
+  and the inlane/outlane feed paths. Add geometry/behavioral GUT tests that assert reachability and
+  return-to-play where practical, using REAL bodies and measured position/velocity (independent
+  oracle), not eyeballing the rendered PNG.
+- INDEPENDENT-ORACLE TESTS (3 classes, all required). STRUCTURAL: the new bodies exist on the correct
+  collision layers (pop bumpers, slingshots, standup bank, lane guides) and in the right positions.
+  BEHAVIORAL: a pop bumper imparts OUTWARD velocity on contact and scores once (cooldown blocks
+  per-frame farming); a slingshot imparts UP-and-into-play velocity on contact; the rubber flipper
+  rebounds the ball preserving momentum; a standup target scores on contact. STRESS: no tunneling at
+  >= ~2x LAUNCH_SPEED_MAX through every new body, including after an active kick. Behavior judged by
+  the ball's REAL measured position/velocity, never a self-reported counter.
+- House style: typed GDScript, snake_case, document the WHY, no emojis, no em-dash characters; lines
+  <= 100 chars; gdlint clean.
+- DELIVERY: commit ALL changes, verify a clean tree, push to a branch, open a PR (do NOT merge to
+  main). CI on the homelab godot runner is the source of truth for "green"; the producer must see
+  GREEN CI on the pushed sha (the artifact, not a doc claim) before PASS.
+
 ## Out of scope for v1 (the cut list - keep honest)
 v1 direction (producer + designer): ONE polished table before any others; defer extra worlds.
 
@@ -165,3 +295,19 @@ v1 direction (producer + designer): ONE polished table before any others; defer 
 Why hold the line: this slice exists to prove the PHYSICS FOUNDATION and the CORE LOOP are fun and
 correct. Every cut item above is worthless if a full-power flip tunnels the ball or a flip does not
 feel like the player's own decision. Build the foundation solid; add the rest only after Gate 0.
+
+### Cut from the "real pinball furniture" slice (2026-06-19) - defended:
+The developer scoped this slice as "mechanics + representative layout", NOT a commercial board. The
+flame-skull CAD image is a placement GUIDE only. Explicitly cut and held out, even though they appear
+in the reference image:
+- ROLLOVER SCORING / lit lanes: we build the physical inlane/outlane GUIDE WALLS only (so the ball is
+  funneled), but NO rollover triggers, lights, lane completion, or ball-save logic. (Matches the v1
+  cut list "outlanes/inlanes with lights".)
+- RAMPS and any second board, multiball, modes, multipliers, wizard mode, combos.
+- DROP-TARGET drop/reset logic, spinners, kickbacks, magnets, the one-way plunger gate as a scoring
+  element (the lane already rests the ball physically).
+- ART, models, textures, lighting, audio/SFX. Gray boxes only.
+Why hold the line: the whole point of "representative" is to prove the FURNITURE FEELS RIGHT (active
+kicks, rubber rebound, makeable shots) on a basic layout before committing art/scope to a full board.
+A complete commercial board with limp bumpers would be a worse outcome than three bumpers that truly
+fire the ball away. One great table first.

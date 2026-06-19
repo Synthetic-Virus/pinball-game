@@ -302,9 +302,9 @@ func is_stroking() -> bool:
 	return _stroke_state != StrokeState.IDLE
 
 
-## TEST HOOK: the forward-stroke speed latched from power on the last strike (u/s). Lets a unit test
-## (tests/test_plunger.gd) assert the power -> stroke-speed MAPPING is monotonic and in-range with no
-## physics world, since the ball's resulting speed (the downstream effect) is solver-dependent and is
-## measured against the real ball in tests/test_plunger_launch.gd instead. Inert in play.
+## TEST HOOK: the forward-stroke speed latched from power on the last strike (u/s). Lets a unit
+## test (tests/test_plunger.gd) assert the power -> stroke-speed MAPPING is monotonic and in-range
+## without a physics world, since the ball's resulting speed (the downstream effect) is solver-
+## dependent and is measured against the real ball in tests/test_plunger_launch.gd. Inert in play.
 func stroke_speed() -> float:
 	return _stroke_speed

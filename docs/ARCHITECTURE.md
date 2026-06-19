@@ -333,3 +333,130 @@ Gameplay-programmer (scoring/flow behind the unchanged contracts):
 
 Test-builder + qa-lead:
 - tests/*.gd  the four NEW files + the extension/verify runs. addons/gut already vendored.
+
+## 10. SLICE: real pinball furniture (rubber flippers + active pop bumpers + slingshots, 2026-06-19)
+
+This slice adds the first REAL pinball FURNITURE on the physics foundation: rubber-wrapped flippers,
+active pop bumpers, slingshots, one standup target bank, and minimal inlane/outlane guides, in a
+REPRESENTATIVE (not commercial) layout. Design intent: DESIGN.md "Slice design intent: real pinball
+furniture". Prior art + the active-vs-passive finding: REFERENCES.md. As before, the physics-programmer
+and gameplay-programmer fill DISJOINT files against the stable signatures below. Nothing re-litigates
+the world scale (section 1), the four physics layers (section 3), or the input map (section 4).
+
+### 10.1 What stays the same (do not touch)
+- World scale, gravity 200, tilt 7 deg, ball radius/mass/material: UNCHANGED (TableConfig).
+- The four physics layers + two masks: UNCHANGED. EVERY new body in this slice reuses the EXISTING
+  layers (the LEAD shared-physics audit result): pop-bumper / slingshot / standup-bank SOLID bodies
+  are STATIC_OBSTACLES (exactly like walls + the existing target deflector); the lane guides are
+  STATIC_OBSTACLES; the detectors are Area3D on the BALLS mask (layer 0). No new layer, no mask edit,
+  so the flipper momentum/snap/no-overlap tests CANNOT regress from a layer/mask change (there is
+  none). The flipper drive (force/hinge/return spring) is NOT touched - only the bat PhysicsMaterial
+  bounce is raised to a rubber value.
+- The plunger / lane pocket / arch / drain / GameFlow / HUD: UNCHANGED. The new furniture scores
+  through the EXISTING GameFlow.on_target_scored(points) handler (the active kick is invisible to the
+  flow behind the scored signal), so no new GameFlow method and no HUD change.
+
+### 10.2 The ACTIVE-KICK family (the one genuinely new mechanic)
+Pop bumpers and slingshots are the SAME mechanical family - on ball contact, fire the ball AWAY with a
+coded outward IMPULSE (the developer's "contracts to shoot the ball away"), capped CCD-safe, with a
+minimum outgoing speed, scored once, behind a per-element cooldown. They differ ONLY in the kick
+DIRECTION. So the shared logic lives in ONE base, scripts/active_kicker.gd (extends Area3D), and the
+two concrete elements override only the direction:
+- scripts/active_kicker.gd  - the base: detector + cooldown + score (gameplay half) and the solid body
+  + the capped/floored/directed impulse (physics half, _build_body + _apply_kick are the TODOs).
+- scripts/pop_bumper.gd      - _kick_direction_for() = RADIALLY OUTWARD from the bumper center.
+- scripts/slingshot.gd       - _kick_direction_for() = the FIXED face normal into play (per side).
+This mirrors the proven target.gd pattern (Area3D detector wrapping a solid StaticBody3D) and extends
+it from PASSIVE (target: solver bounce only) to ACTIVE (these: solver bounce PLUS a coded impulse).
+PASSIVE-only restitution is explicitly REJECTED for these elements (REFERENCES.md, DESIGN.md): an
+impulse is needed so a SLOW ball still leaves FAST.
+
+KICK CONTRACT (TableConfig, the LEAD constants - the physics-programmer honors all three):
+- KICK_IMPULSE_SPEED 55      nominal outgoing speed along the kick direction.
+- KICK_MIN_OUTGOING_SPEED 40 hard floor (a crawl-in still travels) - behavioral tests assert this.
+- KICK_MAX_OUTGOING_SPEED 120 the CCD-SAFE CAP. Strictly inside the no-tunneling stress band
+  (stress fires at 2x LAUNCH_SPEED_MAX = 180), so a STACKED kick can never produce a speed the stress
+  test never proved safe. This is the load-bearing "active kick must not be tuned so hot it tunnels".
+- KICK_COOLDOWN_S 0.25       per-element re-trigger dead time (BUG-007 family). Gates BOTH the kick
+  AND the score (unlike the target, which gates only the score): an element re-kicking every frame
+  would launch a resting ball at escape velocity.
+
+### 10.3 Element contracts (stable signatures the coders fill against)
+- ActiveKicker (base): signal scored(points), signal kicked(direction), func set_ball(ball),
+  var points; overridable _kick_direction_for(ball_pos), _make_body_shape(), _make_detector_shape(),
+  _body_yaw(); physics TODOs _build_body() + _apply_kick(direction). The detector + mesh are built by
+  the base (lead boilerplate); the SOLID body + IMPULSE are the physics half.
+- PopBumper: func configure() (pulls radius/height/score from TableConfig).
+- Slingshot: func configure(mirrored: bool) (picks the per-side kick direction + face yaw).
+- Standup bank: REUSES target.gd unchanged, re-homed to TableConfig.STANDUP_BANK_POSITIONS.
+- Lane guides: STATIC geometry built in table_geometry.gd._build_lane_guides (lead).
+- Rubber flipper: physics-programmer raises the bat PhysicsMaterial bounce (BAT_BOUNCE) to a rubber
+  value in flipper.gd ONLY (no drive change).
+
+### 10.4 CAD shot validation (the deterministic geometry oracle)
+tools/table_viz.py is EXTENDED to (a) DRAW the pop-bumper radial-kick fans, the slingshot kick
+vectors, the standup bank, the lane guides, and the flipper-tip sweep arc on the top-down view, and
+(b) VALIDATE the layout deterministically (validate_layout()): it EXITS NON-ZERO if any kick aims at
+the drain, a standup target sits outside the makeable window (between the flipper-tip reach and the
+arch base), a pop bumper fouls a wall, or the kick bounds fall outside the CCD-safe band. This is the
+laptop-side (thin-client) pre-check; tests/test_shot_geometry.gd is the SAME checks as a GUT test (the
+CI source of truth). The discipline: validate shot geometry by NUMBER, never by eyeballing the PNG.
+
+### 10.5 Test matrix for this slice (extends sections 7 + 9.6; CI on the runner is the source of truth)
+
+| File | Class | Proves | Owner |
+|------|-------|--------|-------|
+| test_pop_bumper.gd (NEW) | structural+behavioral | solid KickerBody on STATIC_OBSTACLES + detector on BALLS; a SLOW ball leaves FAST (>= KICK_MIN), directed OUTWARD (-z), capped (<= KICK_MAX); scores once; cooldown bounds farming | physics + gameplay + test-builder |
+| test_slingshot.gd (NEW) | structural+behavioral | solid body on STATIC_OBSTACLES; both sides kick UP-table (-z) AND toward center; min outgoing speed; scores once; kick-dir constants point into play | physics + gameplay + test-builder |
+| test_active_kicker_no_tunneling.gd (NEW) | stress | a REAL ball at >= 2x LAUNCH_SPEED_MAX never tunnels the pop-bumper or slingshot body, and post-kick speed stays <= the CCD-safe cap (stacked-kick safety) | physics + qa |
+| test_flipper_rubber.gd (NEW) | structural+behavioral | bat PhysicsMaterial bounce reads as rubber (> 0.25); a ball rebounds off the RESTING flipper face preserving momentum (>= 35%, no trampoline > 115%) | physics + test-builder |
+| test_furniture_layout.gd (NEW) | structural integration | the REAL Table.tscn instances the bumpers/slings/standup-bank/lane-guides on the right layers in the right regions (catches table.gd wiring gaps, the prior-slice failure mode) | test-builder + qa |
+| test_shot_geometry.gd (NEW) | geometry | standup bank inside the makeable window; pop bumpers upper-middle clear of walls; sling kicks never aim at the drain; kick bounds inside the CCD-safe band | lead + qa |
+| test_flipper_momentum.gd (VERIFY) | regression | stays green after the rubber surface (no drive change) | physics |
+| test_ball_tunneling.gd (VERIFY) | regression | the flat-wall headline gate stays green | physics |
+
+INDEPENDENT-ORACLE RULE (hard, unchanged): every physics assertion reads the BALL's measured
+position or current_speed()/linear_velocity, never a self-reported counter. A green suite that asserts
+only node existence (no measured outward velocity / no measured rebound) is a FAIL.
+
+### 10.6 File ownership for THIS slice (DISJOINT - no two coders edit the same lines)
+Read-only CONTRACT files (lead-owned; FROZEN after this scaffold):
+- scripts/config/table_config.gd  the LEAD ADDED the furniture block (KICK_*, POP_BUMPER_*,
+  SLINGSHOT_*, STANDUP_BANK_POSITIONS, LANE_GUIDE_*). No existing value changed. Frozen.
+- scripts/config/physics_layers.gd  NO CHANGE (frozen).
+
+Lead-programmer (architecture + static geometry + the CAD tool + this doc):
+- scripts/active_kicker.gd  the shared base SHELL: detector+mesh+cooldown+score+direction dispatch +
+  the geometry hooks. The physics TODOs (_build_body, _apply_kick) are clearly marked for physics.
+- scripts/pop_bumper.gd, scripts/slingshot.gd  the small direction/geometry subclasses (stable).
+- scripts/table.gd  instances + wires the new elements (done in this scaffold).
+- scripts/table_geometry.gd  _build_lane_guides (done in this scaffold).
+- scenes/elements/PopBumper.tscn, Slingshot.tscn  scene wrappers (done).
+- tools/table_viz.py  the CAD shot-validation extension (done). docs/ARCHITECTURE.md (this section).
+
+Physics-programmer (the active impulse + the solid bodies + every no-tunneling guarantee):
+- scripts/active_kicker.gd  FILL _build_body() (the solid StaticBody3D "KickerBody" + shape from
+  _make_body_shape() + _body_yaw() for the slingshot + a local PhysicsMaterial) and _apply_kick()
+  (the capped/floored/directed impulse honoring KICK_MIN/IMPULSE/MAX). These are the ONLY two
+  functions the physics-programmer touches in this file; they are disjoint from the gameplay half
+  (_on_body_entered + cooldown), exactly like the target.gd deflector/detector split.
+- scripts/flipper.gd  raise the bat PhysicsMaterial bounce (BAT_BOUNCE) to a rubber value. Drive
+  UNCHANGED. Keep test_flipper_momentum.gd + the snap/overlap tests green (tune the material, not
+  the drive, if a number drifts).
+- Owns: test_pop_bumper.gd (physics asserts), test_slingshot.gd (physics asserts),
+  test_active_kicker_no_tunneling.gd, test_flipper_rubber.gd, the flipper regression re-runs.
+
+Gameplay-programmer (scoring behind the unchanged contract):
+- scripts/active_kicker.gd  OWNS the detector/score/cooldown half ALREADY SCAFFOLDED (_on_body_entered
+  + the KICK_COOLDOWN_S gate + scored.emit). Verify it once the physics half lands; tune nothing in
+  the physics functions. game_flow.gd, hud.gd, drain.gd UNCHANGED.
+- scripts/target.gd UNCHANGED (the standup bank reuses it as-is, only re-homed by table.gd).
+- Owns: the behavioral score/cooldown asserts in test_pop_bumper.gd + test_slingshot.gd.
+
+Test-builder + qa-lead:
+- tests/*.gd  the six NEW files (scaffolded with the exact asserts) + the regression re-runs.
+
+SPLIT NOTE for active_kicker.gd (one file, two roles, kept DISJOINT by function): gameplay owns
+_on_body_entered + the cooldown + scored.emit (already written); physics owns _build_body + _apply_kick
+(the two clearly-marked TODOs). They are different functions; land the physics half on the same slice
+branch after confirming the gameplay half. Lead arbitrates if they collide.

@@ -29,18 +29,18 @@ extends Node3D
 ##
 ## STABLE CONTRACT (table.gd / tests depend on these; keep the signatures):
 ##   func configure(action_name: String, mirrored: bool) -> void
-##       # action_name in {"left_flipper","right_flipper"}; mirrored flips the geometry for the right.
-##   func is_energized() -> bool          # true while the flip action is held (for tests/diagnostics).
-##   func tip_speed() -> float            # linear speed of the flipper tip (momentum the test checks).
+##       # action_name in {"left_flipper","right_flipper"}; mirrored = true for the right flipper.
+##   func is_energized() -> bool   # true while the flip action is held.
+##   func tip_speed() -> float     # linear speed of the flipper tip (used by the momentum test).
 
 ## --- TUNING (physics-programmer owns these) -----------------------------------------------------
 ## The bat is light so the solenoid can snap it fast but it still carries enough momentum to throw
 ## the heavier ball (BALL_MASS 0.6). A light bat + strong drive is how real solenoids feel: an
 ## almost-instant snap to the up-stop.
 const BAT_MASS: float = 0.12
-## Drive torque applied toward the up-stop while the action is held. Sized (with BAT_MASS and the
-## bat's inertia at FLIPPER_LENGTH) to reach full extension in roughly ~50 ms (DESIGN "FLIPPER SNAP")
-## and to firmly CRADLE the ball's weight when held against it (resist sag).
+## Drive torque applied toward the up-stop while the action is held. Sized with BAT_MASS and the
+## bat's inertia at FLIPPER_LENGTH to reach full extension in ~50 ms (DESIGN "FLIPPER SNAP") and
+## to firmly CRADLE the ball's weight when held against it (resist sag).
 const SOLENOID_TORQUE: float = 9000.0
 ## Return-spring stiffness: restoring torque per radian of displacement from the rest angle when the
 ## action is NOT held. Strong enough to return briskly, soft enough that the return does not itself
@@ -51,11 +51,24 @@ const RETURN_SPRING_STIFFNESS: float = 1200.0
 ## keeps a held flipper rock-steady in a cradle. Too high kills the snap; tuned to allow the ~50 ms
 ## snap while still settling cleanly.
 const ANGULAR_DAMPING: float = 60.0
+## Unit hinge axis in this node's LOCAL space. The bat rotates about the surface normal (+Y).
+## Declared here with the other constants so gdlint's class-definitions-order rule is satisfied.
+const _HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 ## Bat collision/material tuning. High friction lets the bat grip and sling the ball rather than
-## letting it skid; low bounce keeps the strike a clean momentum transfer, not a trampoline.
+## letting it skid.
 const BAT_FRICTION: float = 0.7
-const BAT_BOUNCE: float = 0.05
+## Bat restitution: the RUBBER SLEEVE. DESIGN must-feel #3 / "RUBBER THAT REBOUNDS": a ball striking
+## the flipper face rebounds with a live, slightly-springy feel (a rubber-sleeved bat), not off a
+## dead board. WHY 0.45 (rubber, NOT a trampoline): Jolt combines restitution by MAX with the steel
+## ball (BALL_BOUNCE 0.15), so 0.45 is the effective contact bounce - a ball arriving at speed v
+## bounces off the RESTING bat at ~0.45v, clearly preserving momentum (well above the test's 35%
+## floor) while staying far under a trampoline (the 115% ceiling: a value > 1.0 would manufacture
+## energy). This is a SURFACE change only: it does NOT touch the solenoid drive, the ~50 ms snap,
+## the return spring, the cradle, or the merged momentum tests (the active swing still throws via
+## the bat's real momentum; this material governs only the passive rebound off the face). It raises
+## the old dead 0.05 to a rubber value, per the rubber-rebound test (asserts bounce > 0.25).
+const BAT_BOUNCE: float = 0.45
 
 ## TEST HOOK (DESIGN.md feel gate is validated headlessly): GUT cannot synthesize persistent Input
 ## events across physics frames, so a test cannot hold a real flipper key. This override lets a test
@@ -80,8 +93,6 @@ var _mesh_instance: MeshInstance3D
 ## The signed rest/up angles for THIS flipper (mirrored applied). Lower/upper of the hinge limit.
 var _rest_angle: float = 0.0
 var _up_angle: float = 0.0
-## Unit hinge axis in this node's LOCAL space. The bat rotates about the surface normal (+Y).
-const _HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 
 func _ready() -> void:
@@ -132,7 +143,10 @@ func _build_flipper() -> void:
 	# _apply_handedness so a mirrored (right) flipper extends along -X (QA BUG-001).
 	_shape = CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(TableConfig.FLIPPER_LENGTH, TableConfig.FLIPPER_HEIGHT, TableConfig.FLIPPER_WIDTH)
+	var fl: float = TableConfig.FLIPPER_LENGTH
+	var fh: float = TableConfig.FLIPPER_HEIGHT
+	var fw: float = TableConfig.FLIPPER_WIDTH
+	box.size = Vector3(fl, fh, fw)
 	_shape.shape = box
 	_body.add_child(_shape)
 
@@ -262,8 +276,8 @@ func _is_pressed() -> bool:
 
 
 ## TEST HOOK: force the flipper energized (true) or released (false) regardless of input. Inert in
-## normal play (never called by production code). Pass with no argument is not allowed; callers state
-## intent explicitly. Use clear_force_energized() to hand control back to the input action.
+## normal play (never called by production code). Callers state intent explicitly. Use
+## clear_force_energized() to return control to the input action.
 func force_energized(on: bool) -> void:
 	_force_energized = 1 if on else 0
 

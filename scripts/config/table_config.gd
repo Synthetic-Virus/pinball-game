@@ -65,7 +65,8 @@ const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BA
 ## must leave a POSITIVE gap at the centerline (an inverted V, not an X). With FLIPPER_LENGTH 7 and
 ## REST_ANGLE -0.55 the x-reach is ~5.97, so the spread must exceed that. 7.0 leaves a ~2.1-unit
 ## drain mouth (a bit over one ball diameter) - a missed flip can drain, a cradle holds. The old 5.0
-## made the tips CROSS the center (gap -1.9): that was the past inverted-V overlap bug (commit 6c64a7b
+## made the tips CROSS the center (gap -1.9): that was the past inverted-V overlap bug (commit
+## 6c64a7b
 ## territory), now guarded by the test. Pivots at +/-7 stay well inside the +/-12 side walls.
 const FLIPPER_PIVOT_SPREAD: float = 7.0
 const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain the pivots sit.
@@ -88,7 +89,8 @@ const DRAIN_WIDTH: float = HALF_WIDTH * 2.0
 const DRAIN_DEPTH: float = 6.0
 
 ## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
-## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A large
+## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A
+## large
 ## low catch-plane well below the surface drains ANY ball that falls past it, regardless of X/Z. In
 ## normal play the ball never reaches it; it only fires when something has already gone wrong.
 const OOB_DRAIN_Y: float = -20.0
@@ -166,6 +168,159 @@ const PLUNGER_REST_POS: Vector3 = Vector3(
 	BALL_RADIUS + 0.2,                                         ## Same height as the ball center.
 	BALL_START.z + BALL_RADIUS + PLUNGER_FACE_THICKNESS * 0.5  ## Face just behind the ball.
 )
+
+## ================================================================================================
+## SLICE "real pinball furniture" placement + feel constants (2026-06-19).
+## ADDED by the lead-programmer; NO existing value above this block changed (the world-scale
+## contract
+## is frozen). Every new body in this slice reads its geometry/feel from here. These numbers are the
+## CONTRACT for the slice: pop-bumper/slingshot/standup-bank positions, the active-kick impulse
+## (with
+## a CCD-safe cap and a minimum outgoing speed), and the per-element re-trigger cooldown.
+##
+## They are validated geometrically (CAD discipline) by tools/table_viz.py: every kick direction
+## must
+## point INTO play (up-table / toward center), never at the drain or a wall, and the standup bank
+## must
+## sit inside a flipper-tip sweep. See docs/ARCHITECTURE.md section 10.
+## ================================================================================================
+
+## ---- ACTIVE KICK (shared by pop bumpers AND slingshots) ----------------------------------------
+## The developer's "bell thingy that contracts to shoot the ball away": on contact an active element
+## applies a coded OUTWARD impulse, so even a ball that crawls in is fired away with authority. This
+## is the deliberate divergence from the prior art (which is passive restitution only -
+## REFERENCES.md).
+##
+## WHY AN IMPULSE, NOT JUST RESTITUTION: restitution scales the OUTGOING speed by the INCOMING
+## speed,
+## so a slow ball leaves slowly (limp). An impulse adds a fixed momentum kick regardless of incoming
+## speed, so a slow ball still leaves fast. We layer BOTH: the solid body's PhysicsMaterial gives a
+## clean bounce, and the script adds the impulse on top (the active part).
+##
+## KICK_IMPULSE_SPEED: the outgoing speed floor the kick targets, in world units/s. After a kick the
+## ball leaves at AT LEAST this speed along the kick direction. Chosen below LAUNCH_SPEED_MAX (90)
+## so
+## a kick is lively but not a full plunge, and well inside the CCD-safe envelope the stress tests
+## cover.
+const KICK_IMPULSE_SPEED: float = 55.0
+## KICK_MIN_OUTGOING_SPEED: a hard floor on the post-kick speed (the "minimum outgoing speed" the
+## design mandates). The physics-programmer guarantees the ball leaves at >= this along the kick
+## direction even if the incoming speed partly cancels the impulse. Tests assert against this.
+const KICK_MIN_OUTGOING_SPEED: float = 40.0
+## KICK_MAX_OUTGOING_SPEED: the CCD-SAFE CAP. The post-kick speed is clamped to this so a stacked
+## kick (ball already fast, then kicked) can never exceed the speed the no-tunneling stress tests
+## prove safe. The stress tests fire at >= 2x LAUNCH_SPEED_MAX (180); this cap (well under that)
+## keeps
+## every kicked ball strictly inside the proven-safe band. The physics-programmer owns this
+## guarantee.
+const KICK_MAX_OUTGOING_SPEED: float = 120.0
+## Per-element re-trigger cooldown (seconds). Same family as the target RETRIGGER_COOLDOWN_S
+## (BUG-007):
+## after a kick + score, the element is dead for this long so a ball resting/jittering against it is
+## pushed off ONCE, not strobed every physics frame (no machine-gun farming). The kick AND the score
+## are both gated by this (unlike the target, where only the score is gated): an active element that
+## re-kicked every frame would launch a resting ball at escape velocity.
+const KICK_COOLDOWN_S: float = 0.25
+
+## ---- POP BUMPERS (the "bell thingys") ----------------------------------------------------------
+## 2-3 round active bumpers clustered in the UPPER-MIDDLE field (above the flippers, below the arch)
+## so a ball entering the cluster bounces between them a few times. Each scores on its kick. The
+## kick
+## direction is RADIALLY OUTWARD from the bumper center along the ball's contact normal (computed at
+## runtime by pop_bumper.gd from the ball position; no fixed direction constant needed).
+##
+## POP_BUMPER_RADIUS: the solid round post radius the ball bounces off (like the standup
+## POST_RADIUS).
+const POP_BUMPER_RADIUS: float = 1.6
+## POP_BUMPER_HEIGHT: stands as tall as the perimeter so a ball cannot ride up and over it.
+const POP_BUMPER_HEIGHT: float = WALL_HEIGHT
+## POP_BUMPER_SCORE: flat points per kick (placeholder, no multipliers - DESIGN scope).
+const POP_BUMPER_SCORE: int = 100
+## Cluster centers (local playfield coords, Y resolved on the surface by table.gd). Three bumpers in
+## a triangle in the upper-middle: two lower spread across the width, one higher at center. Z is
+## up-table (negative). Chosen ABOVE the standup bank and BELOW the arch start so the cluster is the
+## "something worth shooting for" up top. Validated reachable by table_viz (a flipped ball can feed
+## it)
+## and clear of walls/arch (radius + clearance inside +/-HALF_WIDTH and above the arch base).
+const POP_BUMPER_POSITIONS: Array[Vector3] = [
+	Vector3(-4.5, 0.0, -13.0),
+	Vector3(4.5, 0.0, -13.0),
+	Vector3(0.0, 0.0, -16.5),
+]
+
+## ---- SLINGSHOTS (active kickers above each flipper) --------------------------------------------
+## One angled active kicker above each flipper, on the OUTER side, so a ball falling down that side
+## is
+## kicked UP-table and toward CENTER (back into play), NEVER down toward the drain. Two total.
+## Unlike
+## the pop bumper (radial outward), a slingshot has a FIXED kick direction (its face normal) so it
+## always returns the ball into play regardless of the exact contact point.
+##
+## SLINGSHOT positions: just up-table of and outboard of each flipper pivot, inside the side wall.
+## The left sling sits left-of-center; the right is its mirror. Y resolved on the surface by
+## table.gd.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
+## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
+## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
+const SLINGSHOT_LENGTH: float = 5.0
+const SLINGSHOT_THICKNESS: float = 0.8
+const SLINGSHOT_HEIGHT: float = WALL_HEIGHT
+## Kick direction per side, as a UNIT vector in playfield-local XZ (Y = 0, on the surface plane).
+## LEFT sling kicks toward +X (right, toward center) and -Z (up-table): into play, away from the
+## drain.
+## RIGHT sling is the mirror: -X (toward center) and -Z (up-table). Both have a POSITIVE up-table
+## (-Z)
+## component and a toward-center X component, which is exactly what the behavioral test asserts.
+## (These are stored as the kick direction the body imparts; the visual angle of the face mirrors
+## it.)
+const SLINGSHOT_LEFT_KICK_DIR: Vector3 = Vector3(0.6, 0.0, -0.8)
+const SLINGSHOT_RIGHT_KICK_DIR: Vector3 = Vector3(-0.6, 0.0, -0.8)
+## SLINGSHOT_SCORE: flat points per kick (placeholder).
+const SLINGSHOT_SCORE: int = 50
+
+## ---- STANDUP TARGET BANK -----------------------------------------------------------------------
+## A small bank of standup targets on the mid-field where a deliberate flip can REACH it (validated
+## by
+## table_viz against the flipper-tip sweep). This REUSES the existing physical target body
+## (target.gd)
+## re-homed into a readable bank, per DESIGN (not a new target class). These REPLACE the old
+## scattered
+## TARGET_POSITIONS in table.gd: three posts in a row across the mid-field, makeable from the
+## flippers.
+##
+## WHY here (z = -7): the existing flipper-tip sweep (validated in table_viz) reaches roughly this
+## far
+## up-table from the flipper at full swing, so a timed flip can hit the bank - "a shot worth
+## making".
+## They are spread across the center so a flip from either flipper can reach the bank.
+const STANDUP_BANK_POSITIONS: Array[Vector3] = [
+	Vector3(-3.0, 0.0, -7.0),
+	Vector3(0.0, 0.0, -7.5),
+	Vector3(3.0, 0.0, -7.0),
+]
+
+## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------
+## Minimal physical guide walls down BOTH sides that funnel a ball past the flippers. Per side: an
+## OUTLANE (outer channel, feeds the drain = risk) and an INLANE (inner channel, feeds back toward
+## the
+## flipper = save), separated by a short divider post. NO rollover scoring, lights, or ball-save
+## logic
+## (DESIGN cut list) - these are unlit PHYSICAL guide walls only. Built as static geometry in
+## table_geometry.gd from these constants.
+##
+## The guide divider is a short wall between the side wall and the flipper, splitting the side
+## channel
+## into an outer (outlane) and inner (inlane) lane. LANE_GUIDE_DIVIDER_X is the X of the divider on
+## the
+## LEFT side (mirror for the right); it sits between the side wall (-HALF_WIDTH) and the flipper
+## pivot.
+const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
+## The divider runs from just above the flipper pivot row down toward the drain, length below.
+const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 2.0
+const LANE_GUIDE_BOTTOM_Z: float = HALF_LENGTH - 2.0
+const LANE_GUIDE_THICKNESS: float = WALL_THICKNESS
+const LANE_GUIDE_HEIGHT: float = WALL_HEIGHT
 
 ## ---- HELPERS -----------------------------------------------------------------------------------
 

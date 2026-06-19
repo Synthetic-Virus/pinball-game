@@ -1,11 +1,11 @@
 extends Area3D
 ## Drain - the open center drain trigger. A ball entering this volume is lost.
 ##
-## OWNERSHIP: gameplay-programmer. A simple Area3D below/between the flippers. It does not change the
-## ball; it only DETECTS the loss and announces it so GameFlow can decrement the ball count.
+## OWNERSHIP: gameplay-programmer. A simple Area3D below/between the flippers. It does not
+## change the ball; it only DETECTS the loss and announces it so GameFlow can decrement the count.
 ##
 ## DESIGN ("LEGIBLE DRAIN"): draining is obviously the player's loss. This node's only job is the
-## clean signal; GameFlow + HUD make it legible (message + ball-count tick). Geometry from TableConfig.
+## clean signal; GameFlow + HUD make it legible (message + ball-count tick). Geometry: TableConfig.
 ##
 ## COLLISION SETUP: this Area3D detects bodies on the BALLS layer by setting its collision_mask.
 ## The CollisionShape3D is sized from TableConfig.DRAIN_WIDTH / DRAIN_DEPTH and positioned at

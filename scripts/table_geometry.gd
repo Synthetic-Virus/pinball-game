@@ -6,16 +6,19 @@ extends RefCounted
 ## behaviour script: it is a builder called by table.gd so the geometry math lives in one place and
 ## reads every dimension from TableConfig (the world-scale contract). No game rules here.
 ##
-## All collision bodies created are StaticBody3D on the STATIC_OBSTACLES layer (the flat surface is on
+## All collision bodies created are StaticBody3D on the STATIC_OBSTACLES layer (the flat surface is
+## on
 ## the PLAYFIELD layer). Everything is added under the tilted Playfield node passed in by table.gd.
 ##
 ## DESIGN LAYOUT honored (DESIGN.md): upright frame, launch lane up the RIGHT side, a rounded top
 ## ARCH that turns the launched ball into the playfield, perimeter walls, and an OPEN bottom for the
 ## drain. The bottom edge is deliberately left WALL-LESS so the ball can fall into the drain volume
 ## (scripts/drain.gd) that table.gd places at TableConfig.DRAIN_Z. Do not add a full-width bottom
-## wall here. The ONE exception is _build_lane_pocket: a short stop that closes ONLY the bottom of the
+## wall here. The ONE exception is _build_lane_pocket: a short stop that closes ONLY the bottom of
+## the
 ## launch lane (x in [LANE_INNER_X, HALF_WIDTH]) so the resting ball does not roll off the open lane
-## bottom, while the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) stays OPEN for the drain.
+## bottom, while the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) stays OPEN for the
+## drain.
 ##
 ## COORDINATE CONVENTION (local to the tilted Playfield, per TableConfig):
 ##   +X = right, -X = left, -Z = up-table (toward the arch), +Z = down-table (toward the drain).
@@ -28,9 +31,11 @@ static func build(playfield: Node3D) -> void:
 	_build_lane_divider(playfield)
 	_build_lane_pocket(playfield)
 	_build_arch(playfield)
+	_build_lane_guides(playfield)
 
 
-## A shared gray-box material so every static body reads as the same neutral surface. Built fresh per
+## A shared gray-box material so every static body reads as the same neutral surface. Built fresh
+## per
 ## call (cheap) so there is no shared mutable global state.
 static func _gray_material() -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
@@ -38,7 +43,8 @@ static func _gray_material() -> StandardMaterial3D:
 	return mat
 
 
-## Create one box StaticBody3D wall: a collision box + a matching gray mesh, on a given layer, placed
+## Create one box StaticBody3D wall: a collision box + a matching gray mesh, on a given layer,
+## placed
 ## at a local position. Centralizes the boilerplate so each wall is one readable call.
 static func _make_box_body(
 	parent: Node3D,
@@ -92,7 +98,8 @@ static func _build_surface(parent: Node3D) -> void:
 	)
 
 
-## The perimeter walls: LEFT, RIGHT, and TOP. The BOTTOM is intentionally OPEN (the drain lives there).
+## The perimeter walls: LEFT, RIGHT, and TOP. The BOTTOM is intentionally OPEN (the drain lives
+## there).
 ## Walls stand from the surface (Y = 0) up to WALL_HEIGHT, centered at WALL_HEIGHT/2.
 static func _build_perimeter_walls(parent: Node3D) -> void:
 	var t: float = TableConfig.WALL_THICKNESS
@@ -116,8 +123,10 @@ static func _build_perimeter_walls(parent: Node3D) -> void:
 	# sits just inside this edge so the ball is caught before it falls off the open end.
 
 
-## The lane divider: an inner wall that, with the right outer wall, forms the launch lane up the right
-## side. It runs from the bottom up to where the arch takes over, so the launched ball is channeled up
+## The lane divider: an inner wall that, with the right outer wall, forms the launch lane up the
+## right
+## side. It runs from the bottom up to where the arch takes over, so the launched ball is channeled
+## up
 ## the lane and over the arch instead of leaking into the playfield early.
 static func _build_lane_divider(parent: Node3D) -> void:
 	var t: float = TableConfig.WALL_THICKNESS
@@ -169,8 +178,46 @@ static func _build_lane_pocket(parent: Node3D) -> void:
 	)
 
 
-## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the top
-## of the table. It turns the ball, launched up the right lane, back over and DOWN into the playfield.
+## INLANE / OUTLANE GUIDES (SLICE "real pinball furniture"): minimal physical guide walls down BOTH
+## sides that funnel a ball past the flipper. Per side a short DIVIDER wall splits the side channel
+## into an OUTER lane (the outlane, between the divider and the side wall, feeds the drain = risk)
+## and
+## an INNER lane (the inlane, between the divider and the flipper, feeds back toward the flipper =
+## save). NO rollover scoring, lights, or ball-save (DESIGN cut list) - these are unlit STATIC guide
+## walls only, on STATIC_OBSTACLES like the perimeter. The divider X comes from TableConfig
+## (LANE_GUIDE_DIVIDER_X, mirrored for the right) and it runs from LANE_GUIDE_TOP_Z down to
+## LANE_GUIDE_BOTTOM_Z. Geometry validated by tools/table_viz.py (the feed-path plot).
+##
+## OWNERSHIP: lead (static geometry). The standup bank, pop bumpers, and slingshots are dynamic
+## elements built in table.gd; only these fixed guide walls live in the static geometry builder.
+static func _build_lane_guides(parent: Node3D) -> void:
+	var h: float = TableConfig.LANE_GUIDE_HEIGHT
+	var t: float = TableConfig.LANE_GUIDE_THICKNESS
+	var top_z: float = TableConfig.LANE_GUIDE_TOP_Z
+	var bottom_z: float = TableConfig.LANE_GUIDE_BOTTOM_Z
+	var length: float = bottom_z - top_z
+	var center_z: float = (top_z + bottom_z) * 0.5
+	var layer: int = PhysicsLayers.STATIC_OBSTACLES
+
+	# One divider per side. The left divider sits at -LANE_GUIDE_DIVIDER_X, the right at +X (mirror).
+	# A simple vertical wall (thin in X, long in Z) is enough to separate the two lanes; the outer/
+	# inner distinction is purely which side of it the ball travels down.
+	for sign: float in [-1.0, 1.0]:
+		var divider_x: float = TableConfig.LANE_GUIDE_DIVIDER_X * sign
+		var guide_name: String = "LaneGuideLeft" if sign < 0.0 else "LaneGuideRight"
+		_make_box_body(
+			parent,
+			guide_name,
+			Vector3(t, h, length),
+			Vector3(divider_x, h * 0.5, center_z),
+			layer
+		)
+
+
+## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the
+## top
+## of the table. It turns the ball, launched up the right lane, back over and DOWN into the
+## playfield.
 ## Built solid: adjacent segments OVERLAP at their joints so there is no gap a fast ball squeezes
 ## through (DESIGN: the arch must actually redirect a full-speed launched ball, no leaks).
 static func _build_arch(parent: Node3D) -> void:

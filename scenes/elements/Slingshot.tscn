@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballslingshot01"]
+
+; Active slingshot kicker above a flipper. Root is an Area3D detector (scripts/slingshot.gd, extends
+; scripts/active_kicker.gd): on ball contact it fires the ball UP-table and toward CENTER (into play,
+; never the drain) with a capped, cooled active impulse and scores. The solid angled bounce body is a
+; child StaticBody3D built in code. table.gd instances one per side and calls configure(mirrored).
+
+[ext_resource type="Script" path="res://scripts/slingshot.gd" id="1_slingshot"]
+
+[node name="Slingshot" type="Area3D"]
+script = ExtResource("1_slingshot")

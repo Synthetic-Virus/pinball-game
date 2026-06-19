@@ -8,7 +8,8 @@ extends Node
 ## STATE MACHINE (keep it small and explicit - one responsibility):
 ##   READY_TO_LAUNCH : a ball sits in the lane, plunger armed. -> on_ball_launched -> BALL_IN_PLAY.
 ##   BALL_IN_PLAY    : ball is live; targets score. -> on_ball_drained -> spend a ball.
-##   (spend a ball) : balls_left -= 1; if > 0 -> request_new_ball -> READY_TO_LAUNCH; else GAME_OVER.
+##   (spend a ball) : balls_left -= 1; if > 0 -> request_new_ball -> READY_TO_LAUNCH;
+##     else GAME_OVER.
 ##   GAME_OVER       : show final score; "launch"/restart action resets to READY_TO_LAUNCH ball 3.
 ##
 ## DESIGN scope: score from 0, +points per target, 3 balls, drain decrements + re-arms, game over at

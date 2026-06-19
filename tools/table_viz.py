@@ -53,6 +53,50 @@ DRAIN_Z = HALF_L - 1.0
 DRAIN_DEPTH = num("DRAIN_DEPTH")
 BALL_R = num("BALL_RADIUS")
 TILT = math.radians(num("TILT_DEG"))
+FLIP_UP = num("FLIPPER_UP_ANGLE")  # radians, magnitude per side
+
+
+def vec3_const(name: str):
+    """Parse a `const NAME: Vector3 = Vector3(a, b, c)` literal, eval'ing simple expressions."""
+    m = re.search(rf"const {name}:\s*Vector3\s*=\s*Vector3\(\s*([^)]+)\)", CFG)
+    if not m:
+        raise KeyError(name)
+    ns = {
+        "BALL_RADIUS": BALL_R, "HALF_LENGTH": HALF_L, "HALF_WIDTH": HALF_W,
+        "FLIPPER_PIVOT_Z": FLIP_PIVOT_Z, "WALL_HEIGHT": num("WALL_HEIGHT"),
+    }
+    return [eval(p, {"__builtins__": {}}, ns) for p in m.group(1).split(",")]
+
+
+def vec3_array_const(name: str):
+    """Parse a `const NAME: Array[Vector3] = [ Vector3(...), ... ]` block into a list of (x, z).
+
+    Split on `= [` (the array's opening bracket) so the `]` in the `Array[Vector3]` type annotation
+    does not prematurely end the block; then take up to the closing `]`.
+    """
+    after = CFG.split(f"const {name}:", 1)[1]
+    block = after.split("= [", 1)[1].split("]", 1)[0]
+    out = []
+    for m in re.finditer(r"Vector3\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)", block):
+        out.append((float(m.group(1)), float(m.group(3))))  # (x, z)
+    return out
+
+
+# SLICE "real pinball furniture" geometry, parsed from TableConfig (single source of truth).
+POP_BUMPERS = vec3_array_const("POP_BUMPER_POSITIONS")
+POP_BUMPER_R = num("POP_BUMPER_RADIUS")
+STANDUP_BANK = vec3_array_const("STANDUP_BANK_POSITIONS")
+SLING_L_POS = vec3_const("SLINGSHOT_LEFT_POS")
+SLING_R_POS = vec3_const("SLINGSHOT_RIGHT_POS")
+SLING_L_KICK = vec3_const("SLINGSHOT_LEFT_KICK_DIR")
+SLING_R_KICK = vec3_const("SLINGSHOT_RIGHT_KICK_DIR")
+# LANE_GUIDE_DIVIDER_X is defined as `HALF_WIDTH - 3.0` (an expression, not a bare literal), so we
+# mirror that formula here rather than parse a number. Same for the top/bottom Z below.
+LANE_GUIDE_X = HALF_W - 3.0
+LANE_GUIDE_TOP_Z = FLIP_PIVOT_Z - 2.0
+LANE_GUIDE_BOTTOM_Z = HALF_L - 2.0
+KICK_MIN = num("KICK_MIN_OUTGOING_SPEED")
+KICK_MAX = num("KICK_MAX_OUTGOING_SPEED")
 
 bs = re.search(r"BALL_START:\s*Vector3\s*=\s*Vector3\(([^)]+)\)", CFG)
 # Components may be expressions (e.g. "HALF_LENGTH - 2.0"); eval them against the parsed constants.
@@ -129,9 +173,48 @@ for sign in (-1, 1):
     tipz = pz - FLIP_LEN * math.sin(abs(REST))
     d.line([tx(px), tz(pz), tx(tipx), tz(tipz)], fill=(90, 200, 120), width=int(FLIP_W * SCALE / 2))
     d.ellipse([tx(px) - 4, tz(pz) - 4, tx(px) + 4, tz(pz) + 4], fill=(230, 230, 120))
-# targets
+# targets (legacy scattered list, if present)
 for txx, tzz in targets:
     d.ellipse([tx(txx) - 7, tz(tzz) - 7, tx(txx) + 7, tz(tzz) + 7], outline=(120, 180, 255), width=3)
+
+# ---- SLICE "real pinball furniture" overlay (CAD shot validation) -------------------------------
+# Standup target bank (re-homed physical targets): filled blue squares.
+for sxx, szz in STANDUP_BANK:
+    d.rectangle([tx(sxx) - 7, tz(szz) - 7, tx(sxx) + 7, tz(szz) + 7],
+                outline=(120, 180, 255), fill=(60, 90, 140), width=2)
+# Pop bumpers: orange circles of POP_BUMPER_R, with a small radial-kick fan to show "outward".
+for bxx, bzz in POP_BUMPERS:
+    r = POP_BUMPER_R * SCALE
+    d.ellipse([tx(bxx) - r, tz(bzz) - r, tx(bxx) + r, tz(bzz) + r],
+              outline=(255, 170, 70), width=3)
+    for ang in range(0, 360, 45):
+        ex = bxx + (POP_BUMPER_R + 1.2) * math.cos(math.radians(ang))
+        ez = bzz + (POP_BUMPER_R + 1.2) * math.sin(math.radians(ang))
+        d.line([tx(bxx), tz(bzz), tx(ex), tz(ez)], fill=(255, 170, 70, 120), width=1)
+# Slingshots: magenta dots with a KICK VECTOR arrow (the load-bearing "into play" direction).
+for (px, _py, pz), (kx, _ky, kz) in [(SLING_L_POS, SLING_L_KICK), (SLING_R_POS, SLING_R_KICK)]:
+    d.ellipse([tx(px) - 5, tz(pz) - 5, tx(px) + 5, tz(pz) + 5], fill=(230, 90, 210))
+    ex, ez = px + kx * 5.0, pz + kz * 5.0  # 5-unit arrow along the kick direction
+    d.line([tx(px), tz(pz), tx(ex), tz(ez)], fill=(230, 90, 210), width=3)
+# Lane-guide dividers (inlane/outlane split) per side.
+for sgn in (-1, 1):
+    gx = LANE_GUIDE_X * sgn
+    d.line([tx(gx), tz(LANE_GUIDE_TOP_Z), tx(gx), tz(LANE_GUIDE_BOTTOM_Z)],
+           fill=(120, 200, 140), width=3)
+# Flipper-tip sweep ARC (rest -> up) so the human can see what the standup bank is checked against.
+for sign in (-1, 1):
+    px, pz = sign * FLIP_SPREAD, FLIP_PIVOT_Z
+    arc_pts = []
+    steps = 16
+    for k in range(steps + 1):
+        a = abs(REST) + (abs(FLIP_UP) - abs(REST)) * k / steps if False else None
+        # Sweep the bat angle from rest to up; tip position traces the arc.
+        ang = (-abs(REST)) + ((abs(FLIP_UP) - (-abs(REST))) * k / steps)
+        tipx = px - sign * FLIP_LEN * math.cos(ang)
+        tipz = pz - FLIP_LEN * math.sin(ang)
+        arc_pts.append((tx(tipx), tz(tipz)))
+    d.line(arc_pts, fill=(90, 200, 120, 160), width=1)
+
 # ball start + plunger
 d.ellipse([tx(BALL_START[0]) - BALL_R * SCALE, tz(BALL_START[2]) - BALL_R * SCALE,
            tx(BALL_START[0]) + BALL_R * SCALE, tz(BALL_START[2]) + BALL_R * SCALE], fill=(235, 235, 245))
@@ -139,6 +222,57 @@ d.text((tx(BALL_START[0]) + 8, tz(BALL_START[2])), "ball/plunger", fill=(200, 20
 d.text((6, 6), "TOP-DOWN  (arch=top, drain/flippers=bottom)  gap=%.2f" %
        (2 * (FLIP_SPREAD - FLIP_LEN * math.cos(abs(REST)))), fill=(220, 220, 230))
 img.save("/tmp/table_topdown.png")
+
+
+# ---- DETERMINISTIC SHOT VALIDATION (CAD discipline; mirrors tests/test_shot_geometry.gd) --------
+# Fails the tool (non-zero exit) if any kick aims at the drain or a standup target is out of flipper
+# reach. This is the offline twin of the GUT geometry test: the same checks, runnable on the laptop
+# (thin client, no Godot) so the layout can be validated before pushing. The GUT test is the CI
+# source of truth; this is the fast local pre-check.
+def validate_layout():
+    problems = []
+    # 1. Slingshot kicks must point UP-table (-z) and toward center per side.
+    if SLING_L_KICK[2] >= 0.0:
+        problems.append("left slingshot kick aims at the drain (z=%.2f >= 0)" % SLING_L_KICK[2])
+    if SLING_R_KICK[2] >= 0.0:
+        problems.append("right slingshot kick aims at the drain (z=%.2f >= 0)" % SLING_R_KICK[2])
+    if SLING_L_KICK[0] <= 0.0:
+        problems.append("left slingshot does not kick toward center (x=%.2f <= 0)" % SLING_L_KICK[0])
+    if SLING_R_KICK[0] >= 0.0:
+        problems.append("right slingshot does not kick toward center (x=%.2f >= 0)" % SLING_R_KICK[0])
+    # 2. Standup bank must sit in the MAKEABLE WINDOW: up-table of the flipper-tip reach (a deliberate
+    #    aimed flip, not a touch) and down-table of the arch base (still in the open field the ball can
+    #    climb to). Mirrors tests/test_shot_geometry.gd._makeable_near_z / _makeable_far_z.
+    near_z = FLIP_PIVOT_Z - FLIP_LEN  # least up-table: closer is a touch, not a flip
+    far_z = ARCH_CENTER_Z             # most up-table: past this the ball is in the arch
+    for sxx, szz in STANDUP_BANK:
+        if szz >= near_z:
+            problems.append("standup target z=%.2f too close to flippers (near %.2f)" % (szz, near_z))
+        if szz <= far_z:
+            problems.append("standup target z=%.2f past the arch base (far %.2f)" % (szz, far_z))
+    # 3. Pop bumpers must be up-table of the flippers and inside the side walls.
+    for bxx, bzz in POP_BUMPERS:
+        if bzz >= FLIP_PIVOT_Z:
+            problems.append("pop bumper z=%.2f is not up-table of the flippers" % bzz)
+        if abs(bxx) >= HALF_W - POP_BUMPER_R:
+            problems.append("pop bumper x=%.2f fouls a side wall" % bxx)
+    # 4. Kick-impulse bounds sane and inside the no-tunneling stress band (2x LAUNCH_SPEED_MAX).
+    launch_max_m = re.search(r"const LAUNCH_SPEED_MAX:\s*float\s*=\s*([\d.]+)", CFG)
+    launch_max = float(launch_max_m.group(1)) if launch_max_m else 90.0
+    if not (KICK_MIN < KICK_MAX < 2.0 * launch_max):
+        problems.append("kick bounds out of band: min=%.1f cap=%.1f stress=%.1f"
+                        % (KICK_MIN, KICK_MAX, 2.0 * launch_max))
+    return problems
+
+
+_problems = validate_layout()
+if _problems:
+    print("SHOT VALIDATION FAILED:")
+    for p in _problems:
+        print("  - " + p)
+    sys.exit(1)
+print("shot validation OK: %d bumpers, %d standup targets, 2 slings, kicks into play"
+      % (len(POP_BUMPERS), len(STANDUP_BANK)))
 
 # The camera views below need explicit camera values. The in-game camera is auto-framed at runtime
 # (no hardcoded position), so unless values were passed on the CLI we stop after the top-down layout.

@@ -133,6 +133,94 @@ Tasks (pull from here):
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (no new features) and both physics-first claims
       are GREEN on the runner before any merge to main. Owner: gamedev-producer.
 
+## SLICE: Real pinball furniture (rubber flippers + active pop bumpers + slingshots) - gamedev-* team
+Add the first REAL pinball furniture on the physics foundation: rubber-wrapped flippers, active pop
+bumpers, slingshots, one standup target bank, and minimal inlane/outlane guides, in a representative
+(NOT commercial) layout. Every interaction physics-based. Design intent confirmed in DESIGN.md
+("Slice design intent: real pinball furniture"). References recorded in REFERENCES.md (two open-source
+repos consulted: prior art uses PASSIVE restitution; we deliberately use an ACTIVE capped+cooled
+impulse per the developer's "contract to shoot the ball away"). Flow: game-designer (DONE - intent
+below) -> lead-programmer (TableConfig placement constants + shared physics layers + table_viz shot
+validation) -> physics-programmer (owns the active-kick impulse cap, rubber material, correctness +
+tunneling stress tests) -> gameplay-programmer (scoring + cooldown on each active element + standup
+bank) -> test-builder + qa-lead (structural/behavioral/stress GUT, independent oracle) -> review board
+-> producer (scope/finish gate, GREEN CI on the pushed sha). Push to a branch / PR; do NOT merge to
+main inside the slice.
+
+Tasks (pull from here - keep them small and finishable):
+- [x] LEAD: ADD the placement/feel constants to TableConfig (no existing value changes): pop-bumper
+      centers/radius/height, slingshot positions/angles, standup-bank positions, inlane/outlane guide
+      geometry, KICK_IMPULSE (with a CCD-safe cap and a minimum outgoing speed), and the per-element
+      RETRIGGER cooldown seconds. Audit shared physics layers so every new body interoperates with
+      ball/flippers/walls (reuse existing PhysicsLayers; document any addition in ARCHITECTURE.md).
+      Owner: gamedev-lead-programmer. Acceptance: constants documented with the WHY; flipper tests
+      stay green after the layer audit; numbers honor the world-scale contract.
+      DONE 2026-06-19 (architecture + scaffolds): ARCHITECTURE.md section 10 records the slice
+      contract. KEY RESULTS: (1) NO new physics layer and NO mask change - every new body reuses the
+      existing PhysicsLayers (pop-bumper/slingshot/standup-bank SOLID bodies = STATIC_OBSTACLES,
+      detectors = Area3D on the BALLS mask, lane guides = STATIC_OBSTACLES), so the flipper tests
+      cannot regress from a layer/mask edit (there is none). (2) The furniture block was ADDED to
+      table_config.gd with NO existing value changed: KICK_IMPULSE_SPEED/MIN/MAX (the cap is strictly
+      inside the 2x LAUNCH_SPEED_MAX stress band) + KICK_COOLDOWN_S, POP_BUMPER_* (3 positions),
+      SLINGSHOT_* (2 positions + per-side kick dirs), STANDUP_BANK_POSITIONS (re-homes the 3 targets),
+      LANE_GUIDE_*. (3) The ACTIVE-KICK family is a shared base scripts/active_kicker.gd (extends
+      Area3D) with pop_bumper.gd + slingshot.gd overriding only the kick DIRECTION; the gameplay half
+      (detector/cooldown/score) is scaffolded, the physics half (_build_body + _apply_kick) is two
+      clearly-marked TODOs. table.gd instances + wires the new elements; table_geometry.gd builds the
+      lane guides. DISJOINT file-ownership split + the test matrix are in ARCHITECTURE.md 10.5/10.6.
+      Six NEW test skeletons scaffolded (gdlint clean, lines <= 100): test_pop_bumper.gd,
+      test_slingshot.gd, test_active_kicker_no_tunneling.gd, test_flipper_rubber.gd,
+      test_furniture_layout.gd, test_shot_geometry.gd (structural asserts pass now; behavioral/stress
+      FAIL until the physics half lands - intended).
+- [x] LEAD/QA: EXTEND tools/table_viz.py for CAD-style shot validation: plot the flipper-tip sweep arc
+      and assert it reaches the standup bank / feeds the bumper cluster; plot each pop-bumper and
+      slingshot kick-direction vector and assert it points into play (up-table/toward center), NOT
+      into the drain or a wall; plot the inlane/outlane feed paths. Owner: gamedev-lead-programmer +
+      gamedev-qa-lead. Acceptance: a deterministic check (a small Python assert or a GUT geometry
+      test) FAILS if a bumper/sling kick aims at the drain or a target sits outside flipper reach.
+      DONE 2026-06-19: table_viz.py now draws the pop-bumper radial-kick fans, the slingshot kick
+      vectors, the standup bank, the lane-guide dividers, and the flipper-tip sweep arc on the
+      top-down view, AND validate_layout() EXITS NON-ZERO if any kick aims at the drain, a standup
+      target sits outside the makeable window (flipper-tip reach .. arch base), a pop bumper fouls a
+      wall, or the kick bounds fall outside the CCD-safe band. The GUT twin is tests/test_shot_geometry.gd
+      (same checks, the CI source of truth). Verified: the tool PASSES on the chosen constants
+      (3 bumpers, 3 standup targets, 2 slings, kicks into play) and FAILS when a standup target is
+      moved out of the makeable window.
+- [ ] PHYSICS: RUBBER-WRAP the flippers - add a rubber bounce surface to the existing flipper collider
+      via PhysicsMaterial / a rubber edge. Do NOT touch the force/hinge/return-spring drive.
+      Owner: gamedev-physics-programmer. Acceptance: a GUT behavioral test shows a ball rebounds off
+      the flipper face PRESERVING momentum (fast stays fast); test_flipper_momentum.gd, the snap
+      timing test, and test_flipper_no_overlap stay GREEN unchanged.
+- [ ] PHYSICS+GAMEPLAY: ACTIVE POP BUMPERS - 2-3 round bumper bodies in the upper-middle that, on ball
+      contact, apply an outward IMPULSE (away from center along the contact normal), capped CCD-safe
+      with a minimum outgoing speed, and score once per contact with a re-trigger cooldown. Physics
+      owns the body/shape/impulse/cap/no-tunnel; gameplay owns the detector/score/cooldown (reuse the
+      target BUG-007 cooldown pattern). Owner: gamedev-physics-programmer + gamedev-gameplay-
+      programmer. Acceptance: GUT behavioral test - a ball arriving SLOWLY leaves FAST and directed
+      OUTWARD (measured velocity, independent oracle); scores once; cooldown blocks per-frame farming;
+      a resting ball is pushed off once, not strobed.
+- [ ] PHYSICS+GAMEPLAY: SLINGSHOTS - one angled active kicker above each flipper (2 total) that, on
+      contact, kicks the ball UP-and-into-play (never toward the drain), capped CCD-safe, scores with
+      cooldown. Same active-kick family as the pop bumpers. Owner: gamedev-physics-programmer +
+      gamedev-gameplay-programmer. Acceptance: GUT behavioral test - a ball dropping down the side
+      contacts the sling and leaves with a velocity whose up-table (-Z) and toward-center components
+      are positive (measured); scores once; cooldown holds.
+- [ ] GAMEPLAY: STANDUP TARGET BANK + INLANE/OUTLANE GUIDES - a small physical standup bank (reuse /
+      re-home the existing physical target body) on the mid-field at a flipper-makeable position, plus
+      minimal physical inlane/outlane guide walls down both sides (outer outlane feeds the drain,
+      inner inlane feeds back toward the flipper). NO rollover scoring, lights, or ball-save.
+      Owner: gamedev-gameplay-programmer. Acceptance: GUT test - standup bank scores on contact and is
+      reachable from a flipper sweep (per table_viz validation); a ball placed in the outlane reaches
+      the drain and a ball in the inlane returns toward the flipper.
+- [ ] PHYSICS/QA: STRESS - extend the GUT no-tunneling suite so the fast ball (>= ~2x
+      LAUNCH_SPEED_MAX, including AFTER an active kick) does not tunnel through any new body (pop
+      bumpers, slingshots, standup bank, lane guides) or the rubber flipper, asserted against REAL
+      instanced bodies measuring real position/velocity. Owner: gamedev-physics-programmer +
+      gamedev-qa-lead. Acceptance: stress suite GREEN on the homelab godot runner (the artifact).
+- [ ] PRODUCER: scope/finish gate. Confirm scope held (representative subset only, no ramps/modes/
+      multiball/art/audio/rollover scoring) and that the active-kick + no-tunnel claims are GREEN on
+      the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
+
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.
