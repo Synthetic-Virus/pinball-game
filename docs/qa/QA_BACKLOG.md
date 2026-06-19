@@ -4,6 +4,26 @@ It pulls work from this backlog and runs in parallel with development. Tests EXE
 homelab runner via CI (the laptop has no Godot); CI results are the source of truth. Three streams:
 
 ## Stream 1 - Test debt (automated GUT tests to write, often BEFORE the code exists)
+- [x] SLICE/real-pinball-furniture: six GUT test files written and pushed (CI run 27850857532,
+      sha a25a6f4, 119/120 passing). Files:
+      tests/test_pop_bumper.gd (structural + behavioral: slow ball leaves fast, outward, capped,
+        scores once, cooldown bounds farming),
+      tests/test_slingshot.gd (structural + behavioral: both sides kick up-table + toward center,
+        min outgoing speed, scores once),
+      tests/test_active_kicker_no_tunneling.gd (stress: 60-iteration loop at 2x LAUNCH_SPEED_MAX
+        against REAL PopBumper.tscn and Slingshot.tscn; position oracle + cap check),
+      tests/test_flipper_rubber.gd (structural: bat PhysicsMaterial bounce > 0.25; behavioral:
+        ball rebounds off resting bat face, momentum preserved >= 35%, no trampoline < 115%),
+      tests/test_furniture_layout.gd (integration: REAL Table.tscn instances bumpers/slings/
+        standup-bank/lane-guides on correct layers and in correct regions),
+      tests/test_shot_geometry.gd (CAD geometry: standup bank in makeable window, bumpers clear
+        of walls, sling kicks never at drain, kick bounds inside CCD-safe band).
+      GUT addon confirmed installed: addons/gut present (vendored v9.4.0).
+      REMAINING RED: test_rubber_rebound_preserves_momentum - fails because BAT_BOUNCE=0.45 at
+      the glancing test geometry achieves only 24.8% rebound vs the 35% floor. Blocked on
+      physics-programmer raising BAT_BOUNCE or confirming the geometry angle. All other behavioral
+      and stress tests for active kickers are RED by design until physics fills _build_body() and
+      _apply_kick() with the solid body and capped impulse. Structural and geometry tests are GREEN.
 - [x] Physics: the ball never tunnels through a wall across many high-speed collisions.
       Written: tests/test_ball_tunneling.gd. FAILS until physics-programmer sets
       continuous_cd = true in ball.gd _ready(). That is the correct pre-impl state.
