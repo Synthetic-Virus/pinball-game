@@ -49,6 +49,13 @@ const TARGET_POSITIONS: Array[Vector3] = [
 	Vector3(0.0, 0.0, -12.0),
 ]
 
+## Camera framing tunables. The camera POSITION is computed at runtime by _frame_camera (it fits
+## the table bounds via the engine's real projection); only the viewing FEEL lives here - pitch and
+## breathing room. FOV is vertical (Godot default keep_aspect = KEEP_HEIGHT).
+const CAMERA_FOV: float = 60.0
+const VIEW_PITCH_DEG: float = 42.0
+const FRAME_MARGIN: float = 1.08
+
 # Filled in _ready(). Typed so the rest of the file (and tests) get autocomplete + checks.
 var playfield: Node3D
 var ball: RigidBody3D
@@ -60,6 +67,7 @@ var oob_drain: Area3D
 var game_flow: Node
 var hud: CanvasLayer
 var targets: Array[Area3D] = []
+var _camera: Camera3D
 
 
 func _ready() -> void:
@@ -77,20 +85,14 @@ func _ready() -> void:
 ## Build the presentation layer: a camera to view the table, a light to lit the gray-box meshes,
 ## and an environment for ambient fill + background. WHY THIS EXISTS: the table elements build their
 ## own MeshInstance3D geometry, but a 3D scene with no Camera3D renders only the clear color (the
-## "empty gray table" bug) and unlit meshes are invisible without a light. These nodes are added to
-## the Table ROOT (this node, unrotated) - not the tilted Playfield - so the camera/light placement
-## is reasoned in world space. Gray-box only; art/lighting polish is a later slice.
+## "empty gray table" bug) and unlit meshes are invisible without a light.
 ##
-## Camera placement: the table is centered at the origin, tilted TableConfig.TILT_DEG about X so the
-## arch end (local -Z) rises and the drain end (local +Z) drops. We sit the camera above and behind
-## the drain end (high +Z, elevated) and aim up-table so the whole playfield reads like a real
-## cabinet view. The three CAMERA_/LIGHT_ tunables below are deliberately easy to nudge once seen on
-## the demo, since framing cannot be previewed on the thin-client laptop (verify on the web demo).
+## The camera POSITION is NOT hardcoded. A hand-tuned position guessed off-engine drifted badly from
+## what Godot actually rendered (the table sat jammed at the bottom of the frame). So instead we let
+## the ENGINE frame the table: _frame_camera aims at the table center and backs the camera off until
+## every table corner is inside the real camera frustum. That uses Godot's own projection and the
+## real viewport, so it cannot disagree with the render and it self-corrects for any aspect ratio.
 func _build_presentation() -> void:
-	# Tunables - adjust framing/feel after viewing the deployed web demo.
-	const CAMERA_POS: Vector3 = Vector3(0.0, 30.0, 44.0)
-	const CAMERA_LOOK_AT: Vector3 = Vector3(0.0, -7.0, 2.0)
-	const CAMERA_FOV: float = 54.0
 	const LIGHT_EULER_DEG: Vector3 = Vector3(-50.0, -20.0, 0.0)
 
 	# Environment: dark background plus ambient fill so the neutral gray boxes are legible even on the
@@ -115,14 +117,68 @@ func _build_presentation() -> void:
 	light.shadow_enabled = false
 	add_child(light)
 
-	# Camera framing the whole playfield from the drain end, made current so the viewport uses it.
-	var camera := Camera3D.new()
-	camera.name = "Camera"
-	camera.fov = CAMERA_FOV
-	camera.position = CAMERA_POS
-	camera.look_at(CAMERA_LOOK_AT, Vector3.UP)
-	camera.current = true
-	add_child(camera)
+	# Camera: created here, but POSITIONED by _frame_camera. current = true so the viewport uses it.
+	_camera = Camera3D.new()
+	_camera.name = "Camera"
+	_camera.fov = CAMERA_FOV
+	add_child(_camera)
+	_camera.current = true
+	# Frame once after the tree/viewport exist (deferred), and again whenever the viewport resizes -
+	# the web canvas only gets its real size after the first frame, so the initial frame may be off.
+	get_viewport().size_changed.connect(_frame_camera)
+	call_deferred("_frame_camera")
+
+
+## World-space corners of the (tilted) table bounding box. The table is centered at the origin and
+## the Playfield node is rotated TableConfig.TILT_DEG about X, so we apply that same tilt here.
+func _table_corners() -> Array:
+	var tilt := Basis(Vector3.RIGHT, deg_to_rad(TableConfig.TILT_DEG))
+	var hw: float = TableConfig.HALF_WIDTH
+	var hl: float = TableConfig.HALF_LENGTH
+	var ht: float = TableConfig.WALL_HEIGHT
+	var corners: Array = []
+	for sx in [-hw, hw]:
+		for sy in [0.0, ht]:
+			for sz in [-hl, hl]:
+				corners.append(tilt * Vector3(sx, sy, sz))
+	return corners
+
+
+## True only when EVERY given world point is inside the current camera frustum (i.e. on screen).
+func _all_corners_visible(corners: Array) -> bool:
+	for corner in corners:
+		if not _camera.is_position_in_frustum(corner):
+			return false
+	return true
+
+
+## Position the camera so the whole table is framed, using the ENGINE's real projection. Aim at the
+## table center (centered by construction) from a fixed downward pitch, then back the camera off
+## along that direction until every table corner is inside the frustum, plus a margin.
+## Re-runnable: called deferred at startup and on every viewport resize.
+func _frame_camera() -> void:
+	if _camera == null:
+		return
+	var corners := _table_corners()
+	var center := Vector3.ZERO  # table is centered at the world origin
+	var pitch := deg_to_rad(VIEW_PITCH_DEG)
+	# Direction from the table center out to the camera: elevated (+Y) and behind the drain end (+Z).
+	var out_dir := Vector3(0.0, sin(pitch), cos(pitch)).normalized()
+	var dist := 18.0
+	_place_camera(center, out_dir, dist)
+	# Grow the distance until the whole table fits (guard bounds the loop defensively).
+	var guard := 0
+	while guard < 400 and not _all_corners_visible(corners):
+		dist += 1.5
+		_place_camera(center, out_dir, dist)
+		guard += 1
+	# A little breathing room so the table is not edge-to-edge.
+	_place_camera(center, out_dir, dist * FRAME_MARGIN)
+
+
+func _place_camera(center: Vector3, out_dir: Vector3, dist: float) -> void:
+	_camera.global_position = center + out_dir * dist
+	_camera.look_at(center, Vector3.UP)
 
 
 ## Create the tilted Playfield node that every table element is parented under.
