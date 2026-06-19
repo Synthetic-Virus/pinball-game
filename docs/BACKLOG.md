@@ -52,13 +52,18 @@ Tasks (pull from here):
       tests/test_lane_pocket_drain.gd, tests/test_target_physical.gd, tests/test_target_no_tunneling.gd
       (structural asserts pass now; behavioral/stress are pending() with the exact asserts spelled out),
       plus adopt tests/test_plunger_launch.gd from the prototype.
-- [ ] PHYSICS: launch-lane bottom pocket - a static stop across ONLY the lane in X (near z=+HALF_LENGTH)
+- [x] PHYSICS: launch-lane bottom pocket - a static stop across ONLY the lane in X (near z=+HALF_LENGTH)
       that rests the ball in the chute and leaves x in [-HALF_WIDTH, LANE_INNER_X] OPEN for the drain.
       ARCHITECTURE: adopt _build_lane_pocket + the LANE_POCKET_* constants from the prototype branch
       (ARCHITECTURE.md 9.3). Acceptance: GUT test (tests/test_lane_pocket_drain.gd) - ball placed at
       BALL_START comes to rest in the lane (does not exit the bottom); a ball at center-X still reaches
       the drain (the pocket did not close the center). Owner: gamedev-physics-programmer +
       gamedev-gameplay-programmer (the center-still-drains half) + gamedev-test-builder.
+      DONE 2026-06-19 (lead polish pass, QA BUG-012): the _build_lane_pocket builder was DROPPED during
+      the original slice integration (build() called surface/walls/divider/arch only). Restored from
+      prototype/physical-plunger and wired into TableGeometry.build() so the ball actually rests in the
+      lane in the integrated game, not just the unit test. Verified the pocket -X face (x=7.6) clears
+      the structural center-drain guard (minimum 7.2).
 - [ ] PHYSICS+GAMEPLAY: physical plunger - a collision body (AnimatableBody3D on KINEMATIC_OBSTACLES,
       like flippers) that STRIKES the resting ball; the existing meter (power 0..1) maps to strike
       strength so the launched ball ends in LAUNCH_SPEED_MIN..MAX. PRESERVE the contract
@@ -74,6 +79,16 @@ Tasks (pull from here):
       velocity set - assert this), full strike out-throws a weak one (>=1.5x), resulting speed in
       ~LAUNCH_SPEED_MIN..MAX; launch with no ball is a no-op; max strike never tunnels the face/pocket;
       existing test_plunger.gd contract tests stay green.
+      LEAD POLISH 2026-06-19 (QA BUG-013/015/017): (1) table.gd was DOUBLE-OFFSETTING the plunger -
+      it set plunger.position = BALL_START, but plunger.gd seats its face at the playfield-LOCAL
+      PLUNGER_REST_POS assuming the node sits at the playfield origin; the face landed off the table and
+      never struck the ball. Fixed: plunger.position = Vector3.ZERO (the contract test_plunger_launch.gd
+      already honored). (2) BUG-015: the four test_plunger.gd tests still asserted ball.launch() was
+      called (the deleted fake path) - converted to assert the plunger-side contract the physical strike
+      honors (ball_launched once, disarm, stroke begun, power -> stroke_speed monotonic via the new
+      stroke_speed() test hook; the ball-speed oracle stays in test_plunger_launch.gd). (3) BUG-017:
+      ball.launch() demoted from STABLE CONTRACT to a documented dead-in-production velocity helper so it
+      is not re-wired into the plunger.
 - [~] GAMEPLAY+PHYSICS: physical targets - convert the 3 Area3D pass-through targets to physical
       bodies that deflect the ball and score ON CONTACT, keeping BUG-007 cooldown and momentum.
       ARCHITECTURE (ARCHITECTURE.md 9.4): target.gd ROOT stays an Area3D DETECTOR (public contract +
@@ -98,6 +113,14 @@ Tasks (pull from here):
       byte-for-byte (signal scored, method set_ball, export points). test_lane_pocket_drain.gd
       structural test for pocket X-extent filled. BLOCKED on physics-programmer: _build_deflector
       body + PhysicsMaterial; test_target_physical.gd behavioral tests; test_target_no_tunneling.gd.
+- [x] TEST/QA (QA BUG-014): integration test that instances the REAL Table.tscn and asserts table.gd's
+      wiring - the two slice blockers (missing lane pocket, double-offset plunger) slipped through CI
+      because every other slice test bypasses table.gd. Owner: gamedev-lead-programmer (folded into the
+      polish pass) + gamedev-test-builder. DONE 2026-06-19: tests/test_table_integration.gd instances
+      res://scenes/Table.tscn and asserts (a) a LanePocket StaticBody3D on STATIC_OBSTACLES exists,
+      (b) the PlungerFace, mapped from world space back into playfield-local, sits inside the lane in X
+      and at PLUNGER_REST_POS.z (catches the double-offset), and (c) the real ball settles and stays in
+      the lane. Written to FAIL pre-fix and PASS post-fix (locks both blockers closed).
 - [ ] PHYSICS: VERIFY flippers still impart real momentum (no redesign). Acceptance: existing
       test_flipper_momentum.gd stays green after the shared-physics changes. Owner: gamedev-physics-programmer.
 - [ ] PHYSICS/QA: extend GUT stress tests so the fast ball (>= ~2x LAUNCH_SPEED_MAX) does NOT tunnel

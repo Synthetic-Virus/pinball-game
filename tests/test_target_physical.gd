@@ -28,8 +28,8 @@ const MIN_MOMENTUM_FRACTION: float = 0.4
 ## Cooldown grinding window: hold the ball in contact for this many frames and assert the score
 ## count is much less than the frame count (the cooldown is actually blocking per-frame farming).
 const CONTACT_HOLD_FRAMES: int = 120
-## The post radius used in target.gd for the CylinderShape3D. Must match the implementation.
-## 1.5 units per target.gd line 58 ("shape.radius = 1.5").
+## The post radius used in target.gd for the CylinderShape3D. Must match the implementation
+## (target.gd const POST_RADIUS = 1.5).
 const POST_RADIUS: float = 1.5
 
 const TARGET_SCENE: PackedScene = preload("res://scenes/elements/Target.tscn")

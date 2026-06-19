@@ -232,9 +232,15 @@ func _build_dynamic_elements() -> void:
 		targets.append(target)
 
 	# --- Plunger ----------------------------------------------------------------------------------
+	# CONTRACT (QA BUG-013): the Plunger node MUST sit at the playfield origin (Vector3.ZERO). Its
+	# child face (plunger.gd._build_face) seats itself at the playfield-LOCAL TableConfig.PLUNGER_REST_POS
+	# and, like every other element here, treats its own local space as playfield space. Parenting the
+	# Plunger anywhere else (the old code set it to BALL_START) double-offsets the face: it would land at
+	# BALL_START + PLUNGER_REST_POS, off the table, and the strike would never contact the ball.
+	# tests/test_plunger_launch.gd sets the plunger to ZERO for exactly this reason; honor that here.
 	plunger = PlungerScene.instantiate()
 	plunger.name = "Plunger"
-	plunger.position = TableConfig.BALL_START
+	plunger.position = Vector3.ZERO
 	playfield.add_child(plunger)
 	plunger.set_ball(ball)
 
