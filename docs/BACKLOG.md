@@ -33,15 +33,16 @@ CCD + tuning) -> gameplay-programmer (plunger power meter, drain, scoring) -> te
 (GUT tests; the CI test job currently SKIPS because addons/gut is missing - install it) -> peer review board
 -> producer (scope/finish gate).
 
-Acceptance (resubmission: the finish gate hangs on EXACTLY the two test blockers below):
-- [~] Force-driven flippers (hinge + driven force + return spring), NOT kinematic; do not overlap; impart
-      real momentum to the ball. (BLOCKER: test_flipper_momentum.gd must drive force_energized() with REAL
+Acceptance (resubmission: both physics-first gates below are now REAL and GREEN on the runner -
+CI run 27794688808 on sha fc82849: 62 tests, 353 asserts, all passed):
+- [x] Force-driven flippers (hinge + driven force + return spring), NOT kinematic; do not overlap; impart
+      real momentum to the ball. (DONE: test_flipper_momentum.gd drives force_energized() with REAL
       assertions - full swing >= 1.5x a tap (ball current_speed, not tip_speed), tip_speed rises within the
-      ~50 ms snap window - and run GREEN on the runner, NOT pending().)
+      ~50 ms snap window - executed GREEN on the runner, NOT pending(). CI run 27794688808.)
 - [x] Action-based input map (left_flipper/right_flipper/launch/nudge).
-- [~] Ball with continuous_cd; a GUT stress test asserts zero tunneling at full flip speed. (BLOCKER: the
-      100-iteration stress loop in test_ball_tunneling.gd must fire an instanced REAL Ball.tscn, not a
-      hand-built RigidBody3D, and run GREEN on the runner.)
+- [x] Ball with continuous_cd; a GUT stress test asserts zero tunneling at full flip speed. (DONE: the
+      100-iteration stress loop in test_ball_tunneling.gd fires an instanced REAL Ball.tscn, not a
+      hand-built RigidBody3D, and executed GREEN on the runner. CI run 27794688808.)
 - [x] Rounded top arch guides the launched ball into the playfield. (sealed overlapping-segment arch.)
 - [x] Plunger power meter (hold to charge an oscillating meter, release to launch at that power).
 - [x] Open center drain + ball count + basic score. (center drain + OOB failsafe + targets, all wired.)
