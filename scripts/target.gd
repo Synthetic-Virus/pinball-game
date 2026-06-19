@@ -1,120 +1,168 @@
 extends Area3D
 ## Target - one rewarding upper-playfield scoring obstacle (gray-box bumper/target).
 ##
-## OWNERSHIP: gameplay-programmer. When the ball hits it, it scores a flat value and gives an
-## immediate legible response (a knock-back kick + score tick). DESIGN requires at least one target
-## a skilled flip can hit on purpose; table.gd places a small number of these in the upper-middle.
+## OWNERSHIP (SLICE "make-the-core-interactions-physics-based"):
+##   Gameplay-programmer: the DETECTOR half - this Area3D shell, body_entered, scored.emit,
+##     RETRIGGER_COOLDOWN_S. Owns the kick-deletion and the score-on-contact logic.
+##   Physics-programmer: the DEFLECTOR half - the child StaticBody3D "Deflector", its shape,
+##     its PhysicsMaterial bounce tuning, and the no-trap/no-tunnel guarantee.
+##   Land the gameplay half FIRST (kick deleted), then the physics half (deflector added), on
+##   the same slice branch in sequence. See ARCHITECTURE.md section 9.4 for the full decision.
 ##
-## NOTE on layer: implemented as an Area3D that DETECTS the ball and applies a kick, mirroring the
-## old Main.gd bumpers. If the physics-programmer later prefers a solid StaticBody bumper with a
-## restitution kick, that is a coordinated change; for this slice the Area3D + manual kick is the
-## contract so scoring is deterministic and testable.
+## WHAT CHANGED AND WHY:
+##   The old design was an Area3D pass-through that rewrote ball.linear_velocity with a coded
+##   kick (the "manual kick"). That violated the physics-first design pillar: a fast ball crawled
+##   out at a fixed kick speed, and the target was invisible to the physics solver (no solid body).
 ##
-## KICK DIRECTION: the ball is kicked away from the target centre, flattened to the playfield XZ
-## plane (Y component zeroed out). This gives a natural "bounce off a bumper" feel without fighting
-## gravity. A minimum kick distance guard prevents a zero-vector divide when the ball is exactly
-## centred on the target (edge case, but crashes without the guard).
+##   The new design keeps the Area3D as a DETECTOR (monitoring the BALLS layer so body_entered
+##   still fires on contact, preserving the public contract and table.gd's Array[Area3D] typing).
+##   A child StaticBody3D "Deflector" on STATIC_OBSTACLES is the SOLID POST: the ball physically
+##   collides with it and the Jolt solver bounces it via a near-elastic PhysicsMaterial. The
+##   manual velocity kick is DELETED - the solver does the momentum transfer now. This preserves a
+##   fast ball's speed (the designer's #1 fun risk: a target that kills speed ends the loop). The
+##   Area3D detector shape is a slightly LARGER cylinder (deflector radius + BALL_RADIUS) so it
+##   fires body_entered before the ball center crosses the deflector face.
 ##
-## STABLE CONTRACT:
-##   signal scored(points: int)       # emitted when the ball strikes this target.
+##   WHY keep the Area3D root rather than swap to a StaticBody root: a StaticBody3D emits NO
+##   body_entered (it detects nothing). Wrapping the deflector inside the existing Area3D gives
+##   BOTH a real physics bounce AND a clean contact event without any change to the public contract.
+##
+## PUBLIC CONTRACT (STABLE - table.gd and tests depend on these byte-for-byte):
+##   signal scored(points: int)         # emitted when the ball first contacts this target.
 ##   func set_ball(ball: RigidBody3D) -> void
-##   var points: int                  # flat score value (default 100, placeholder per DESIGN).
+##   var points: int                    # flat score value (default 100, placeholder per DESIGN).
 
 signal scored(points: int)
 
-@export var points: int = 100  ## Flat value per hit (placeholder, DESIGN.md scoring).
+## Radius of the solid deflector post (the StaticBody3D cylinder the ball bounces off).
+## The Area3D detector shell is built LARGER by BALL_RADIUS so body_entered fires on approach,
+## before the ball center reaches the post surface. Physics-programmer may retune but must keep
+## this constant in sync so the detector shell stays consistent with actual deflector geometry.
+const POST_RADIUS: float = 1.5
 
-## Knock-back speed ADDED outward on a hit. Tuned to be clearly legible at this world scale
-## (gravity 200, LAUNCH_SPEED_MAX 90) without being so strong it breaks the physics solver. This is
-## the bumper "pop", added to the ball's redirected momentum rather than replacing it (see below).
-const KICK_SPEED: float = 25.0
-
-## Floor speed after a hit. A ball that crawls into a target should still pop off legibly, so the
-## outgoing speed is at least this. A fast ball keeps (most of) its speed; a slow one gets a boost.
-const MIN_OUTGOING_SPEED: float = 25.0
-
-## Minimum squared distance between ball and target before we fall back to a default kick direction.
-## Prevents a divide-by-zero if the ball is centred exactly on the target origin.
-const MIN_KICK_DIST_SQ: float = 0.001
-
-## Re-trigger cooldown (seconds). After a hit, this target ignores further contacts briefly so a ball
-## resting/grinding against it on the tilted plane cannot score every physics frame (QA BUG-007 score
-## farm). One legible hit, then a short dead time, matches how a real bumper behaves.
+## Re-trigger cooldown (seconds). After a hit, this target ignores further contacts briefly so a
+## ball resting or grinding against the post on the tilted plane cannot score every physics frame
+## (QA BUG-007 score farm). One legible hit, then a short dead time, matches real bumper behavior.
+## The cooldown guards the SCORE only; the solver bounce is always physical (not cooldown-gated).
 const RETRIGGER_COOLDOWN_S: float = 0.20
 
+## Deflector restitution (bounce). This is the ONE genuinely new feel knob in this slice and
+## the load-bearing value for the designer's "the ball must come OFF the target keeping its
+## momentum". WHY 0.8 (near-elastic, NOT a full 1.0 trampoline): Jolt combines restitution by
+## taking the MAX of the two bodies, so the effective bounce against the steel ball (BALL_BOUNCE
+## 0.15) is 0.8. A head-on ball arriving at speed v leaves at ~0.8v - clearly a bounce, clearly
+## still fast. A value of 1.0 would ADD energy each hit; 0.8 keeps momentum without manufacturing
+## it. This is what replaces the deleted manual velocity kick: the solver bounces, not code.
+const DEFLECTOR_BOUNCE: float = 0.8
+## Deflector friction. Low so a glancing ball slides off cleanly (crisp redirect, not a grab).
+## A post should turn the ball away, not grip it like a flipper bat.
+const DEFLECTOR_FRICTION: float = 0.2
+
+@export var points: int = 100  ## Flat value per hit (placeholder, DESIGN.md scoring).
+
 var _ball: RigidBody3D = null
-## Time (seconds, from Time.get_ticks_msec) before which contacts are ignored. 0 = ready.
+## Absolute time (ms, from Time.get_ticks_msec) before which new contacts are ignored. 0 = ready.
 var _cooldown_until_ms: float = 0.0
 
 func _ready() -> void:
-	# Monitor bodies on the BALLS layer only. This Area3D does not need to be on a layer itself
-	# for detection (monitoring does not require layer membership), but setting collision_mask
-	# to BALLS ensures Godot's broadphase only wakes the Area3D for relevant bodies.
+	# Area3D detector setup: monitor bodies on the BALLS layer only. The Area3D does not need to
+	# be on any collision layer itself for detection; setting collision_mask to BALLS ensures the
+	# broadphase only wakes this area for ball contacts. collision_layer = 0 (no layer) because
+	# the solid post the physics solver sees is the child Deflector (StaticBody3D), not this Area.
+	collision_layer = 0
 	collision_mask = PhysicsLayers.BALLS
 
-	# Gray-box cylinder: small enough that hitting it takes skill, large enough to be a real target.
-	# CylinderShape3D stands upright (axis Y) so its round profile faces the ball correctly.
-	var shape := CylinderShape3D.new()
-	shape.radius = 1.5   # ~2.5 ball diameters wide - clearly visible and hittable.
-	shape.height = TableConfig.WALL_HEIGHT  # Same height as walls so it is a solid obstacle.
+	# Build the detector shape: a cylinder slightly larger than the post by one ball radius so
+	# the detector fires as the ball approaches, not only after the ball center passes the surface.
+	# The SOLID physics shape lives on the Deflector child (physics-programmer's half).
+	var detector_shape := CylinderShape3D.new()
+	detector_shape.radius = POST_RADIUS + TableConfig.BALL_RADIUS
+	detector_shape.height = TableConfig.WALL_HEIGHT
 
 	var col := CollisionShape3D.new()
-	col.shape = shape
+	col.shape = detector_shape
 	add_child(col)
 
-	# Gray-box visual mesh (matches the collision shape so the player can aim at what they see).
+	# Gray-box visual mesh: shows the inner POST_RADIUS (the solid surface the player aims at),
+	# not the detector radius, so the visible obstacle matches what the player expects to bounce off.
 	var mesh_instance := MeshInstance3D.new()
 	var cylinder_mesh := CylinderMesh.new()
-	cylinder_mesh.top_radius = shape.radius
-	cylinder_mesh.bottom_radius = shape.radius
-	cylinder_mesh.height = shape.height
+	cylinder_mesh.top_radius = POST_RADIUS
+	cylinder_mesh.bottom_radius = POST_RADIUS
+	cylinder_mesh.height = TableConfig.WALL_HEIGHT
 	mesh_instance.mesh = cylinder_mesh
 	add_child(mesh_instance)
 
+	# Wire the contact signal. The area's body_entered fires when the ball enters the detector
+	# volume (which wraps the deflector), so scoring is triggered by the same physics contact.
 	body_entered.connect(_on_body_entered)
 
-## Register the live ball. Only this body triggers the score and kick. STABLE SIGNATURE.
+	# Physics half: build the solid deflector post the ball bounces off.
+	_build_deflector()
+
+## Register the live ball. Only this body triggers the score. STABLE SIGNATURE.
 func set_ball(ball: RigidBody3D) -> void:
 	_ball = ball
 
+## Build the child StaticBody3D "Deflector" - the solid post the ball physically bounces off.
+##
+## PHYSICS-PROGRAMMER's half (ARCHITECTURE.md 9.7 split). The structural test resolves the child
+## by name: find_child("Deflector", true, false).
+##
+## NO-TUNNEL: the deflector is STATIC and the ball carries continuous_cd, so the ball's swept CCD
+## test catches the post even at >= 2x LAUNCH_SPEED_MAX (tests/test_target_no_tunneling.gd).
+## WALL_HEIGHT keeps the post as tall as the perimeter so a ball cannot ride up and over it.
+##
+## NO-TRAP: the deflector sits on STATIC_OBSTACLES, which BALL_COLLISION_MASK already includes,
+## so the ball can never pass INTO it. DEFLECTOR_BOUNCE rebounds the ball with its momentum
+## (designer: "the ball must come OFF the target"), so a fast ball stays fast and a crawl still
+## pops off legibly rather than being killed to a fixed speed.
+func _build_deflector() -> void:
+	var deflector := StaticBody3D.new()
+	deflector.name = "Deflector"
+	# STATIC_OBSTACLES: exactly like the walls/arch/lane divider/lane pocket. The ball already
+	# collides with this layer via BALL_COLLISION_MASK; no mask edit needed anywhere (this is the
+	# shared-physics audit result: no layer/mask change means the flipper tests cannot regress).
+	# collision_mask = 0: a static post is only collided with, it scans nothing.
+	deflector.collision_layer = PhysicsLayers.STATIC_OBSTACLES
+	deflector.collision_mask = 0
+
+	# Near-elastic material: this makes the bounce momentum-preserving via the solver, replacing
+	# the deleted manual kick. LOCAL to this body - not shared or mutated globally.
+	var material := PhysicsMaterial.new()
+	material.bounce = DEFLECTOR_BOUNCE
+	material.friction = DEFLECTOR_FRICTION
+	deflector.physics_material_override = material
+
+	# The solid post: a cylinder standing upright (axis Y) so its round profile faces the ball
+	# from every approach angle - the same POST_RADIUS post the player has always aimed at, solid.
+	var shape := CylinderShape3D.new()
+	shape.radius = POST_RADIUS
+	shape.height = TableConfig.WALL_HEIGHT
+
+	var col := CollisionShape3D.new()
+	col.shape = shape
+	deflector.add_child(col)
+
+	add_child(deflector)
+
 func _on_body_entered(body: Node) -> void:
-	# Guard: ignore any body that is not the tracked ball.
+	# Guard: only the tracked ball matters. Any other physics body is silently ignored.
 	if body != _ball:
 		return
 
-	# Cooldown guard: a ball grinding against the target on the tilted plane re-fires body_entered
-	# every time it dips out and back in. Without this it would score every frame (QA BUG-007). One
-	# hit, then a short dead time before this target can score again.
+	# Cooldown guard (QA BUG-007): a ball grinding against the post on the tilted plane re-fires
+	# body_entered every time it dips in and out of the detector volume. Without this the player
+	# could farm points every frame. One hit, then a dead time, before scoring again.
+	# The BOUNCE is not gated here: the solver deflects the ball on every contact regardless of
+	# whether we score. Only the scored() emission is rate-limited by the cooldown.
 	var now_ms: float = float(Time.get_ticks_msec())
 	if now_ms < _cooldown_until_ms:
 		return
 	_cooldown_until_ms = now_ms + RETRIGGER_COOLDOWN_S * 1000.0
 
-	# Announce the score immediately so HUD ticks the instant the ball touches the target.
+	# Score fires on the physics contact frame so the HUD ticks the instant the ball touches.
+	# No manual velocity rewrite: the solver handles the bounce via the Deflector's PhysicsMaterial.
+	# The old manual kick is deleted (it was rewriting linear_velocity, discarding the ball's
+	# incoming speed - the opposite of the momentum pillar and the designer's #1 fun risk).
 	scored.emit(points)
-
-	# Compute the kick direction: away from the target centre, on the playfield XZ plane only.
-	# We zero out Y so the kick does not fight gravity by adding an upward or downward component.
-	var delta: Vector3 = _ball.global_position - global_position
-	delta.y = 0.0
-
-	var kick_dir: Vector3
-	if delta.length_squared() > MIN_KICK_DIST_SQ:
-		kick_dir = delta.normalized()
-	else:
-		# Ball is exactly centred (should not happen in play but guards the math).
-		# Default kick: straight up-table (away from the drain), which is a safe fallback.
-		kick_dir = Vector3(0.0, 0.0, -1.0)
-
-	# REDIRECT while PRESERVING MOMENTUM (QA BUG-007 / DESIGN "REAL MOMENTUM").
-	# The old code OVERWROTE linear_velocity with a fixed 25 u/s, which slowed a 90 u/s ball to a
-	# crawl on every hit and discarded the player's speed - the opposite of the momentum pillar. We
-	# instead keep the ball's incoming SPEED (flattened to the playfield plane), send it outward along
-	# kick_dir, and ADD the bumper pop on top. A floor speed guarantees even a slow ball pops legibly.
-	var incoming: Vector3 = _ball.linear_velocity
-	incoming.y = 0.0
-	var outgoing_speed: float = maxf(incoming.length() + KICK_SPEED, MIN_OUTGOING_SPEED)
-	# Preserve the original Y velocity so the kick does not fight gravity / the tilted surface.
-	var new_velocity: Vector3 = kick_dir * outgoing_speed
-	new_velocity.y = _ball.linear_velocity.y
-	_ball.linear_velocity = new_velocity

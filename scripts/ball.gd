@@ -13,8 +13,14 @@ extends RigidBody3D
 ## STABLE CONTRACT (tests and table.gd depend on these; keep the signatures):
 ##   func reset_to_start() -> void           # zero velocity, return to TableConfig.BALL_START.
 ##   func reset_to(pos: Vector3) -> void      # zero velocity, place at an arbitrary local position.
-##   func launch(direction: Vector3, speed: float) -> void  # impart launch velocity (plunger calls).
 ##   func current_speed() -> float            # |linear_velocity|, for tests/HUD/diagnostics.
+##
+## NOT a launch path any more (QA BUG-017): launch(direction, speed) below is RETAINED only as a
+## low-level velocity helper for diagnostics/future tooling. After the physics-based-interactions
+## slice, NO production code calls it: the ball is launched by the PHYSICAL plunger strike (the
+## AnimatableBody3D face in scripts/plunger.gd colliding with the resting ball), never by setting the
+## ball's velocity in code. Do NOT re-wire the plunger to call this; that would reintroduce the fake
+## non-physics launch the slice deliberately removed.
 
 ## --- TUNING (physics-programmer owns these) -----------------------------------------------------
 ## Linear damping. A real steel ball loses little energy in flight; keep this very low so a launched
@@ -110,11 +116,10 @@ func reset_to(pos: Vector3) -> void:
 	sleeping = false
 
 
-## Impart a launch velocity along a unit direction at a given speed. The plunger calls this on
-## release. STABLE SIGNATURE.
-## We SET the velocity directly rather than applying an impulse: the plunger has already chosen the
-## exact launch speed from its power meter, so a deterministic velocity is what tests assert against
-## and what makes the power->speed mapping legible. Mass-independent and frame-rate independent.
+## Low-level helper: set a velocity along a unit direction at a given speed. NOT called by production
+## code after the physics-based-interactions slice (the physical plunger strike launches the ball by
+## collision now - see the class header / QA BUG-017). Retained as a deterministic velocity setter
+## for diagnostics and possible future tooling; do NOT re-wire the plunger to call it.
 func launch(direction: Vector3, speed: float) -> void:
 	sleeping = false
 	var dir := direction

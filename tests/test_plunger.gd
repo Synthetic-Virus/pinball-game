@@ -2,27 +2,40 @@ extends GutTest
 ## Test matrix entry: PLUNGER power meter + launch mapping.
 ## Owner: test-builder + gameplay-programmer.
 ##
+## SCOPE OF THIS FILE (the plunger-side CONTRACT, not the ball's resulting speed):
+##   This file owns the gameplay contract that the plunger honors regardless of HOW the ball is
+##   thrown: the oscillating meter, arm/disarm gating, the release-before-charge rule (BUG-008),
+##   and that a release fires ball_launched exactly once and disarms. It exercises plunger.gd with
+##   manually-stepped _physics_process frames and a lightweight stub ball, so it needs NO physics
+##   server and NO scene tree.
+##
+##   The PHYSICAL strike (the ball's resulting velocity from the AnimatableBody3D face contact, the
+##   power->speed mapping landing in the design range, no tunneling) is the physics half of the slice
+##   and is proven against the REAL instanced Ball.tscn in tests/test_plunger_launch.gd, which drives
+##   a real physics world. Asserting ball speed HERE is impossible without that physics world, so this
+##   file deliberately does NOT - it asserts the launch CONTRACT (signal/disarm/stroke begun + a
+##   monotonic power->stroke-speed mapping), and leaves the measured-ball-speed oracle to that file.
+##
+## WHAT CHANGED (QA BUG-015): the plunger no longer calls ball.launch() (it became a physical strike
+##   in this slice). The four tests that asserted launch_call_count / last_launch_speed /
+##   last_launch_direction on a stub were testing a path that no longer exists and would be RED in CI.
+##   They are rewritten below to assert the plunger-side contract the physical strike DOES honor
+##   (ball_launched once, disarm, stroke begun, and power -> stroke_speed monotonic via the test hook).
+##
 ## HOW THESE TESTS WORK (for a non-expert reader):
-##   - We create a real Plunger node and a lightweight stub ball (FakeBall) that records the
-##     speed passed to launch() without doing any physics. This is NOT a mock of game infrastructure;
-##     it is a minimal stand-in for the physics-programmer's ball.gd, which does not run without
-##     Godot's physics server being driven by frames. Using a stub here is the right boundary.
+##   - We create a real Plunger node and a lightweight stub ball (FakeBall) so set_ball() has a
+##     RigidBody3D to hold. The plunger never calls anything on it now; it is just a valid handle so
+##     the null-guard in _physics_process passes. This is NOT a mock of game infrastructure.
 ##   - _physics_process is called manually (simulate frames) so we do not need a running scene tree.
 ##   - All power_changed values are collected via signal connection.
 
 # ---------------------------------------------------------------------------
-# FakeBall: minimal stand-in so plunger.gd can call _ball.launch(direction, speed)
-# without needing real ball physics. Records the last launch arguments for assertions.
+# FakeBall: a minimal RigidBody3D handle so plunger.set_ball() has a valid ball to track. The
+# physical plunger does NOT call any method on it (the strike is a collision, not a code call), so
+# this stub records nothing; it only needs to exist and to expose sleeping (set by _do_launch).
 # ---------------------------------------------------------------------------
 class FakeBall extends RigidBody3D:
-	var last_launch_direction: Vector3 = Vector3.ZERO
-	var last_launch_speed: float = 0.0
-	var launch_call_count: int = 0
-
-	func launch(direction: Vector3, speed: float) -> void:
-		last_launch_direction = direction
-		last_launch_speed = speed
-		launch_call_count += 1
+	pass
 
 # ---------------------------------------------------------------------------
 # Shared test state
@@ -129,49 +142,61 @@ func test_release_launches_and_disarms() -> void:
 
 	assert_eq(_launched_count, 1, "ball_launched should fire exactly once on release")
 	assert_false(plunger.is_armed(), "plunger should be disarmed after launch")
-	assert_eq(fake_ball.launch_call_count, 1, "ball.launch() should be called exactly once")
+	# The release must BEGIN the physical strike stroke (the contract replacing ball.launch()): the
+	# face is now driving up-table. We assert the stroke is in progress rather than a ball.launch()
+	# call. The ball's resulting speed is verified against the real ball in test_plunger_launch.gd.
+	assert_true(plunger.is_stroking(), "release should begin the physical strike stroke")
 
-func test_release_speed_within_bounds() -> void:
+func test_release_stroke_speed_within_bounds() -> void:
+	# The forward STROKE speed (the plunger-side knob that, via the contact, throws the ball) must map
+	# into the configured stroke band. The resulting BALL speed is verified against the real ball in
+	# test_plunger_launch.gd; here we assert the mapping the plunger itself controls.
 	plunger.arm()
 	_simulate_frames(30, true)
 	_release_launch()
 
-	var speed: float = fake_ball.last_launch_speed
+	var speed: float = plunger.stroke_speed()
 	assert_true(
-		speed >= TableConfig.LAUNCH_SPEED_MIN and speed <= TableConfig.LAUNCH_SPEED_MAX,
-		"launch speed %f must be within [LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX]" % speed
+		speed >= TableConfig.PLUNGER_STROKE_SPEED_MIN and speed <= TableConfig.PLUNGER_STROKE_SPEED_MAX,
+		"stroke speed %f must be within [PLUNGER_STROKE_SPEED_MIN, PLUNGER_STROKE_SPEED_MAX]" % speed
 	)
 
-func test_higher_power_maps_to_higher_speed() -> void:
-	# Launch at low power (hold briefly - charge stays near the low end of the wave).
+func test_higher_power_maps_to_higher_stroke_speed() -> void:
+	# Strike at low power (hold briefly - charge stays near the low end of the wave).
 	# CHARGE_RATE = 2.5, so after just a few frames the phase is small and power is near 0.
 	plunger.arm()
 	_simulate_frames(4, true)   # Very brief hold -> low power (phase ~= 4/120 * 2.5 ~= 0.083)
 	_release_launch()
-	var low_speed: float = fake_ball.last_launch_speed
+	var low_speed: float = plunger.stroke_speed()
 
-	# Reset and launch at higher power (hold long enough to climb toward the peak).
+	# Reset and strike at higher power (hold long enough to climb toward the peak).
 	plunger.arm()
 	# 48 frames = 0.4 s -> phase ~= 0.4 * 2.5 = 1.0 -> pingpong(1.0,1.0) = 1.0 (the peak)
 	_simulate_frames(48, true)
 	_release_launch()
-	var high_speed: float = fake_ball.last_launch_speed
+	var high_speed: float = plunger.stroke_speed()
 
 	assert_true(high_speed > low_speed,
-		"higher power (speed %f) must produce a higher launch speed than lower power (speed %f)" % [
+		"higher power (stroke %f) must produce a higher stroke speed than lower power (stroke %f)" % [
 			high_speed, low_speed
 		])
 
-func test_launch_direction_is_up_table() -> void:
+func test_strike_drives_face_up_table() -> void:
+	# The physical strike drives the face UP-TABLE (local -Z) into the ball. After a release, the face
+	# has begun moving and its z must be at or below (more up-table than) its rest z. This replaces the
+	# old ball.launch() direction assertion: the launch direction is now expressed by the face's motion.
 	plunger.arm()
 	_simulate_frames(20, true)
 	_release_launch()
-	# TableConfig.up_table_local() returns Vector3(0, 0, -1).
-	var expected: Vector3 = TableConfig.up_table_local()
-	assert_true(
-		fake_ball.last_launch_direction.is_equal_approx(expected),
-		"launch direction should be TableConfig.up_table_local() = %s, got %s" % [
-			str(expected), str(fake_ball.last_launch_direction)
+	# Step a few frames so the forward stroke has visibly advanced the face up-table.
+	_simulate_frames(4, false)
+
+	var rest_z: float = TableConfig.PLUNGER_REST_POS.z
+	assert_lt(
+		plunger.face_position().z,
+		rest_z,
+		"strike must drive the face up-table (-Z) from rest z=%f; got %f" % [
+			rest_z, plunger.face_position().z
 		]
 	)
 

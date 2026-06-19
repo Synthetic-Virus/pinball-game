@@ -7,6 +7,32 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
 - [x] Physics: the ball never tunnels through a wall across many high-speed collisions.
       Written: tests/test_ball_tunneling.gd. FAILS until physics-programmer sets
       continuous_cd = true in ball.gd _ready(). That is the correct pre-impl state.
+- [x] SLICE/physical-launch: lane pocket stops ball without closing center drain.
+      Written: tests/test_lane_pocket_drain.gd (branch: slice/core-interactions-physics).
+      Structural: LanePocket on STATIC_OBSTACLES, -X face does not reach center drain region.
+      Behavioral: resting ball stays in lane; center-X ball reaches real Drain.ball_drained.
+      FAILS until physics-programmer builds TableGeometry._build_lane_pocket and adds
+      TableConfig.LANE_POCKET_FACE_Z. Correct pre-impl state.
+- [x] SLICE/physical-launch: plunger strike physically imparts velocity (no ball.launch() call).
+      Written: tests/test_plunger_launch.gd (branch: slice/core-interactions-physics, adopted
+      from prototype/physical-plunger). Structural: PlungerFace on KINEMATIC_OBSTACLES,
+      contract (power_changed/ball_launched/arm/disarm/set_ball/is_armed/test_strike_at_power).
+      Behavioral: strike imparts speed, full >= 1.5x weak, speed in LAUNCH_SPEED_MIN..MAX.
+      Stress: 20 iterations at full power - ball never tunnels lane pocket (position oracle).
+      FAILS until physics-programmer implements the AnimatableBody3D face + stroke machine.
+- [x] SLICE/physical-targets: target has solid deflector, bounces ball, scores on contact.
+      Written: tests/test_target_physical.gd (branch: slice/core-interactions-physics).
+      Structural: Deflector child on STATIC_OBSTACLES, Area3D monitors BALLS, contract intact.
+      Behavioral: direction reversal, >= 40% momentum kept, ball never passes post far face,
+      scored fires exactly once per hit, cooldown bounds farming to <= 5 emits in 120 frames.
+      FAILS until gameplay-programmer deletes the velocity kick + physics-programmer adds
+      the StaticBody3D Deflector child with near-elastic PhysicsMaterial.
+- [x] SLICE/physical-targets: no tunneling through the target deflector (stress gate).
+      Written: tests/test_target_no_tunneling.gd (branch: slice/core-interactions-physics).
+      100-iteration stress loop at 2x LAUNCH_SPEED_MAX. Position oracle: ball never ends up
+      past POST_RADIUS + BALL_RADIUS*0.5 on the far side of the deflector cylinder. Bonus
+      test confirms POST_RADIUS constant matches the actual CylinderShape3D radius.
+      FAILS until the Deflector body exists in target.gd.
 - [x] Scoring: hitting a target adds exactly the expected points.
       Written: tests/test_game_flow.gd (test_target_scores_only_in_play,
       test_multiple_target_hits_accumulate). FAILS until gameplay-programmer fills
@@ -57,10 +83,11 @@ the bat arm must extend in the -X direction (world), which requires either:
 The test test_flippers_do_not_overlap_at_pivots in tests/test_world_scale.gd WILL FAIL on this
 geometry: gap = 2*FLIPPER_PIVOT_SPREAD - 2*FLIPPER_LENGTH*cos(|REST_ANGLE|) = 10 - 11.935 = -1.935 < 0.
 
-Suggested GUT test to lock the fix:
+Suggested GUT test to lock the fix (NOTE: see BUG-016 for why tip_x < 0 is the wrong predicate):
   Assert that after configure("right_flipper", true), the right flipper bat tip world X is
-  less than 0 (left of center) and world Z is greater than FLIPPER_PIVOT_Z (drain side).
-  Specifically: tip_x < 0.0 and tip_z > TableConfig.FLIPPER_PIVOT_Z.
+  LESS than FLIPPER_PIVOT_SPREAD (tip is left of the right pivot, pointing toward center),
+  and world Z is greater than FLIPPER_PIVOT_Z (drain side). Also assert the gap between
+  the two tips = 2*pivot_spread - 2*reach > BALL_RADIUS*2 (drain mouth is wider than the ball).
 
 ---
 
@@ -389,8 +416,214 @@ during the loop, or restructure so each iteration explicitly launches then drain
 
 ---
 
+### BUG-012 [BLOCKING] Lane pocket is NOT built - the whole "ball rests in the lane" mechanic is missing
+
+Severity: BLOCKING - one of the three slice conversions does not exist in production. Slice review.
+
+Slice: core-interactions-physics. Found by QA review 2026-06-19 on branch slice/core-interactions-physics.
+
+Files:
+- /home/virus/pinball-game/scripts/table_geometry.gd lines 22-27 (build() does NOT call _build_lane_pocket)
+- /home/virus/pinball-game/scripts/table_geometry.gd (no _build_lane_pocket method exists at all)
+
+Evidence:
+1. TableConfig has LANE_POCKET_FACE_Z / LANE_POCKET_THICKNESS (table_config.gd 107-108) and a
+   BALL_START tuned to rest against the pocket, but NO body is ever created from them.
+2. TableGeometry.build() calls _build_surface / _build_perimeter_walls / _build_lane_divider /
+   _build_arch only. There is no _build_lane_pocket method and no call to one.
+3. The prototype/physical-plunger branch DOES have _build_lane_pocket and calls it in build()
+   (verified: git show prototype/physical-plunger:scripts/table_geometry.gd). The BACKLOG LEAD task
+   said to ADOPT it; the geometry half of the adoption was dropped during integration onto the slice.
+
+Consequence: the ball placed at BALL_START rolls down the tilted lane and falls off the open bottom
+edge (the exact bug the slice exists to fix). The launch mechanic cannot work because there is no
+resting ball to strike. This also re-opens the pre-existing "ball falls out the lane" report.
+
+CI status: NOT green. test_lane_pocket_drain.gd::test_lane_pocket_body_exists_on_static_layer asserts
+find_child("LanePocket") is not null and WILL FAIL; the two behavioral rest tests WILL FAIL. The tests
+are correct and already RED against the missing code. This bug is the reason the suite cannot be green.
+
+Fix: adopt _build_lane_pocket from the prototype branch into the slice table_geometry.gd and add the
+call in build(). It must span ONLY x in [LANE_INNER_X, HALF_WIDTH] (the structural test in
+test_lane_pocket_drain.gd asserts the -X face does not cross into the center drain region).
+
+---
+
+### BUG-013 [BLOCKING] Plunger node is double-offset by table.gd - the face lands off the table, never strikes the ball
+
+Severity: BLOCKING - the physical plunger strike (the slice headline) cannot fire in the real game.
+
+Slice: core-interactions-physics. Found by QA review 2026-06-19.
+
+Files:
+- /home/virus/pinball-game/scripts/table.gd line 237 (plunger.position = TableConfig.BALL_START)
+- /home/virus/pinball-game/scripts/plunger.gd lines 127-129 (face seated at PLUNGER_REST_POS,
+  contract comment: "table.gd parents this Plunger node at the playfield origin (position ZERO)")
+
+Evidence (the two files disagree on the contract):
+1. plunger.gd seats its face at the playfield-LOCAL coordinate PLUNGER_REST_POS = (10, 0.8, 24.0) and
+   documents that this works ONLY because the Plunger node sits at the playfield origin (0,0,0).
+2. table.gd instead sets plunger.position = BALL_START = (10, 0.8, 23.0).
+3. The face's effective playfield position is therefore BALL_START + PLUNGER_REST_POS =
+   (20, 1.6, 47.0): x=20 is past the right wall (HALF_WIDTH=12) and z=47 is 22 units past the open
+   bottom edge (HALF_LENGTH=25). The face is nowhere near the ball; the strike does nothing.
+4. The plunger TESTS pass because test_plunger_launch.gd before_each sets _plunger.position =
+   Vector3.ZERO (the contract the script expects). The tests honor the contract; table.gd violates it,
+   and NO test exercises the table.gd wiring, so this integration bug is invisible to CI.
+
+Fix: set plunger.position = Vector3.ZERO in table.gd._build_dynamic_elements (the plunger seats its
+own face at PLUNGER_REST_POS). Then ADD an integration test that instances the full Table.tscn and
+asserts the PlungerFace world/playfield position is in the launch lane next to BALL_START (this is the
+missing coverage that let the bug through - see BUG-014).
+
+---
+
+### BUG-014 [HIGH] No integration test exercises table.gd wiring for the slice mechanics (coverage gap)
+
+Severity: HIGH (test debt) - every slice unit test bypasses table.gd, so table.gd integration bugs
+(BUG-012 pocket-not-wired-up reachable only via build(), BUG-013 plunger double-offset) sail through
+green unit suites. This is the gap that made two BLOCKING defects invisible to CI.
+
+Files:
+- /home/virus/pinball-game/tests/test_plunger_launch.gd (builds plunger at Vector3.ZERO, not via table.gd)
+- /home/virus/pinball-game/tests/test_target_physical.gd (instances Target.tscn directly)
+- /home/virus/pinball-game/tests/test_scene_structure.gd (instances Table.tscn but only checks
+  camera/light/mesh, never the plunger position, the lane pocket, or a target body)
+
+Direction to test-builder: add test_table_integration.gd that instances res://scenes/Table.tscn,
+waits for _ready, and asserts on the REAL built tree (independent oracle, measured positions):
+  1. find_child("LanePocket", true, false) exists under the Playfield (catches BUG-012 end to end).
+  2. the PlungerFace playfield-space position is within the launch lane (x in [LANE_INNER_X, HALF_WIDTH],
+     z near BALL_START.z), i.e. in light contact with the resting ball (catches BUG-013).
+  3. after SETTLE_FRAMES the real Ball rests in the lane (position.z < LANE_POCKET_FACE_Z + radius) -
+     the full integrated rest behavior, not the isolated-geometry version.
+This belongs in Stream 1 (test debt) and should be written even though it currently fails: it is the
+correct pre-fix state and locks BUG-012 and BUG-013 closed.
+
+---
+
+### BUG-015 [BLOCKING] test_plunger.gd: four tests assert ball.launch() is called - that API is deleted in the physical plunger
+
+Severity: BLOCKING (CI) - four tests in the existing test suite will FAIL against the slice's new
+plunger.gd because they assert a contract (plunger calls ball.launch()) that was intentionally
+removed. They will report failures that look like physics bugs but are stale test logic. This blocks
+CI green on the slice branch.
+
+Files:
+- /home/virus/pinball-game/tests/test_plunger.gd lines 17-25 (FakeBall stub records launch() calls)
+- /home/virus/pinball-game/tests/test_plunger.gd line 132 (assert_eq(fake_ball.launch_call_count, 1))
+- /home/virus/pinball-game/tests/test_plunger.gd lines 139-160 (last_launch_speed comparisons)
+- /home/virus/pinball-game/tests/test_plunger.gd lines 165-176 (last_launch_direction comparison)
+- /home/virus/pinball-game/scripts/plunger.gd lines 208-242 (_do_launch now starts the AnimatableBody3D
+  stroke; never calls _ball.launch())
+
+Repro (trace):
+1. The old plunger.gd called _ball.launch(direction, speed) in _do_launch(). The FakeBall in
+   test_plunger.gd was designed to intercept that call and record the speed + direction.
+2. The slice replaced _do_launch() with a physical stroke machine: it sets _stroke_state = FORWARD
+   and drives the AnimatableBody3D face. The ball is struck by a physics contact, not a velocity set.
+3. The new _do_launch() never calls _ball.launch(). fake_ball.launch_call_count stays 0.
+4. Four tests fail:
+   - test_release_launches_and_disarms (line 123): asserts launch_call_count == 1, gets 0.
+   - test_release_speed_within_bounds (line 134): reads fake_ball.last_launch_speed = 0.0, not in range.
+   - test_higher_power_maps_to_higher_speed (line 145): both low_speed and high_speed are 0.0 (equal).
+   - test_launch_direction_is_up_table (line 165): reads fake_ball.last_launch_direction = Vector3.ZERO.
+5. The other five tests in test_plunger.gd (charge oscillation, meter reset, disarm) do NOT depend
+   on ball.launch() and will continue to pass.
+
+Root cause: the slice changed the plunger's internal contract from "set velocity via ball.launch()"
+to "strike via AnimatableBody3D contact" without updating the four tests that depended on the old
+contract. The four tests are testing a deliberately deleted implementation.
+
+Fix direction: rewrite the four failing tests to verify the new physical contract using
+test_strike_at_power() (the test hook already on plunger.gd at line 285) and measure the REAL
+ball's current_speed() after physics settle. This mirrors what test_plunger_launch.gd already does
+(the correct model for behavioral tests on the physical plunger). Options:
+  (a) Convert the four tests in test_plunger.gd to use a real Ball.tscn + test_strike_at_power +
+      wait_physics_frames, matching test_plunger_launch.gd's pattern. Remove FakeBall entirely since
+      the class is now testing a deleted API.
+  (b) Mark the four tests pending() with the reason "tests the deleted ball.launch() API; being
+      replaced by test_plunger_launch.gd" to stop the CI failure immediately, then rewrite properly.
+  Do NOT remove the five tests that still pass (they correctly verify the charge/oscillation/disarm
+  contract, which is unchanged).
+
+Suggested replacement assertion for test_release_launches_and_disarms (the most important one):
+  After arm() + hold frames + release: assert is_armed() == false AND _launched_count == 1
+  (ball_launched signal fired). The ball.launch() call count is no longer the right oracle;
+  the signal and armed state are. These already pass.
+
+---
+
+### BUG-016 [MEDIUM] BUG-001 suggested test predicate tip_x < 0 is wrong - rejects a geometrically correct right flipper
+
+Severity: MEDIUM (test guidance error) - the suggested GUT test in BUG-001 will FAIL against the
+CORRECT fixed geometry. If written as described it creates a false-failing test and misleads the
+team into thinking the flipper is still broken when it is actually correct.
+
+Files:
+- /home/virus/pinball-game/docs/qa/QA_BACKLOG.md BUG-001 "Suggested GUT test" paragraph (now corrected above)
+- /home/virus/pinball-game/scripts/flipper.gd lines 183-188 (_apply_handedness, the fix)
+- /home/virus/pinball-game/tests/test_world_scale.gd (test_flippers_do_not_overlap_at_pivots exists
+  and does correctly verify the gap, but only by arithmetic on config values, not live flipper geometry)
+
+Evidence (arithmetic):
+1. With the fix applied: bat_offset_x = FLIPPER_LENGTH * 0.5 * hand_sign = -3.5 for the right flipper.
+2. Right pivot at x=+7.0. Right flipper rest_angle = +0.55 rad.
+   Body +X in world = (cos(0.55), 0, -sin(0.55)) = (0.853, 0, -0.523).
+   Bat tip world offset from pivot = (-FLIPPER_LENGTH) * body_x = (-5.967, 0, 3.659).
+   Bat tip world x = 7.0 + (-5.967) = +1.033.
+3. tip_x = +1.033 > 0 -- BUG-001's predicate "tip_x < 0" FAILS on the correct geometry.
+4. The geometry IS correct: the tip is between the pivot (+7) and center (0), pointing toward
+   center as required for an inverted V. Gap between tips = 2.06 units > ball diameter 1.2 units.
+
+Correct predicate for a GUT test that locks the BUG-001 fix:
+  right tip x < FLIPPER_PIVOT_SPREAD (to the left of the right pivot)
+  AND right tip x > -HALF_WIDTH (hasn't gone past the left wall)
+  AND right tip z > FLIPPER_PIVOT_Z (drain side of the pivot)
+  AND gap between left tip x and right tip x > BALL_RADIUS * 2.0 (drain mouth is open)
+
+The existing test_flippers_do_not_overlap_at_pivots in tests/test_world_scale.gd covers the gap
+condition by pure arithmetic; it will pass with the corrected geometry. A live-flipper geometry
+test using the above predicates is additional hardening that can go in test_table_integration.gd
+(see BUG-014 direction).
+
+---
+
+### BUG-017 [LOW] ball.gd retains launch() as dead code - stale STABLE CONTRACT comment misleads future coders
+
+Severity: LOW (code clarity, future mis-use risk) - the launch() method is documented as
+"The plunger calls this on release" and labelled STABLE CONTRACT, but the physical plunger slice
+deleted that call. A future coder reading the contract may call ball.launch() to "launch" the ball,
+re-introducing the fake non-physics velocity set that the slice deliberately removed.
+
+Files:
+- /home/virus/pinball-game/scripts/ball.gd lines 113-125 (launch() doc comment and implementation)
+- /home/virus/pinball-game/scripts/plunger.gd lines 40-41 (contract comment "The plunger calls this")
+
+Evidence:
+1. ball.gd line 113 comment: "Impart a launch velocity... The plunger calls this on release."
+   This was true before the slice. After the slice, _do_launch() in plunger.gd never calls _ball.launch().
+2. plunger.gd contract block still lists "func set_ball(ball: RigidBody3D) -> void" with the note
+   "The plunger calls this on release" (paraphrased from the original header for the old contract).
+3. FakeBall in test_plunger.gd has a launch() intercept stub that is now dead (BUG-015).
+4. A grep for _ball.launch() or ball.launch() across all scripts (excluding comments and tests)
+   returns zero production callers. The method is orphaned in production.
+
+Fix: update ball.gd launch() doc comment to state it is NOT called by the physical plunger and is
+retained as a utility/test helper (or for future multiball use). Update plunger.gd contract header
+to remove the stale reference. Optionally, the "STABLE CONTRACT" label on launch() should be
+demoted - it is now an internal utility, not a cross-system integration point.
+This is a documentation fix only; do not remove launch() without checking for any non-obvious
+callers (e.g. test helpers that may exercise it for other purposes).
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
-(none yet)
+- SLICE core-interactions-physics: after BUG-012/013/015 fixes land, re-run the FULL GUT suite on
+  the runner (not just the slice files) and confirm the pre-slice gates stay green: test_ball_tunneling.gd,
+  test_flipper_momentum.gd, test_plunger.gd contract (the five tests that still pass), test_game_flow.gd,
+  test_world_scale.gd. The slice touched shared physics config (table_config.gd) so a flipper/world-scale
+  regression is possible.
 
 ## How QA stays unblocked (the independence rule in practice)
 When there is no new code to test, QA does NOT idle. It (a) writes tests against agreed function
