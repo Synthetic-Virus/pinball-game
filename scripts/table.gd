@@ -63,6 +63,7 @@ var targets: Array[Area3D] = []
 
 
 func _ready() -> void:
+	_build_presentation()
 	_build_playfield()
 	_build_static_geometry()
 	_build_dynamic_elements()
@@ -71,6 +72,57 @@ func _ready() -> void:
 	# Kick off the first ball through the flow state machine, not directly.
 	if game_flow != null and game_flow.has_method("start_game"):
 		game_flow.start_game()
+
+
+## Build the presentation layer: a camera to view the table, a light to lit the gray-box meshes,
+## and an environment for ambient fill + background. WHY THIS EXISTS: the table elements build their
+## own MeshInstance3D geometry, but a 3D scene with no Camera3D renders only the clear color (the
+## "empty gray table" bug) and unlit meshes are invisible without a light. These nodes are added to
+## the Table ROOT (this node, unrotated) - not the tilted Playfield - so the camera/light placement
+## is reasoned in world space. Gray-box only; art/lighting polish is a later slice.
+##
+## Camera placement: the table is centered at the origin, tilted TableConfig.TILT_DEG about X so the
+## arch end (local -Z) rises and the drain end (local +Z) drops. We sit the camera above and behind
+## the drain end (high +Z, elevated) and aim up-table so the whole playfield reads like a real
+## cabinet view. The three CAMERA_/LIGHT_ tunables below are deliberately easy to nudge once seen on
+## the demo, since framing cannot be previewed on the thin-client laptop (verify on the web demo).
+func _build_presentation() -> void:
+	# Tunables - adjust framing/feel after viewing the deployed web demo.
+	const CAMERA_POS: Vector3 = Vector3(0.0, 34.0, 50.0)
+	const CAMERA_LOOK_AT: Vector3 = Vector3(0.0, 0.0, -3.0)
+	const CAMERA_FOV: float = 50.0
+	const LIGHT_EULER_DEG: Vector3 = Vector3(-50.0, -20.0, 0.0)
+
+	# Environment: dark background plus ambient fill so the neutral gray boxes are legible even on the
+	# unlit faces the directional light does not reach.
+	var world_env := WorldEnvironment.new()
+	world_env.name = "Environment"
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.07, 0.08, 0.10)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.62, 0.66, 0.76)
+	env.ambient_light_energy = 0.45
+	world_env.environment = env
+	add_child(world_env)
+
+	# Directional light angled down the table. Shadows are OFF on purpose: shadow mapping is a known
+	# web-perf cost and the project's headline gate is smooth FPS; a gray-box does not need shadows.
+	var light := DirectionalLight3D.new()
+	light.name = "Light"
+	light.rotation_degrees = LIGHT_EULER_DEG
+	light.light_energy = 1.2
+	light.shadow_enabled = false
+	add_child(light)
+
+	# Camera framing the whole playfield from the drain end, made current so the viewport uses it.
+	var camera := Camera3D.new()
+	camera.name = "Camera"
+	camera.fov = CAMERA_FOV
+	camera.position = CAMERA_POS
+	camera.look_at(CAMERA_LOOK_AT, Vector3.UP)
+	camera.current = true
+	add_child(camera)
 
 
 ## Create the tilted Playfield node that every table element is parented under.
