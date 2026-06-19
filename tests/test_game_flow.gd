@@ -137,6 +137,34 @@ func test_drain_posts_ball_drained_message() -> void:
 	assert_true("BALL DRAINED" in _messages,
 		"message 'BALL DRAINED' should be emitted after a drain when balls remain")
 
+func test_rapid_double_drain_spends_only_one_ball() -> void:
+	# QA BUG-018: the center drain and the OOB failsafe both route to on_ball_drained, and a lost ball
+	# can trip both within two frames. The state guard must make on_ball_drained idempotent for a
+	# single ball life: two calls in a row spend exactly ONE ball, never two.
+	flow.start_game()
+	flow.on_ball_launched()  # BALL_IN_PLAY, 3 balls.
+	flow.on_ball_drained()   # First drain: spend one, back to READY_TO_LAUNCH (2 balls).
+	flow.on_ball_drained()   # Second drain for the SAME loss: must be ignored (still READY_TO_LAUNCH).
+	assert_eq(_balls_events[-1], 2,
+		"a double drain for one lost ball must spend exactly one ball (expected 2, not 1)")
+	assert_eq(flow.current_state(), flow.State.READY_TO_LAUNCH,
+		"after a double drain the machine must be READY_TO_LAUNCH for the next ball, not further along")
+
+func test_double_drain_on_last_ball_triggers_game_over_once() -> void:
+	# Variant of BUG-018 at the boundary: a double drain on the final ball must declare game over
+	# exactly once and must not push the ball count below zero.
+	flow.start_game()
+	# Spend the first two balls cleanly.
+	for _i: int in range(2):
+		flow.on_ball_launched()
+		flow.on_ball_drained()
+	# Last ball: launch, then drain TWICE in succession.
+	flow.on_ball_launched()
+	flow.on_ball_drained()  # Final drain -> GAME_OVER, balls = 0.
+	flow.on_ball_drained()  # Duplicate -> must be ignored by the GAME_OVER state guard.
+	assert_eq(_game_over_events.size(), 1, "game_over must fire exactly once on a double final drain")
+	assert_eq(_balls_events[-1], 0, "ball count must rest at 0, never go negative on a double drain")
+
 func test_drain_ignored_when_not_in_play() -> void:
 	# Drain without launching should be silently ignored.
 	flow.start_game()

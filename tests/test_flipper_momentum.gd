@@ -195,6 +195,27 @@ func test_full_swing_outthrows_a_tap() -> void:
 	## Trial A: the tap.
 	var tap_speed: float = await _run_swing_trial(TAP_FRAMES)
 
+	## The tap MUST actually contact the ball (QA BUG-016). If it does not (e.g. the seat is too far
+	## for a one-frame tap to reach), tap_speed is 0 and the 1.5x ratio assert below is satisfied by
+	## ANY positive swing speed - an infinite effective ratio that would mask a flipper which whiffs
+	## on a tap but connects on a full swing. The full-swing floor (min_meaningful_speed) guards the
+	## swing trial; this guards the tap trial, so BOTH trials are real strikes and the ratio is a true
+	## comparison of swing energies, not an artifact of a missed contact. NOTE: the seat (0.85 toward
+	## the up-stop) and TAP_FRAMES were tuned together so a one-frame tap DOES graze the ball (a light
+	## bat driven for one frame coasts far enough to clip a near-up seat) while a full swing arrives far
+	## faster - that is why the historical ratios were finite (1.02, 1.40) before the gap was widened,
+	## never infinite. If this guard ever fails, the tap stopped reaching the ball: lengthen TAP_FRAMES
+	## slightly (keeping it well under SNAP_FRAMES so it stays a tap) rather than moving the seat toward
+	## rest, which past tuning showed collapses the ratio below 1.5x (QA BUG-016).
+	assert_gt(
+		tap_speed,
+		0.1,
+		"Tap trial must actually contact the ball (tap_speed=%f). A zero tap makes the momentum "
+		% tap_speed
+		+ "ratio meaningless and could mask a flipper that whiffs a tap but connects a full swing "
+		+ "(QA BUG-016). Lengthen TAP_FRAMES (stay under SNAP_FRAMES) so the tap reaches the ball."
+	)
+
 	## Trial B: the full swing. Re-seating happens inside the trial helper.
 	var swing_speed: float = await _run_swing_trial(SNAP_FRAMES)
 
@@ -222,6 +243,44 @@ func test_full_swing_outthrows_a_tap() -> void:
 			swing_speed,
 			(swing_speed / tap_speed) if tap_speed > 0.0 else INF,
 		]
+	)
+
+func test_flipper_returns_to_rest_after_release() -> void:
+	## DESIGN "FLIPPER SNAP ... then returns under a spring": after the action is released the bat must
+	## settle back to its REST (drooping) angle, not hang at the up-stop. This is the behavioural check
+	## QA BUG-013 asked for: it confirms the return spring pulls toward rest and the hinge-limit /
+	## spring / seat coordinate conventions agree in SIGN. If the spring were inverted (or the hinge
+	## axis antiparallel to the spring's measurement axis), the bat would rest at the UP stop with no
+	## input and a ball could never be cradled - and the momentum test would NOT catch it (it measures
+	## ball speed after a swing, not the at-rest angle). This test is the missing oracle for at-rest.
+	##
+	## We read the bat angle through the flipper's own _current_hinge_angle() about the world hinge
+	## axis - the same measurement the spring uses - so the assertion is in the flipper's native
+	## convention and compares directly against TableConfig.FLIPPER_REST_ANGLE.
+	var axis_world: Vector3 = (_flipper.global_transform.basis * Vector3(0.0, 1.0, 0.0)).normalized()
+
+	## Drive to the up-stop, then release and let the spring return the bat.
+	_flipper.force_energized(true)
+	await wait_physics_frames(SNAP_FRAMES)
+	_flipper.clear_force_energized()
+	## Generous settle window: the return spring is softer than the solenoid, so allow several snap
+	## windows for the bat to come to rest and the damping to kill any overshoot oscillation.
+	await wait_physics_frames(SNAP_FRAMES * 4)
+
+	var rest_angle_now: float = _flipper._current_hinge_angle(axis_world)
+	var rest_target: float = TableConfig.FLIPPER_REST_ANGLE  ## left flipper, non-mirrored
+	## Tolerance: a fraction of the full rest..up sweep. The bat must clearly be at the rest stop, not
+	## stuck near the up stop (which would be ~ (UP - REST) away).
+	var sweep: float = absf(TableConfig.FLIPPER_UP_ANGLE - TableConfig.FLIPPER_REST_ANGLE)
+	var tolerance: float = sweep * 0.25
+	assert_almost_eq(
+		rest_angle_now,
+		rest_target,
+		tolerance,
+		"After release the bat must return to the REST angle (got %f, want %f +/- %f). If it is near "
+		% [rest_angle_now, rest_target, tolerance]
+		+ "the UP angle (%f) the return spring or hinge-axis sign is inverted (QA BUG-013)."
+		% TableConfig.FLIPPER_UP_ANGLE
 	)
 
 func test_flipper_reaches_full_swing_quickly() -> void:

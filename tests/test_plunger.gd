@@ -34,9 +34,13 @@ var fake_ball: FakeBall
 var _power_values: Array = []     # Collects every power_changed emission.
 var _launched_count: int = 0       # Counts ball_launched signal firings.
 
-## Step size used when we want to simulate a meaningful number of physics frames.
-## Matches project.godot physics/common/physics_ticks_per_second = 120.
-const FRAME_DELTA: float = 1.0 / 120.0
+## Step size used when we want to simulate a meaningful number of physics frames. MUST match the
+## game's real physics tick (project.godot physics/common/physics_ticks_per_second = 240). Driving
+## _physics_process at any other rate makes every frame-count -> wall-clock comment below wrong and
+## would silently mislead any future scene-level test that copies this constant (QA BUG-012). The
+## test_frame_delta_matches_project_tick_rate test below asserts this stays in sync with the project.
+const PHYSICS_TICKS_PER_SECOND: int = 240
+const FRAME_DELTA: float = 1.0 / float(PHYSICS_TICKS_PER_SECOND)
 
 func before_each() -> void:
 	plunger = preload("res://scripts/plunger.gd").new()
@@ -78,6 +82,18 @@ func after_each() -> void:
 # Tests
 # ---------------------------------------------------------------------------
 
+func test_frame_delta_matches_project_tick_rate() -> void:
+	# Guard against the BUG-012 drift: if the project's physics tick rate ever changes, this test's
+	# FRAME_DELTA (and every frame-count comment derived from it) must change with it. Reading the
+	# live ProjectSettings value makes the test self-checking rather than relying on a stale literal.
+	var project_rate: int = int(ProjectSettings.get_setting("physics/common/physics_ticks_per_second"))
+	assert_eq(
+		PHYSICS_TICKS_PER_SECOND,
+		project_rate,
+		"test_plunger FRAME_DELTA must be driven at the real physics tick rate (project=%d Hz). " % project_rate
+		+ "Update PHYSICS_TICKS_PER_SECOND and the frame-count comments together (QA BUG-012)."
+	)
+
 func test_only_charges_when_armed() -> void:
 	# Without arm(): holding launch must produce no power_changed emissions and no launch.
 	_simulate_frames(30, true)
@@ -96,9 +112,9 @@ func test_meter_oscillates_between_zero_and_one() -> void:
 	_power_values.clear()
 
 	# Hold the launch button for enough frames to complete at least one full oscillation.
-	# CHARGE_RATE = 2.5 -> sweep time = 0.8 s -> 96 frames at 120 Hz.
-	# We run 160 frames (~1.33 s) to guarantee at least one full triangle cycle.
-	_simulate_frames(160, true)
+	# CHARGE_RATE = 2.5 -> sweep time = 0.8 s -> 192 frames at 240 Hz.
+	# We run 320 frames (~1.33 s) to guarantee at least one full triangle cycle.
+	_simulate_frames(320, true)
 
 	assert_true(_power_values.size() > 0, "power_changed should fire every frame while charging")
 
@@ -146,14 +162,14 @@ func test_higher_power_maps_to_higher_speed() -> void:
 	# Launch at low power (hold briefly - charge stays near the low end of the wave).
 	# CHARGE_RATE = 2.5, so after just a few frames the phase is small and power is near 0.
 	plunger.arm()
-	_simulate_frames(4, true)   # Very brief hold -> low power (phase ~= 4/120 * 2.5 ~= 0.083)
+	_simulate_frames(8, true)   # Very brief hold -> low power (phase ~= 8/240 * 2.5 ~= 0.083)
 	_release_launch()
 	var low_speed: float = fake_ball.last_launch_speed
 
 	# Reset and launch at higher power (hold long enough to climb toward the peak).
 	plunger.arm()
-	# 48 frames = 0.4 s -> phase ~= 0.4 * 2.5 = 1.0 -> pingpong(1.0,1.0) = 1.0 (the peak)
-	_simulate_frames(48, true)
+	# 96 frames = 0.4 s -> phase ~= 0.4 * 2.5 = 1.0 -> pingpong(1.0, 1.0) = 1.0 (the peak)
+	_simulate_frames(96, true)
 	_release_launch()
 	var high_speed: float = fake_ball.last_launch_speed
 

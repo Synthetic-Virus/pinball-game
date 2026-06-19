@@ -389,8 +389,363 @@ during the loop, or restructure so each iteration explicitly launches then drain
 
 ---
 
+### BUG-012 [HIGH] test_plunger.gd simulates at 120 Hz but the game runs at 240 Hz - power curve timing is wrong in tests
+
+Severity: HIGH (test quality / latent gameplay bug) - the plunger test drives `_physics_process`
+manually at FRAME_DELTA = 1/120 s, but project.godot sets physics_ticks_per_second = 240. The
+in-game oscillation timing is therefore TWICE as fast as the test assumes. A player who expects
+a 0.8 s sweep (from the comment "CHARGE_RATE 2.5 -> 0.8 s") actually gets a 0.8 s sweep, because
+the real game calls _physics_process 240 times per second with delta = 1/240. BUT the test uses
+delta = 1/120, meaning one simulated second is achieved in half as many test "frames". The
+test_higher_power_maps_to_higher_speed test drives 4 frames for "low power" and 48 frames for
+"high power" using delta=1/120. In the real game at 240 Hz, those same durations are 0.033 s and
+0.4 s (same wall-clock time). This is actually consistent because the test is using real time
+(frame_count * delta), not frame count. The issue is subtler: test comments say "48 frames at 120
+Hz" but the game runs at 240 Hz, so any test that reasons about FRAME COUNTS (not time) will be
+wrong.
+
+Specifically: the frame-count reasoning in test comments ("48 frames = 0.4 s -> phase 1.0") is
+correct for the test's own manually-driven 120 Hz loop but WRONG for reasoning about the live game.
+If a future test asserts a specific frame count from a CI-run scene (not manually driven), it will
+be off by a factor of 2x.
+
+Suspected files/lines:
+- /home/virus/pinball-game/tests/test_plunger.gd line 39:
+  const FRAME_DELTA: float = 1.0 / 120.0
+
+Repro:
+1. Read test_plunger.gd FRAME_DELTA = 1.0 / 120.0.
+2. Read project.godot: common/physics_ticks_per_second = 240.
+3. The test uses half the project tick rate when driving _physics_process manually.
+4. test_higher_power_maps_to_higher_speed: "4 frames * (1/120) = 0.033 s" and "48 frames *
+   (1/120) = 0.4 s". The wall-clock math is correct. But the frame-count-based comment in
+   test_meter_oscillates_between_zero_and_one says "160 frames (~1.33 s)" - at 120 Hz that is
+   1.33 s. In the real 240 Hz game, 1.33 s = 320 frames. This mismatch means the test is not
+   a faithful simulation of the real game's frame budget.
+5. Any future physics integration test that imports the 120 Hz FRAME_DELTA constant (or its
+   reasoning) for a scene-based test will produce timing assertions off by 2x.
+
+Expected: FRAME_DELTA should match the real game's tick: 1.0 / 240.0. Frame-count comments
+should reflect the 240 Hz baseline so the test is a faithful simulation and future tests can
+copy the constant without surprise.
+
+Suggested fix:
+  const FRAME_DELTA: float = 1.0 / 240.0
+  Update all frame-count comments accordingly (160 frames at 120 Hz -> 320 frames at 240 Hz,
+  but wall-clock durations are the same so test_higher_power_maps_to_higher_speed logic is unaffected
+  once FRAME_DELTA is corrected - just recalculate frame counts to keep same durations).
+
+Suggested GUT test to lock the fix:
+  Add a constant consistency check: assert FRAME_DELTA == 1.0 /
+  ProjectSettings.get_setting("physics/common/physics_ticks_per_second", 240).
+
+---
+
+### BUG-013 [HIGH] The flipper return-spring displacement is measured relative to THIS NODE's +X but the rest angle is in the HINGE frame - coordinate mismatch may cause wrong spring direction
+
+Severity: HIGH - the return spring may push the bat in the wrong direction (toward the up-stop
+instead of back to rest), causing the bat to be energized when it should relax, and introducing
+a jitter or self-oscillation when the flip action is released.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/flipper.gd lines 231-235 (_physics_process return spring block)
+- /home/virus/pinball-game/scripts/flipper.gd lines 248-254 (_current_hinge_angle)
+
+Repro (trace):
+1. When the flip action is released, _physics_process enters the spring branch.
+2. current_angle = _current_hinge_angle(axis_world).
+3. _current_hinge_angle computes: ref_dir = global_transform.basis * Vector3.RIGHT (the Flipper
+   NODE's local +X in world). bat_dir = _body.global_transform.basis * Vector3.RIGHT (the bat
+   body's local +X in world).
+4. signed_angle_to(bat_dir, axis_world) returns the angle from the Flipper node's +X to the
+   bat body's +X about the hinge axis.
+5. At rest angle _rest_angle = -0.55, the bat was placed by:
+   _body.transform = Transform3D(Basis(_HINGE_AXIS_LOCAL, _rest_angle), Vector3.ZERO)
+   So the bat's +X is rotated _rest_angle radians from the Flipper node's +X.
+   Therefore current_angle at rest = _rest_angle. displacement = _rest_angle - _rest_angle = 0.
+   Spring torque = 0. Correct.
+6. When the player holds the flipper to up_angle (-0.15 for the left flipper, but wait:
+   LEFT: _rest_angle = -0.55, _up_angle = 0.15. hand_sign = +1. drive_dir = signf(0.15 - (-0.55)) = +1.
+   When released mid-swing (current_angle > _rest_angle, say 0.0), displacement = 0.0 - (-0.55) = +0.55.
+   Spring torque = -RETURN_SPRING_STIFFNESS * 0.55 = -660 Nm. This is NEGATIVE (clockwise / down).
+   axis_world for the left flipper (on tilted playfield, Y pointing up from surface) is a world vector.
+   apply_torque(axis_world * (-660)) drives the bat back toward negative angles (toward _rest_angle).
+   This IS the correct direction. The math appears consistent for the left flipper.
+
+7. For the RIGHT flipper: _rest_angle = +0.55, _up_angle = -0.15. When released at mid-swing
+   (current_angle < _rest_angle, say 0.0), displacement = 0.0 - 0.55 = -0.55.
+   Spring torque = -RETURN_SPRING_STIFFNESS * (-0.55) = +660 Nm.
+   apply_torque(axis_world * 660) drives the bat toward more positive angles (back toward +0.55 rest).
+   This is also correct.
+
+HOWEVER: the hinge's angular_limit/lower and angular_limit/upper are set to
+  lower = min(_rest_angle, _up_angle), upper = max(_rest_angle, _up_angle).
+For the LEFT flipper: lower = min(-0.55, 0.15) = -0.55, upper = max(-0.55, 0.15) = 0.15.
+For the RIGHT flipper: lower = min(0.55, -0.15) = -0.15, upper = max(0.55, -0.15) = 0.55.
+
+The hinge limit is set in the JOINT's local frame. Since the joint's Z axis is the hinge axis
+(per the comment "local Z == hinge axis == surface normal"), the HingeJoint3D angular limits
+refer to rotation about the joint's Z axis. But _current_hinge_angle measures rotation of the
+BAT's body about axis_world (the playfield surface normal in world space). If the joint's local
+Z and axis_world are not the same direction (sign), the limit signs are inverted relative to the
+spring-angle convention, and the bat hits the WRONG stop as its hard limit.
+
+Specifically: the joint transform is:
+  Transform3D(
+    Vector3(1,0,0),    # joint local X = world X
+    Vector3(0,0,-1),   # joint local Y = world -Z
+    Vector3(0,1,0),    # joint local Z = world Y (the surface normal)
+    Vector3.ZERO
+  )
+The joint's local Z = world Y = playfield surface normal = axis_world. Signs match. So the
+limits ARE in the same direction as the angle convention. The spring math is consistent.
+
+REVISED VERDICT: the spring direction logic is geometrically consistent. The suspected mismatch
+does not manifest if the joint Z is confirmed to point the same direction as axis_world (both
+are +Y local of the Flipper parent node). This bug is marked PROBABLE CONCERN but not confirmed
+as a definite defect; it requires a CI physics run to observe the bat's actual at-rest position.
+
+The key TESTABLE question is: after releasing the flipper and waiting SNAP_FRAMES, does
+current_hinge_angle(axis_world) converge to _rest_angle (within epsilon), or overshoot to the
+wrong stop? If the bat ends up at _up_angle instead of _rest_angle, the spring direction is wrong.
+
+Suggested GUT test to confirm or close:
+  After a full swing (force_energized(true) for SNAP_FRAMES), call clear_force_energized(), wait
+  SNAP_FRAMES, then assert abs(_flipper._current_hinge_angle(axis_world) - _flipper._rest_angle)
+  < 0.1 rad (bat returned to rest, not stuck at up-stop). This is a regression-lock test for
+  the spring direction regardless of the analysis above.
+
+---
+
+### BUG-014 [HIGH] Lane divider bottom edge terminates exactly at DRAIN_Z creating a ball-trap corner
+
+Severity: HIGH - a ball rolling slowly along the right gutter (between the right wall and the lane
+divider) can become trapped in the corner where the lane divider's bottom end meets the drain volume,
+bouncing between the divider end and the drain trigger without draining or being playable.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/table_geometry.gd lines 122-128 (_build_lane_divider)
+- /home/virus/pinball-game/scripts/config/table_config.gd line 86:
+  const DRAIN_Z: float = HALF_LENGTH - 1.0  (= 24.0)
+
+Repro (trace):
+1. _build_lane_divider sets bottom_z = hl - 1.0 = 24.0.
+2. TableConfig.DRAIN_Z = HALF_LENGTH - 1.0 = 24.0.
+3. The lane divider's bottom face is at Z = 24.0. The drain trigger volume CENTER is at Z = 24.0
+   with DRAIN_DEPTH = 6.0, spanning Z = 21.0 to Z = 27.0. So the drain trigger starts at Z = 21.
+4. The lane divider occupies LANE_INNER_X = 8.0 in X, from Z = top_z to Z = 24.0. It has
+   WALL_THICKNESS = 0.8, so its right face is at X = 8.0 + 0.4 = 8.4 and its left face at X = 7.6.
+5. A ball rolling down the right gutter (X near 10.0, between X=8.0 and X=12.0) at slow speed
+   reaches the lane divider bottom at Z = 24.0. The drain width is DRAIN_WIDTH = HALF_WIDTH * 2 = 24
+   (the full table width), so it catches the ball anywhere in X.
+6. At slow ball speeds (~0 u/s along Z) the ball enters the drain normally. This is the INTENDED
+   path.
+7. EDGE CASE: a ball rolling along the inside face of the lane divider (X near 8.0) at moderate
+   speed reaches Z = 24.0, the divider ends, and the ball deflects around the corner of the
+   divider end. The sharp right-angle corner of the box geometry can trap a slow ball in a narrow
+   corridor between the divider end-face and the drain trigger. The ball may oscillate without
+   quite having enough velocity to clear the corner and reach the open drain mouth.
+8. If the drain trigger fires here, the ball drains correctly. If the corner geometry deflects the
+   ball back up before the drain triggers (ball never enters the volume at rest), the ball is stuck.
+
+Severity rationale: a ball trapped in the gutter-corner is a soft-lock (game stuck in BALL_IN_PLAY
+if it is not moving enough to trigger the drain volume). The OOB failsafe at Y = -20.0 would not
+help since the ball is on the playfield surface. If this corner-trap occurs before the drain Z, the
+game can only be rescued by tilting (nudge), which may or may not dislodge it given the geometry.
+
+Suggested fix contract: extend the lane divider's bottom edge 1-2 units PAST the drain center
+(bottom_z = hl + 1.0) or taper the bottom corner with an angled face. Alternatively, move the
+lane divider terminus to Z = FLIPPER_PIVOT_Z so the ball exits the lane mouth above the flippers
+rather than beside the drain trigger.
+
+Suggested GUT test to lock the fix:
+  In a scene-level integration test, give a ball zero velocity at position (LANE_INNER_X, BALL_RADIUS,
+  DRAIN_Z - 0.5). After 60 frames, assert either: ball position.z >= DRAIN_Z (it drained normally)
+  or ball current_speed() > 0 (it was not trapped at rest). A trapped ball at rest at this position
+  is the failure condition.
+
+---
+
+### BUG-015 [MEDIUM] The OOB failsafe drain fires for the wrong body type if a future non-ball physics body enters its volume
+
+Severity: MEDIUM - the OOB catch-plane (`oob_drain`) is a plain Area3D with no `set_ball` guard,
+wired to `_on_oob_body_entered` which only filters for `body == ball`. This is correct for single-
+ball play. However, the flipper body (RigidBody3D on KINEMATIC_OBSTACLES layer) is NOT in the OOB
+drain's mask (mask = PhysicsLayers.BALLS = 8). So flippers cannot trigger it. This is safe.
+
+BUT: if a future implementation adds a physics-based debris object or a multiball ball on the BALLS
+layer without calling `table.gd`'s set_ball equivalent, the OOB drain would SILENTLY IGNORE that
+ball (body != ball is true, so the drain fires nothing). The result is the same stuck-in-BALL_IN_PLAY
+soft-lock that BUG-006 describes.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/table.gd lines 222-226 (_on_oob_body_entered)
+
+Repro:
+1. A future multiball implementation adds a second Ball instance to the playfield without calling
+   oob_drain.set_ball (because oob_drain is a plain Area3D with no set_ball method).
+2. The second ball escapes through the table geometry.
+3. oob_drain.body_entered fires with the escaped ball as `body`.
+4. _on_oob_body_entered checks `body != ball` - this is TRUE (it is the second ball, not the
+   tracked first ball). The condition returns early.
+5. game_flow.on_ball_drained() is never called for the escaped ball. Soft-lock.
+
+Severity rationale: non-blocking for the single-ball slice (this slice is explicitly single-ball),
+but is a latent multiball trap. Noted here so the multiball implementation knows to extend the
+failsafe or add per-ball drain tracking.
+
+Suggested fix for the multiball extension:
+  Replace the `body != ball` identity check with a layer-based check:
+  `if not (body is RigidBody3D and (body.collision_layer & PhysicsLayers.BALLS) != 0): return`
+  This drains ANY ball-layer body that falls out of bounds, regardless of which ball object it is.
+
+Suggested GUT test:
+  When multiball is implemented, assert that if a second ball (on BALLS layer) exits the playfield
+  (Y < OOB_DRAIN_Y), a ball_drained event fires (even if it is not the "primary" tracked ball).
+
+---
+
+### BUG-016 [MEDIUM] The test_full_swing_outthrows_a_tap momentum ratio is satisfiable if tap_speed is near zero, masking a broken flipper
+
+Severity: MEDIUM (test quality / correctness gap) - the tap trial may return near-zero ball speed
+(the ball slips off the bat tip without meaningful contact), making the 1.5x ratio gate trivially
+satisfiable. The min_meaningful_speed guard is applied only to the FULL SWING speed, not the tap.
+
+Suspected files/lines:
+- /home/virus/pinball-game/tests/test_flipper_momentum.gd lines 193-225 (test_full_swing_outthrows_a_tap)
+
+Repro (trace):
+1. Trial A (tap): TAP_FRAMES = 1 frame of solenoid drive. The bat barely twitches; if the ball
+   is seated at the up-stop (seat_angle near _up_angle, ~0.85 of the arc), the 1-frame drive
+   may not reach the ball before the spring pulls the bat back. tap_speed could be 0.0.
+2. Trial B (full swing): SNAP_FRAMES = 20 frames of drive. The bat sweeps to the up-stop and
+   strikes the ball. swing_speed should be significant.
+3. Assert: swing_speed >= MOMENTUM_RATIO_FLOOR * tap_speed = 1.5 * 0.0 = 0.0.
+4. Any positive swing_speed satisfies this. The test passes even if the tap was a complete miss.
+5. The min_meaningful_speed guard checks: swing_speed > LAUNCH_SPEED_MIN / 5.0 = 6.0. This
+   catches a missing FULL SWING but does not catch a missing tap.
+6. A broken flipper that does nothing on a tap but does strike the ball on a full swing would
+   pass both guards, reporting a "correct" momentum ratio despite the tap being a miss.
+
+Expected behavior: the test should also assert that tap_speed > some_minimum (the tap actually
+struck the ball, not that it missed). This ensures the RATIO is measured between two real contact
+events, not between a real strike and a missed contact.
+
+Suggested fix:
+  After tap_speed = await _run_swing_trial(TAP_FRAMES), add:
+  assert_gt(tap_speed, 0.1, "Tap trial must actually strike the ball (tap_speed > 0.1); "
+    "if this fails, the ball seat is too far from the bat tip to be reached in one frame")
+  This minimum is intentionally low (the tap should be a real but weak hit). Adjust the seat
+  angle in _seat_ball_in_swing_path if needed so a one-frame drive reliably reaches it.
+
+---
+
+### BUG-017 [LOW] The flipper bat is placed on KINEMATIC_OBSTACLES layer but its collision_mask only checks BALLS - flipper-vs-wall collisions are silently skipped
+
+Severity: LOW - flippers cannot collide with the arch or perimeter walls. In normal play this is
+by design: the hinge joint constrains the bat, and the hinge limits stop it before it reaches a
+wall. But if the physics solver's hinge limits slip (Jolt constraint solver tolerance) or the
+solenoid drive overshoots under high load, the bat tip could penetrate a wall without a collision
+response. No bounce-back occurs; the bat clips through.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/physics_layers.gd line 28:
+  const KINEMATIC_COLLISION_MASK: int = BALLS
+- /home/virus/pinball-game/scripts/flipper.gd line 116:
+  _body.collision_mask = PhysicsLayers.KINEMATIC_COLLISION_MASK
+
+Repro:
+1. KINEMATIC_COLLISION_MASK = BALLS (bit 8 only).
+2. The flipper bat's collision_mask = 8.
+3. The perimeter walls are on STATIC_OBSTACLES (bit 2).
+4. Ball mask (BALL_COLLISION_MASK) includes KINEMATIC_OBSTACLES (bit 4). Ball detects flippers.
+5. Flipper mask (KINEMATIC_COLLISION_MASK = BALLS, bit 8). Flipper ONLY detects balls.
+6. Flipper body cannot register a collision with a wall (bit 2 not in its mask).
+7. If the hinge limit fails to stop the bat at the up-stop (constraint slip), the tip passes
+   through the arch or perimeter wall. No collision force is applied to the wall; the bat
+   passes through without a physics response.
+
+Severity rationale: the hinge angular limits are the primary stop. Adding wall-collision to the
+flipper mask would cause redundant collision pairs (flipper-vs-wall) every frame, adding solver
+cost. The design choice (hinge-limit only) is intentional and documented. Flagged here as a LOW
+severity known limitation so the physics-programmer is aware that the hinge limits are the single
+failure point for bat-over-extension.
+
+Suggested monitoring: in the integration stress test, assert that after 100 full-swing cycles
+the bat tip position remains within the table bounds (tip X within [-HALF_WIDTH, HALF_WIDTH]).
+
+---
+
+### BUG-018 [LOW] The HUD score label "BALLS" can display negative values if on_ball_drained fires twice for the same ball
+
+Severity: LOW - if two drain signals fire for the same lost ball (e.g. ball passes through both
+the center drain and the OOB failsafe in the same frame), GameFlow.on_ball_drained() is called
+twice. The second call passes the BALL_IN_PLAY guard only if the state has not yet transitioned.
+Since state transitions happen synchronously inside on_ball_drained, the second call arrives when
+state is READY_TO_LAUNCH (or GAME_OVER), and the guard returns early. This IS safe as written.
+
+HOWEVER, there is a race if signals are processed in a different order. In Godot 4, signal
+connections fire in connection order (first-connected first). Both drain.ball_drained and
+oob_drain.body_entered are wired in _wire_signals. If they somehow both fire in the same physics
+frame (e.g. ball enters both volumes simultaneously), they are dispatched in connection order:
+drain.ball_drained -> game_flow.on_ball_drained (state goes READY_TO_LAUNCH or GAME_OVER).
+Then oob_drain.body_entered -> _on_oob_body_entered -> game_flow.on_ball_drained, which is
+guarded (state != BALL_IN_PLAY) and returns. So double-spend is prevented.
+
+The actual risk is a deferred-signal scenario: if one signal fires in one physics frame and the
+other fires in the next (before the ball is reset), both could pass the guard. This depends on
+exact ball trajectory. The OOB drain at Y = -20 is far enough from the center drain (Z = 24)
+that simultaneous triggering is geometrically implausible unless the ball is falling diagonally.
+This bug is THEORETICAL but the design is correct for the single-ball case.
+
+Suggested GUT test to prove the guard holds:
+  Call game_flow.on_ball_drained() twice in the same frame while in BALL_IN_PLAY. Assert that
+  balls_changed fires only once and the final ball count is (starting - 1), not (starting - 2).
+  This test locks the guard against regression.
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
-(none yet)
+
+### SWEEP 2026-06-18 - integrated slice review (qa-lead). CI run 27794688808 GREEN on the runner.
+Independent-oracle verified from the runner log (not the summary line): Godot 4.6.3 + Jolt,
+test_ball_tunneling 3/3 (incl. test_full_speed_ball_never_tunnels_a_wall), test_flipper_momentum
+7/7 (incl. test_full_swing_outthrows_a_tap + test_flipper_reaches_full_swing_quickly, NO
+pending/risky), Totals "All tests passed!". BOTH producer-blocking CI gates are now green.
+
+Status of the BUG-001..011 backlog after the integration/polish pass (re-read of shipping code):
+- BUG-001 (right flipper mirror): FIXED in flipper.gd _apply_handedness (bat offset sign flips with
+  hand_sign). Spread 5->7 in table_config.gd leaves a positive drain mouth. CLOSED.
+  -> test debt: test_flipper_no_overlap.gd still owed to lock it (see Stream 1).
+- BUG-002 (game-over soft-lock): FIXED. table.gd _physics_process polls just_pressed "launch" in
+  GAME_OVER -> restart(); _on_request_new_ball calls hud.hide_game_over(). CLOSED.
+- BUG-003 (empty table): FIXED. table.gd builds surface/walls/arch/lane + ball/flippers/plunger/
+  targets/drain/oob and wires every signal. CLOSED.
+- BUG-004 (drain behind bottom wall): FIXED. DRAIN_Z = HALF_LENGTH-1.0 (inside field); geometry
+  leaves bottom OPEN. CLOSED.
+- BUG-005 (no surface): FIXED. TableGeometry._build_surface builds PLAYFIELD-layer surface, top at Y=0.
+- BUG-006 (sideways escape): MITIGATED. Full-length side+top walls; OOB failsafe Area3D at Y=-20
+  routes to on_ball_drained. CLOSED as designed.
+- BUG-007 (target momentum/score-farm): FIXED. target.gd preserves incoming speed + adds KICK_SPEED,
+  RETRIGGER_COOLDOWN_S 0.20 dead time. CLOSED. -> test debt: test_target_no_double_score.gd owed.
+- BUG-008 (auto-launch on held key): FIXED. plunger.gd _release_seen latch. CLOSED.
+- BUG-009 (bounce test strict threshold): NOT YET RELAXED. test_ball_tunneling.gd line 155 still
+  asserts `position.z <= WALL_Z` (no epsilon). It is GREEN today, but it is a latent flaky gate.
+  Non-blocking (deferred to Stream 1); see findings NB-1.
+- BUG-010 (tip_speed off-axis): FIXED. tip_speed() projects angular_velocity onto hinge axis. CLOSED.
+- BUG-011 (restart test coincidental path): test quality, non-blocking. Still owed.
+
+## Stream 1 additions (test debt owed, NON-blocking for this slice - deferred by producer ruling)
+- [ ] test_flipper_no_overlap.gd - assert right-flipper tip_x < 0 and tip_z > FLIPPER_PIVOT_Z after
+      configure("right_flipper", true); locks BUG-001. (test-builder)
+- [ ] test_target_no_double_score.gd - a single dwell on a target scores once within the cooldown;
+      locks BUG-007. (test-builder)
+- [ ] test_table_integration.gd - boot Table.tscn headless; assert ball rests on surface (BUG-005),
+      a full-power launch never leaves [-HALF_WIDTH, HALF_WIDTH] (BUG-006), drain fires -> ball
+      decrements, restart hides the game-over panel (BUG-002). (test-builder)
+- [ ] Relax test_ball_tunneling bounce threshold to WALL_Z + BALL_RADIUS*0.5 (BUG-009). (test-builder)
+- [ ] Restructure test_restart_resets_score_and_balls so each loop iteration launches then drains
+      (BUG-011). (test-builder)
 
 ## How QA stays unblocked (the independence rule in practice)
 When there is no new code to test, QA does NOT idle. It (a) writes tests against agreed function

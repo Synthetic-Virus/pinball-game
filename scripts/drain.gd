@@ -42,7 +42,8 @@ func _ready() -> void:
 	add_child(col)
 
 	# Position the Area3D at the drain centre in local (playfield) space.
-	# DRAIN_Z is defined as HALF_LENGTH + 2.0 - just past the flipper pivots toward the bottom edge.
+	# DRAIN_Z is HALF_LENGTH - 1.0 - BELOW the flipper pivots but just INSIDE the open bottom edge, so
+	# a ball that gets past the flippers drains before it can reach the (deliberately wall-less) bottom.
 	# X = 0 (centred), Y = 0 (on the playfield surface).
 	position = Vector3(0.0, 0.0, TableConfig.DRAIN_Z)
 

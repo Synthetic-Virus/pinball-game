@@ -77,6 +77,16 @@ func on_ball_launched() -> void:
 ## The ball entered the drain. Spends a ball; re-arms for the next one or declares game over.
 ## Only acts while BALL_IN_PLAY - guards against duplicate drain signals or late-arriving bodies.
 ## STABLE SIGNATURE.
+##
+## DOUBLE-DRAIN SAFETY (QA BUG-018): the center drain and the OOB failsafe both route here, and a
+## lost ball can clip one volume in one frame and the other in the next. This single state guard
+## closes BOTH the same-frame and the multi-frame race, because:
+##   - The FIRST accepted drain immediately leaves BALL_IN_PLAY (to READY_TO_LAUNCH or GAME_OVER).
+##   - NOTHING returns the machine to BALL_IN_PLAY except on_ball_launched, which requires a
+##     deliberate plunger fire on the freshly-armed next ball.
+## Therefore every drain signal arriving between a loss and the next launch is rejected here, and a
+## single physical loss spends exactly one ball. test_game_flow asserts this (rapid double drain ->
+## balls == STARTING_BALLS - 1, never - 2).
 func on_ball_drained() -> void:
 	if _state != State.BALL_IN_PLAY:
 		return

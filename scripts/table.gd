@@ -215,12 +215,22 @@ func _on_request_new_ball() -> void:
 		hud.hide_game_over()
 
 
-## Failsafe drain hit: only the live ball counts (ignore any other body), then route to the same
-## GameFlow drain handler the center drain uses. GameFlow's own state guard prevents a double-spend
-## if both drains somehow fire for the same lost ball (the second arrives in READY_TO_LAUNCH and is
-## ignored).
+## Failsafe drain hit: route any BALLS-layer body that has fallen out of bounds to the same GameFlow
+## drain handler the center drain uses. GameFlow's own state guard prevents a double-spend if both
+## drains fire for the same lost ball (the second arrives in READY_TO_LAUNCH and is ignored).
+##
+## We match by LAYER MEMBERSHIP, not by identity against the single tracked `ball` (QA BUG-015). The
+## OOB plane is a last-resort anti-soft-lock failsafe: its job is to drain ANYTHING that has escaped
+## the playfield so the game can never hang in BALL_IN_PLAY with no ball reachable. An identity check
+## would silently ignore any body that is not the one tracked reference (e.g. a future extra ball),
+## defeating the failsafe's whole purpose. A layer check keeps it correct for the current single ball
+## and robust against escape regardless of which body fell. The center drain keeps its identity check
+## (it is scoring-relevant, not a failsafe), so this widening lives only on the failsafe path.
 func _on_oob_body_entered(body: Node) -> void:
-	if body != ball:
+	var body_layer: int = 0
+	if body is CollisionObject3D:
+		body_layer = (body as CollisionObject3D).collision_layer
+	if body_layer & PhysicsLayers.BALLS == 0:
 		return
 	if game_flow != null and game_flow.has_method("on_ball_drained"):
 		game_flow.on_ball_drained()

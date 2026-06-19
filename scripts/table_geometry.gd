@@ -121,8 +121,15 @@ static func _build_lane_divider(parent: Node3D) -> void:
 	var hl: float = TableConfig.HALF_LENGTH
 	# The divider's TOP end stops at the arch start so the ball can curve over the top into the field.
 	var top_z: float = TableConfig.ARCH_CENTER_Z + TableConfig.ARCH_RADIUS_Z
-	# The divider's BOTTOM end stops short of the drain so it does not block the open bottom.
-	var bottom_z: float = hl - 1.0
+	# The divider's BOTTOM end must reach PAST the drain center so the divider end-face sits INSIDE the
+	# drain trigger volume, not at its near edge. Earlier this was hl - 1.0 = 24.0, the exact value of
+	# DRAIN_Z: the divider's sharp bottom corner coincided with the drain center, so a ball creeping
+	# down the inside of the divider could be deflected laterally at that corner and oscillate against
+	# the end-face WITHOUT crossing into the drain trigger - a soft-lock with no drain event and the OOB
+	# failsafe (Y = -20) no help because the ball is still on the surface (QA BUG-014). The drain volume
+	# spans DRAIN_Z +/- DRAIN_DEPTH/2; ending the divider at DRAIN_Z + DRAIN_DEPTH/2 guarantees a ball
+	# that reaches the divider's bottom corner is already INSIDE the drain volume and drains cleanly.
+	var bottom_z: float = TableConfig.DRAIN_Z + TableConfig.DRAIN_DEPTH * 0.5
 	var length: float = bottom_z - top_z
 	var center_z: float = (top_z + bottom_z) * 0.5
 	_make_box_body(

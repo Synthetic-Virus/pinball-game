@@ -38,6 +38,22 @@ Status: NOT REACHED.
   tests, stale comments) are DEFERRED to BACKLOG Next / QA_BACKLOG and must NOT block resubmission. Gate 0
   NOT scheduled until the two CI gates are green on the runner.
 
+- 2026-06-18 SEND_BACK (narrow/hygiene only) - SLICE "Core 3D table rebuild on Jolt" resubmission: the
+  two physics-first gates are GENUINELY DONE. Verified independently from the runner log (not the green
+  checkmark): CI run 27794688808 ran against headSha fc82849 (== branch tip == HEAD), test_full_speed_
+  ball_never_tunnels_a_wall + test_full_swing_outthrows_a_tap + test_flipper_reaches_full_swing_quickly
+  all EXECUTED by name, Totals 62 passing / 353 asserts / "All tests passed!", with the fail-loud no-run
+  guard active. Scope held; board satisfied on the physics lens. NOT cleared because the working tree is
+  DIRTY with unvalidated, out-of-scope DEFERRED work (uncommitted edits to scripts/drain.gd, game_flow.gd,
+  table.gd, table_geometry.gd + 3 test files + QA_BACKLOG = BUG-013/014/015/016/018, all on the cut list).
+  CI validated fc82849, NOT this tree, so the source-of-truth artifact does not cover the current state.
+  Required to clear (small): (1) discard or branch off the out-of-scope working-tree edits so the proven-
+  green fc82849 is the resubmitted state - do NOT smuggle deferred bug work into this bounded slice;
+  (2) commit+push the BACKLOG blocker-4 reconciliation (flip BACKLOG lines 37/42 from [~] to [x] citing
+  run 27794688808: 62 tests / 353 asserts / all passed) so the finish gate visibly hangs on nothing;
+  (3) re-confirm a green runner log on the exact pushed sha. No new code required. Gate 0 schedules the
+  moment the tree is clean and CI is green AS-IS.
+
 ## Sunk-cost rule (the producer enforces this)
 Hours already spent are gone whether we continue or not. The only question at each gate is whether
 the NEXT chunk of hours is the best use of them. Past investment is never an argument to continue.
