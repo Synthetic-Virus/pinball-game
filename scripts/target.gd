@@ -24,15 +24,27 @@ signal scored(points: int)
 
 @export var points: int = 100  ## Flat value per hit (placeholder, DESIGN.md scoring).
 
-## Knock-back speed applied to the ball on a hit. Tuned to be clearly legible at this world scale
-## (gravity 200, LAUNCH_SPEED_MAX 90) without being so strong it breaks the physics solver.
+## Knock-back speed ADDED outward on a hit. Tuned to be clearly legible at this world scale
+## (gravity 200, LAUNCH_SPEED_MAX 90) without being so strong it breaks the physics solver. This is
+## the bumper "pop", added to the ball's redirected momentum rather than replacing it (see below).
 const KICK_SPEED: float = 25.0
+
+## Floor speed after a hit. A ball that crawls into a target should still pop off legibly, so the
+## outgoing speed is at least this. A fast ball keeps (most of) its speed; a slow one gets a boost.
+const MIN_OUTGOING_SPEED: float = 25.0
 
 ## Minimum squared distance between ball and target before we fall back to a default kick direction.
 ## Prevents a divide-by-zero if the ball is centred exactly on the target origin.
 const MIN_KICK_DIST_SQ: float = 0.001
 
+## Re-trigger cooldown (seconds). After a hit, this target ignores further contacts briefly so a ball
+## resting/grinding against it on the tilted plane cannot score every physics frame (QA BUG-007 score
+## farm). One legible hit, then a short dead time, matches how a real bumper behaves.
+const RETRIGGER_COOLDOWN_S: float = 0.20
+
 var _ball: RigidBody3D = null
+## Time (seconds, from Time.get_ticks_msec) before which contacts are ignored. 0 = ready.
+var _cooldown_until_ms: float = 0.0
 
 func _ready() -> void:
 	# Monitor bodies on the BALLS layer only. This Area3D does not need to be on a layer itself
@@ -70,6 +82,14 @@ func _on_body_entered(body: Node) -> void:
 	if body != _ball:
 		return
 
+	# Cooldown guard: a ball grinding against the target on the tilted plane re-fires body_entered
+	# every time it dips out and back in. Without this it would score every frame (QA BUG-007). One
+	# hit, then a short dead time before this target can score again.
+	var now_ms: float = float(Time.get_ticks_msec())
+	if now_ms < _cooldown_until_ms:
+		return
+	_cooldown_until_ms = now_ms + RETRIGGER_COOLDOWN_S * 1000.0
+
 	# Announce the score immediately so HUD ticks the instant the ball touches the target.
 	scored.emit(points)
 
@@ -86,8 +106,15 @@ func _on_body_entered(body: Node) -> void:
 		# Default kick: straight up-table (away from the drain), which is a safe fallback.
 		kick_dir = Vector3(0.0, 0.0, -1.0)
 
-	# Apply the kick by setting linear_velocity directly.
-	# We do not add to the existing velocity because the ball may be travelling INTO the target
-	# at an oblique angle; we want the kick to REDIRECT it, not just add to the incoming speed.
-	# This gives the same clear snap the old Main.gd bumper produced.
-	_ball.linear_velocity = kick_dir * KICK_SPEED
+	# REDIRECT while PRESERVING MOMENTUM (QA BUG-007 / DESIGN "REAL MOMENTUM").
+	# The old code OVERWROTE linear_velocity with a fixed 25 u/s, which slowed a 90 u/s ball to a
+	# crawl on every hit and discarded the player's speed - the opposite of the momentum pillar. We
+	# instead keep the ball's incoming SPEED (flattened to the playfield plane), send it outward along
+	# kick_dir, and ADD the bumper pop on top. A floor speed guarantees even a slow ball pops legibly.
+	var incoming: Vector3 = _ball.linear_velocity
+	incoming.y = 0.0
+	var outgoing_speed: float = maxf(incoming.length() + KICK_SPEED, MIN_OUTGOING_SPEED)
+	# Preserve the original Y velocity so the kick does not fight gravity / the tilted surface.
+	var new_velocity: Vector3 = kick_dir * outgoing_speed
+	new_velocity.y = _ball.linear_velocity.y
+	_ball.linear_velocity = new_velocity

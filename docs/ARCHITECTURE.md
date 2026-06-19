@@ -119,6 +119,13 @@ Connected once in `table.gd._wire_signals()`. Keep these signatures stable.
 - `GameFlow.balls_changed(balls)`   -> `HUD.set_balls(balls)`
 - `GameFlow.message(text: String)`  -> `HUD.set_message(text)`
 - `GameFlow.game_over(final)`       -> `HUD.show_game_over(final)`
+- `GameFlow.request_new_ball()`     -> also `HUD.hide_game_over()` (the INVERSE of show_game_over).
+  This hides the game-over panel on BOTH a normal new ball and a restart (restart -> start_game ->
+  request_new_ball), so the panel is never left visible over a live ball. Restart itself: table.gd
+  polls the `launch` action (just-pressed edge) only in GAME_OVER and calls `GameFlow.restart()`.
+- Failsafe: a second out-of-bounds `Drain` (a low catch-plane Area3D built in table.gd) routes its
+  `body_entered` (filtered to the live ball) into the same `GameFlow.on_ball_drained()`, so a ball
+  that escapes the playfield can never soft-lock the game in BALL_IN_PLAY.
 
 Element method contracts (called by table.gd / each other):
 - `Ball.reset_to_start()`, `Ball.reset_to(pos)`, `Ball.launch(dir, speed)`, `Ball.current_speed()`

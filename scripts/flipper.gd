@@ -72,6 +72,11 @@ var _action_name: String = ""
 var _mirrored: bool = false
 var _body: RigidBody3D
 var _hinge: HingeJoint3D
+## The bat's collision shape and mesh. Kept as handles because handedness re-seats their X offset:
+## the bat must extend FROM the pivot TOWARD the table center, which is +X for the left flipper and
+## -X for the (mirrored) right flipper. See _apply_handedness (QA BUG-001 fix).
+var _shape: CollisionShape3D
+var _mesh_instance: MeshInstance3D
 ## The signed rest/up angles for THIS flipper (mirrored applied). Lower/upper of the hinge limit.
 var _rest_angle: float = 0.0
 var _up_angle: float = 0.0
@@ -123,22 +128,21 @@ func _build_flipper() -> void:
 	_body.physics_material_override = material
 
 	# Collision shape: a box centered at half-length so one end sits at the pivot (this node's
-	# origin) and the other end is the tip at distance FLIPPER_LENGTH.
-	var shape := CollisionShape3D.new()
+	# origin) and the other end is the tip at distance FLIPPER_LENGTH. The X offset SIGN is set by
+	# _apply_handedness so a mirrored (right) flipper extends along -X (QA BUG-001).
+	_shape = CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(TableConfig.FLIPPER_LENGTH, TableConfig.FLIPPER_HEIGHT, TableConfig.FLIPPER_WIDTH)
-	shape.shape = box
-	shape.position = Vector3(TableConfig.FLIPPER_LENGTH * 0.5, 0.0, 0.0)
-	_body.add_child(shape)
+	_shape.shape = box
+	_body.add_child(_shape)
 
 	# Gray-box mesh matching the collision box so the flipper is visible without art.
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.name = "FlipperMesh"
+	_mesh_instance = MeshInstance3D.new()
+	_mesh_instance.name = "FlipperMesh"
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = box.size
-	mesh_instance.mesh = box_mesh
-	mesh_instance.position = shape.position
-	_body.add_child(mesh_instance)
+	_mesh_instance.mesh = box_mesh
+	_body.add_child(_mesh_instance)
 
 	add_child(_body)
 
@@ -171,6 +175,17 @@ func _apply_handedness() -> void:
 	var hand_sign := -1.0 if _mirrored else 1.0
 	_rest_angle = TableConfig.FLIPPER_REST_ANGLE * hand_sign
 	_up_angle = TableConfig.FLIPPER_UP_ANGLE * hand_sign
+
+	# Seat the bat box on the correct side of the pivot. The bat must reach FROM the pivot TOWARD the
+	# table center: +X for the left flipper, -X for the mirrored right flipper. Without this the right
+	# bat pointed AWAY from center (toward the right wall) and could never intercept a draining ball -
+	# the inverted V could not form (QA BUG-001). Mirroring the angle alone is not enough; the lever
+	# arm itself must flip. half_len keeps one end pinned at the pivot (this node's origin).
+	var bat_offset_x: float = TableConfig.FLIPPER_LENGTH * 0.5 * hand_sign
+	if _shape != null:
+		_shape.position = Vector3(bat_offset_x, 0.0, 0.0)
+	if _mesh_instance != null:
+		_mesh_instance.position = Vector3(bat_offset_x, 0.0, 0.0)
 
 	# Hinge limits are an absolute lower..upper range; order them so lower <= upper regardless of
 	# the mirror sign. These hard stops back up the spring: the ball can never push the bat past
@@ -265,10 +280,14 @@ func is_energized() -> bool:
 
 ## Linear speed of the flipper tip. The momentum test reads this to confirm a full swing is faster
 ## than a tap. STABLE SIGNATURE.
-## tip speed = |omega| * lever arm (FLIPPER_LENGTH). We measure the body's actual angular velocity
-## magnitude (the real momentum of the force-driven bat), so a tap that never reaches full swing
-## reads a lower tip speed than a full swing - which is exactly the feel the test guards.
+## tip speed = |omega about the hinge axis| * lever arm (FLIPPER_LENGTH). We project the body's
+## angular velocity ONTO the hinge axis rather than taking its full magnitude (QA BUG-010): a clean
+## swing is purely about the axis, but an oblique ball strike or a Jolt constraint impulse can add a
+## spurious off-axis wobble that would inflate a naive |omega|. The axis projection reports only the
+## real swing speed, so the momentum gate reads the feel the player actually gets.
 func tip_speed() -> float:
 	if _body == null:
 		return 0.0
-	return _body.angular_velocity.length() * TableConfig.FLIPPER_LENGTH
+	var axis_world: Vector3 = (global_transform.basis * _HINGE_AXIS_LOCAL).normalized()
+	var ang_vel_about_axis: float = _body.angular_velocity.dot(axis_world)
+	return absf(ang_vel_about_axis) * TableConfig.FLIPPER_LENGTH

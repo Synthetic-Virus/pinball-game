@@ -27,6 +27,17 @@ Can this be finished with real available time, or does "done" recede every month
 Keep if scope is cuttable to a finishable core. Scrap or cut hard if done keeps moving.
 Status: NOT REACHED.
 
+## Gate log (producer rulings)
+- 2026-06-18 SEND_BACK - SLICE "Core 3D table rebuild on Jolt": scope held (no creep; cut list intact)
+  and architecture approved by the board, but the two physics-first gates this slice exists to prove are
+  NOT asserted by CI: (1) test_ball_tunneling stress loop runs a hand-built body, not the real Ball.tscn;
+  (2) test_flipper_momentum still pending() despite the force_energized() hook existing. Required to clear:
+  repoint the tunneling stress test at real Ball.tscn, replace the momentum pending() stubs with real
+  force_energized() assertions (full swing >= ~1.5x tap; ~50 ms snap), and produce the runner log showing
+  GUT green (not skipped/pending). UX/QA polish items (nudge, HUD font, overlap, colorblind, extra lock
+  tests, stale comments) are DEFERRED to BACKLOG Next / QA_BACKLOG and must NOT block resubmission. Gate 0
+  NOT scheduled until the two CI gates are green on the runner.
+
 ## Sunk-cost rule (the producer enforces this)
 Hours already spent are gone whether we continue or not. The only question at each gate is whether
 the NEXT chunk of hours is the best use of them. Past investment is never an argument to continue.

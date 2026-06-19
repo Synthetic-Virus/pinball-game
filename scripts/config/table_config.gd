@@ -59,7 +59,15 @@ const ARCH_SEGMENTS: int = 16                    ## Polyline segments approximat
 const FLIPPER_LENGTH: float = 7.0   ## Pivot to tip. Drives reach and the momentum it can impart.
 const FLIPPER_WIDTH: float = 1.4
 const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BALL_RADIUS overlap).
-const FLIPPER_PIVOT_SPREAD: float = 5.0  ## Half-distance between the two pivots (inverted-V gap).
+## Half-distance between the two pivots (so pivots sit at +/-FLIPPER_PIVOT_SPREAD on X).
+## CONSTRAINT (verified by tests/test_world_scale.gd test_flippers_do_not_overlap_at_pivots):
+## the two bats, each reaching FLIPPER_LENGTH*cos(|REST_ANGLE|) in X toward center from its pivot,
+## must leave a POSITIVE gap at the centerline (an inverted V, not an X). With FLIPPER_LENGTH 7 and
+## REST_ANGLE -0.55 the x-reach is ~5.97, so the spread must exceed that. 7.0 leaves a ~2.1-unit
+## drain mouth (a bit over one ball diameter) - a missed flip can drain, a cradle holds. The old 5.0
+## made the tips CROSS the center (gap -1.9): that was the past inverted-V overlap bug (commit 6c64a7b
+## territory), now guarded by the test. Pivots at +/-7 stay well inside the +/-12 side walls.
+const FLIPPER_PIVOT_SPREAD: float = 7.0
 const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain the pivots sit.
 ## Resting and energized angles (radians) of the flipper about its pivot, measured on the playfield
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
@@ -68,10 +76,22 @@ const FLIPPER_REST_ANGLE: float = -0.55
 const FLIPPER_UP_ANGLE: float = 0.15
 
 ## ---- DRAIN -------------------------------------------------------------------------------------
-## Open center drain: a trigger volume below/between the flippers. A ball entering it is lost.
-const DRAIN_Z: float = HALF_LENGTH + 2.0  ## Just past the flippers, off the bottom edge.
+## Open center drain: a trigger volume below the flippers. A ball entering it is lost.
+## DRAIN_Z sits BELOW the flipper pivot row (FLIPPER_PIVOT_Z = 20) but INSIDE the playfield bottom
+## edge (HALF_LENGTH = 25), so a ball that gets past the flippers falls into the drain BEFORE it can
+## reach the open bottom edge. table_geometry.gd deliberately leaves the bottom perimeter OPEN (no
+## bottom wall) so nothing blocks the drain. Earlier this was HALF_LENGTH + 2 = 27, which placed the
+## trigger 2 units OUTSIDE the playfield - if a naive bottom wall were ever built it would block the
+## drain (QA BUG-004). Keeping it inside the field removes that dependency.
+const DRAIN_Z: float = HALF_LENGTH - 1.0
 const DRAIN_WIDTH: float = HALF_WIDTH * 2.0
 const DRAIN_DEPTH: float = 6.0
+
+## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
+## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A large
+## low catch-plane well below the surface drains ANY ball that falls past it, regardless of X/Z. In
+## normal play the ball never reaches it; it only fires when something has already gone wrong.
+const OOB_DRAIN_Y: float = -20.0
 
 ## ---- LAUNCH / PLUNGER --------------------------------------------------------------------------
 ## Ball rest position at the bottom of the launch lane (local playfield coords).
