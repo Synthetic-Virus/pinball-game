@@ -49,3 +49,24 @@ func test_ball_has_a_visible_mesh() -> void:
 	assert_not_null(ball, "expected a ball RigidBody3D in the built scene")
 	if ball != null:
 		assert_not_null(_find("MeshInstance3D", ball), "ball needs a MeshInstance3D to be visible")
+
+
+func test_camera_frames_the_whole_table() -> void:
+	## FRAMING gate: the auto-frame must put every table corner inside the camera frustum, or the
+	## table renders off-screen / jammed in a corner (the "table at the bottom" bug). Verified via the
+	## engine's own projection, so it holds for whatever viewport size CI runs at.
+	await wait_frames(3)  # let the deferred _frame_camera run after _ready
+	var cam: Camera3D = _find("Camera3D") as Camera3D
+	assert_not_null(cam, "need a Camera3D to test framing")
+	if cam == null:
+		return
+	var tilt := Basis(Vector3.RIGHT, deg_to_rad(TableConfig.TILT_DEG))
+	var hw: float = TableConfig.HALF_WIDTH
+	var hl: float = TableConfig.HALF_LENGTH
+	var ht: float = TableConfig.WALL_HEIGHT
+	for sx in [-hw, hw]:
+		for sy in [0.0, ht]:
+			for sz in [-hl, hl]:
+				var corner: Vector3 = tilt * Vector3(sx, sy, sz)
+				assert_true(cam.is_position_in_frustum(corner),
+					"table corner %s must be framed by the camera" % corner)
