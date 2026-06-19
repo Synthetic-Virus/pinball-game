@@ -7,6 +7,32 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
 - [x] Physics: the ball never tunnels through a wall across many high-speed collisions.
       Written: tests/test_ball_tunneling.gd. FAILS until physics-programmer sets
       continuous_cd = true in ball.gd _ready(). That is the correct pre-impl state.
+- [x] SLICE/physical-launch: lane pocket stops ball without closing center drain.
+      Written: tests/test_lane_pocket_drain.gd (branch: slice/core-interactions-physics).
+      Structural: LanePocket on STATIC_OBSTACLES, -X face does not reach center drain region.
+      Behavioral: resting ball stays in lane; center-X ball reaches real Drain.ball_drained.
+      FAILS until physics-programmer builds TableGeometry._build_lane_pocket and adds
+      TableConfig.LANE_POCKET_FACE_Z. Correct pre-impl state.
+- [x] SLICE/physical-launch: plunger strike physically imparts velocity (no ball.launch() call).
+      Written: tests/test_plunger_launch.gd (branch: slice/core-interactions-physics, adopted
+      from prototype/physical-plunger). Structural: PlungerFace on KINEMATIC_OBSTACLES,
+      contract (power_changed/ball_launched/arm/disarm/set_ball/is_armed/test_strike_at_power).
+      Behavioral: strike imparts speed, full >= 1.5x weak, speed in LAUNCH_SPEED_MIN..MAX.
+      Stress: 20 iterations at full power - ball never tunnels lane pocket (position oracle).
+      FAILS until physics-programmer implements the AnimatableBody3D face + stroke machine.
+- [x] SLICE/physical-targets: target has solid deflector, bounces ball, scores on contact.
+      Written: tests/test_target_physical.gd (branch: slice/core-interactions-physics).
+      Structural: Deflector child on STATIC_OBSTACLES, Area3D monitors BALLS, contract intact.
+      Behavioral: direction reversal, >= 40% momentum kept, ball never passes post far face,
+      scored fires exactly once per hit, cooldown bounds farming to <= 5 emits in 120 frames.
+      FAILS until gameplay-programmer deletes the velocity kick + physics-programmer adds
+      the StaticBody3D Deflector child with near-elastic PhysicsMaterial.
+- [x] SLICE/physical-targets: no tunneling through the target deflector (stress gate).
+      Written: tests/test_target_no_tunneling.gd (branch: slice/core-interactions-physics).
+      100-iteration stress loop at 2x LAUNCH_SPEED_MAX. Position oracle: ball never ends up
+      past POST_RADIUS + BALL_RADIUS*0.5 on the far side of the deflector cylinder. Bonus
+      test confirms POST_RADIUS constant matches the actual CylinderShape3D radius.
+      FAILS until the Deflector body exists in target.gd.
 - [x] Scoring: hitting a target adds exactly the expected points.
       Written: tests/test_game_flow.gd (test_target_scores_only_in_play,
       test_multiple_target_hits_accumulate). FAILS until gameplay-programmer fills
