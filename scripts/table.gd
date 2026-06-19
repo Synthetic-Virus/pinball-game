@@ -88,9 +88,9 @@ func _ready() -> void:
 ## the demo, since framing cannot be previewed on the thin-client laptop (verify on the web demo).
 func _build_presentation() -> void:
 	# Tunables - adjust framing/feel after viewing the deployed web demo.
-	const CAMERA_POS: Vector3 = Vector3(0.0, 34.0, 50.0)
-	const CAMERA_LOOK_AT: Vector3 = Vector3(0.0, 0.0, -3.0)
-	const CAMERA_FOV: float = 50.0
+	const CAMERA_POS: Vector3 = Vector3(0.0, 30.0, 44.0)
+	const CAMERA_LOOK_AT: Vector3 = Vector3(0.0, -7.0, 2.0)
+	const CAMERA_FOV: float = 54.0
 	const LIGHT_EULER_DEG: Vector3 = Vector3(-50.0, -20.0, 0.0)
 
 	# Environment: dark background plus ambient fill so the neutral gray boxes are legible even on the
