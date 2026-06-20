@@ -13,6 +13,7 @@ export const meta = {
   name: 'ship-slice',
   description: 'Run a pinball game-dev slice through the full gamedev team: design -> plan/scaffold -> parallel build+tests -> QA -> polish -> review board -> producer scope gate.',
   phases: [
+    { title: 'Setup' },
     { title: 'Design' },
     { title: 'Plan' },
     { title: 'Build' },
@@ -29,9 +30,28 @@ let _a = args
 if (typeof _a === 'string') { try { _a = JSON.parse(_a) } catch (e) { /* plain string brief */ } }
 const SLICE = (typeof _a === 'string') ? _a : ((_a && (_a.brief || _a.slice || _a.description)) || 'See the latest SLICE in docs/BACKLOG.md')
 
-const DOCS = 'Read .claude/CLAUDE.md (house rules), docs/DESIGN.md, docs/REFERENCES.md, docs/pinhead-tech-notes.md, docs/GATES.md, and the SLICE in docs/BACKLOG.md.'
+// GIT DISCIPLINE is folded into DOCS so EVERY agent prompt carries it. WHY: previously build/QA
+// agents committed AND pushed in-progress work to main (the house rules say "push and read the
+// runner"), which broke main and spammed CI failure emails. Now only the Setup phase creates the
+// branch and only the Deliver phase pushes - both are named as exceptions in the rule and their own
+// prompts tell them to do exactly that, so they override the general note. Everyone else commits
+// locally and stays on the branch.
+const GIT_RULE = 'GIT DISCIPLINE: stay on the CURRENT git branch. Commit your work locally with clear messages, but do NOT git push, do NOT open PRs, and do NOT create or switch branches. Only the Setup phase creates the slice branch and only the Deliver phase pushes/opens the PR. This keeps in-progress, possibly-failing work OFF main.'
+
+const DOCS = 'Read .claude/CLAUDE.md (house rules), docs/DESIGN.md, docs/REFERENCES.md, docs/pinhead-tech-notes.md, docs/GATES.md, and the SLICE in docs/BACKLOG.md. ' + GIT_RULE
 
 log('ship-slice on: ' + SLICE)
+
+// 0) SETUP - create the slice branch so NO in-progress work ever lands on main ----------------
+// WHY: build/QA agents commit during the run; without a branch they commit on main and (per the
+// house rules) push it, breaking main and spamming CI failure emails. Setup branches first so all
+// later commits land on the slice branch; only Deliver pushes.
+phase('Setup')
+const setup = await agent(
+  `${DOCS}\n\nYou are the devops engineer doing SLICE SETUP. Create the working branch so no in-progress work ever lands on main. Run 'git status'; if on main or any non-slice branch, create and checkout a branch named slice/<short-kebab-slug-of-this-slice>; if already on a slice/* branch, stay on it. Do NOT modify code and do NOT push. Report the branch name. (You are the ONLY phase that creates the branch - this is the explicit exception to the git-discipline rule.)\n\nSlice: ${SLICE}`,
+  { agentType: 'gamedev-devops-engineer', model: 'sonnet', phase: 'Setup', label: 'setup-branch' }
+)
+log('setup branch ready')
 
 // 1) DESIGN -------------------------------------------------------------------
 phase('Design')
@@ -115,14 +135,15 @@ const DELIVER_SCHEMA = {
   additionalProperties: true,
 }
 const delivery = await agent(
-  `${DOCS}\n\nYou are the devops/release engineer. DELIVER this slice so the review board and producer can judge the REAL, CI-tested state. The gamedev coders left their work in the working tree; get it committed, pushed, on a PR, and GREEN on the homelab godot runner. Do these IN ORDER:\n` +
-  `1. 'git status'. If on 'main', create and switch to a branch slice/<short-kebab-slug-of-the-slice>. If already on a slice/* branch, stay on it.\n` +
+  `${DOCS}\n\nYou are the devops/release engineer. DELIVER this slice so the review board and producer can judge the REAL, CI-tested state. The Setup phase already created the slice branch; the coders left their work in the working tree. Get it committed, LOCALLY VERIFIED, pushed, on a PR, and GREEN on the homelab godot runner. Do these IN ORDER:\n` +
+  `1. 'git status'. Confirm you are on the slice/* branch that Setup created. If somehow on main, create and switch to slice/<short-kebab-slug-of-the-slice>.\n` +
   `2. Stage and commit ALL of the slice's working-tree changes (scripts, scenes, tests, docs). Do NOT commit .claude/settings.json, gdlintrc, or other local-only junk. Then run 'git status' again and CONFIRM the tree is clean of slice files - leaving the polish pass uncommitted is the #1 recurring failure of this workflow; do NOT repeat it. Set clean=true only if it is genuinely clean.\n` +
-  `3. Push the branch to origin.\n` +
-  `4. Open a PR to main with gh (or reuse the open PR for this branch). Do NOT merge to main - the human merges after the producer PASS.\n` +
-  `5. Find the CI run for the pushed head sha and WAIT with 'gh run watch <id> --exit-status'. Capture conclusion, run id, head sha.\n` +
-  `6. If CI is RED: read the failing job log, report the failures plainly, STOP (do NOT edit code - that is the coders' job; the producer will SEND_BACK). If GREEN: report the green run as the artifact.\n` +
-  `You have no Godot locally; CI is the only test oracle. Return the structured delivery result.\n\nSlice: ${SLICE}`,
+  `3. VERIFY LOCALLY BEFORE PUSHING (do not push a red build, so CI is never red): fetch a headless Godot matching project config/features (4.x) and run the GUT suite headless. If ANY test fails, report the failure plainly and STOP - do NOT push and do NOT edit code (the coders/producer handle fixes). Only continue when the local run is GREEN.\n` +
+  `4. Push the branch to origin.\n` +
+  `5. Open a PR to main with gh (or reuse the open PR for this branch). Do NOT merge to main - the human merges after the producer PASS.\n` +
+  `6. Find the CI run for the pushed head sha and WAIT with 'gh run watch <id> --exit-status'. Capture conclusion, run id, head sha.\n` +
+  `7. If CI is RED: read the failing job log, report the failures plainly, STOP. If GREEN: report the green run as the artifact.\n` +
+  `A headless Godot CAN be fetched and run locally (prior runs used Godot 4.6); the homelab runner remains the FINAL oracle. Return the structured delivery result.\n\nSlice: ${SLICE}`,
   { agentType: 'gamedev-devops-engineer', model: 'sonnet', phase: 'Deliver', label: 'deliver', schema: DELIVER_SCHEMA }
 )
 log('deliver: branch=' + (delivery && delivery.branch) + ' ci=' + (delivery && delivery.ci_conclusion) + ' clean=' + (delivery && delivery.clean))
