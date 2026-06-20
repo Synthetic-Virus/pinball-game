@@ -32,7 +32,17 @@ static var were_addons_disabled : bool = true
 @warning_ignore("unsafe_property_access")
 @warning_ignore("untyped_declaration")
 static func _static_init() -> void:
-	were_addons_disabled = ProjectSettings.get(str(WARNING_PATH, 'exclude_addons'))
+	# LOCAL FIX (physics-programmer, furniture slice): the GDScript warning setting
+	# 'debug/gdscript/warnings/exclude_addons' is an editor-only ProjectSetting and is NOT
+	# registered in the headless test runtime, so ProjectSettings.get(...) returns null there.
+	# Assigning that null straight into the typed `bool` static var threw
+	# "Trying to assign value of type 'Nil' to a variable of type 'bool'." on every headless GUT
+	# run (printed before any test ran, then mis-attributed to the first test file in the log).
+	# Coerce to the engine default (true = addons excluded from warnings) when the lookup is null,
+	# so the typed bool only ever receives a real bool. Behavior is unchanged when the setting
+	# exists (editor runs); this only removes the spurious startup script error in headless CI.
+	var excluded: Variant = ProjectSettings.get(str(WARNING_PATH, 'exclude_addons'))
+	were_addons_disabled = true if excluded == null else bool(excluded)
 	ProjectSettings.set(str(WARNING_PATH, 'exclude_addons'), true)
 
 	var WarningsManager = load('res://addons/gut/warnings_manager.gd')

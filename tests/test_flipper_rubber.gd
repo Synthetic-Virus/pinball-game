@@ -82,15 +82,37 @@ func before_each() -> void:
 ## perpendicular to that direction, on the surface plane. We place the ball off the mid-bat point
 ## along the +face-normal side and fire it back DOWN the normal into the face; it rebounds out along
 ## the same normal.
+## The resting bat's direction (pivot -> tip) in WORLD space, read from the LIVE FlipperBody basis.
+##
+## WHY read it live instead of computing Vector3(cos(rest), 0, sin(rest)) (QA BUG-019 follow-up):
+## the hand-computed version had the WRONG Z sign for Godot's +Y rotation convention AND assumed the
+## bat sits exactly at FLIPPER_REST_ANGLE. In practice the bat SETTLES to a slightly different angle
+## (the return spring/hinge balance), so the hardcoded direction pointed at empty space and the
+## ball sailed PAST the bat without ever touching it - the test then "passed" the momentum check
+## trivially (the ball kept ~98% of its speed because it never collided) while the direction check
+## failed. The bat's own basis.x IS its true direction at the instant we fire, so deriving the face
+## geometry from it guarantees a real head-on contact at whatever angle the bat actually rests at.
+func _bat_dir() -> Vector3:
+	var bat: Node = _flipper.find_child("FlipperBody", true, false)
+	return (bat as Node3D).global_transform.basis.x.normalized()
+
+
+## The bat's long-face normal on the surface plane, pointing toward the side a ball approaches from
+## (negative Z, up-table). Perpendicular to the live bat direction, about the surface normal (+Y).
+func _face_normal() -> Vector3:
+	var bat_dir: Vector3 = _bat_dir()
+	var n: Vector3 = Vector3(bat_dir.z, 0.0, -bat_dir.x).normalized()
+	# Two perpendiculars exist; choose the one pointing up-table (-Z) so the ball is fired down-table
+	# into the face the way a real ball strikes a resting flipper.
+	return n if n.z < 0.0 else -n
+
+
 func _fire_at_face() -> void:
-	var rest: float = TableConfig.FLIPPER_REST_ANGLE
-	# Bat direction (pivot -> tip) on the surface plane: the left flipper extends toward +X, rotated
-	# by the rest angle about the surface normal (+Y).
-	var bat_dir := Vector3(cos(rest), 0.0, sin(rest))
-	# The long-face normal is the bat direction rotated +90 deg about +Y (perpendicular, on-plane).
-	var face_normal := Vector3(sin(rest), 0.0, -cos(rest))
-	# Aim at the mid-bat point so we hit the long face, not an end cap.
-	var bat_mid: Vector3 = bat_dir * (TableConfig.FLIPPER_LENGTH * 0.5)
+	var bat_dir: Vector3 = _bat_dir()
+	var face_normal: Vector3 = _face_normal()
+	# Aim at the mid-bat point so we hit the long face, not an end cap. The FlipperBody sits at the
+	# pivot (this Flipper node's origin), so the mid-face is half the length along the live bat dir.
+	var bat_mid: Vector3 = _flipper.global_position + bat_dir * (TableConfig.FLIPPER_LENGTH * 0.5)
 	# Stand the ball off the face by half the bat width + the ball radius + a small approach gap.
 	var standoff: float = TableConfig.FLIPPER_WIDTH * 0.5 + TableConfig.BALL_RADIUS + 2.0
 	_ball.position = bat_mid + face_normal * standoff
@@ -123,8 +145,9 @@ func test_ball_rebounds_off_resting_flipper_face() -> void:
 	## a real surface contact, not a pass-through. We fired the ball IN along -face_normal, so a true
 	## rebound has a POSITIVE component along +face_normal. ORACLE: the dot of the ball's measured
 	## velocity with the face normal (geometry-correct for the angled bat, not a bare +/-z check).
-	var rest: float = TableConfig.FLIPPER_REST_ANGLE
-	var face_normal := Vector3(sin(rest), 0.0, -cos(rest))
+	## The face normal is read from the LIVE bat (see _face_normal) so it matches where _fire_at_face
+	## actually aimed, even though the resting bat settles a little off FLIPPER_REST_ANGLE.
+	var face_normal: Vector3 = _face_normal()
 	_fire_at_face()
 	await wait_physics_frames(APPROACH_FRAMES)
 	var rebound_along_normal: float = _ball.linear_velocity.dot(face_normal)
