@@ -464,6 +464,75 @@ Tasks (pull from here - keep them small and finishable):
       rescale) and that the soft-lock + flipper-material + triangular-sling + lane-resize + UX claims
       are GREEN on the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
 
+## SLICE: Fix the launch (gray-box, physics-based) - gamedev-* team
+CONFIRMED playability bug on the deployed build (main): the developer plunges and the ball climbs
+partway up the launch chute, stalls, and rolls back, so play cannot start reliably across the power
+meter. This is a CORRECTNESS slice: NO new mechanics or element types, same element counts, every
+interaction physics-based. Fix the launch so EVERY plunge (the whole meter, including MIN power)
+delivers the ball over the arch into the playfield, AND close the test gap that let a non-clearing
+launch ship. Design intent confirmed in DESIGN.md ("Slice design intent: Fix the launch"). Cut list in
+DESIGN.md ("Cut from the Fix the launch slice"). Flow: game-designer (DONE - intent below) ->
+physics-programmer (MEASURE the cause headless, then fix the measured cause) -> lead-programmer (any
+TableConfig speed/friction/lane edit, re-derive dependents with WHY) -> gameplay-programmer (re-verify
+the plunger contract unchanged) -> test-builder + qa-lead (the behavioral lane-clear oracle +
+structural/stress) -> review board -> producer (scope/finish gate, GREEN CI on the pushed sha). The
+team's Setup phase creates the slice branch; build/QA agents COMMIT but do NOT push; Deliver verifies
+the FULL GUT suite GREEN locally (fetch headless Godot 4.x, run GUT) BEFORE pushing ONE PR. Do NOT
+touch main.
+
+THE DIAGNOSIS (geometry, confirmed by the designer; physics MEASURES it before fixing): ball rests at
+BALL_START.z = HALF_LENGTH - 2.0 = 23.0; the arch is at ARCH_CENTER_Z = -HALF_LENGTH + 6.0 = -19.0,
+so the climb is ~42 units. Down-slope decel = GRAVITY*sin(TILT_DEG) = 200*sin(7) = ~24.4 u/s^2.
+Clearing 42 units from rest needs ~sqrt(2*24.4*42) = ~45.3 u/s at the ball BEFORE rattle/friction loss.
+But LAUNCH_SPEED_MIN = 30 and PLUNGER_STROKE_SPEED_MIN = 30 -> the entire lower half of the meter
+physically cannot clear the lane (primary cause (a): the floor is too low). Physics must also rule in/out
+(b) impulse under-delivery and (c) rattle/friction in the snug 2.0-unit lane.
+
+Tasks (pull from here - keep them small and finishable):
+- [ ] PHYSICS: DIAGNOSE BY MEASUREMENT. Headless, on the REAL tilted Playfield + REAL TableGeometry
+      (build exactly like tests/test_plunger_launch.gd: rotated TILT_DEG about X, TableGeometry.build,
+      shipping Plunger.tscn + Ball.tscn), fire test_strike_at_power at MIN, MID, and MAX and MEASURE:
+      (a) the ball's current_speed() just after the strike resolves, and (b) the apex - the lowest Z
+      (most up-table) the ball reaches before rolling back. Determine which is true: (a) floor too low
+      (the ~45 u/s climb requirement vs LAUNCH_SPEED_MIN 30), (b) the impulse under-delivers (full
+      power < LAUNCH_SPEED_MAX at the ball), (c) the snug 2.0-unit lane bleeds energy to rattle +
+      BALL_FRICTION 0.4. Owner: gamedev-physics-programmer. Files: a measurement script/test under
+      tests/ (may be a temporary diagnostic that reports numbers). Acceptance: the measured speeds and
+      apexes at MIN/MID/MAX are REPORTED in the deliverable, and the cause(s) named from the numbers.
+- [ ] PHYSICS+LEAD: FIX THE MEASURED CAUSE(S). Raise LAUNCH_SPEED_MIN (and PLUNGER_STROKE_SPEED_MIN
+      feeding it) so EVEN A MINIMUM plunge clears the lane into play with margin over ~45 u/s plus the
+      measured rattle/friction loss - the WHOLE meter must be useful, no dead bottom half. Keep
+      LAUNCH_SPEED_MAX a satisfying hard plunge clearly stronger than the new min (raise MAX if needed
+      to keep a readable weak-vs-strong spread). IF the measurement shows rattle/friction is a real
+      contributor, lower the lane-wall / ball-lane friction or widen the lane SLIGHTLY (never back to a
+      bulky box; keep the developer's snug ball-width look). Keep the plunger face striking square with
+      no gap. If the impulse under-delivers, fix the impulse sizing so the delivered ball speed lands in
+      LAUNCH_SPEED_MIN..MAX. WHY-comment every changed number with the measured value behind it.
+      Owner: gamedev-physics-programmer (impulse/friction) + gamedev-lead-programmer (TableConfig
+      constants + re-derive dependents). Files: scripts/config/table_config.gd, scripts/plunger.gd,
+      scripts/ball.gd, scripts/table_geometry.gd (only the lane-friction/widen IF measured). Acceptance:
+      the new behavioral lane-clear test (below) passes at MIN/low/mid; test_plunger_launch.gd and
+      test_plunger_lane_size.gd stay green; the plunger contract is unchanged byte-for-byte.
+- [ ] TEST/QA: CLOSE THE TEST GAP - add a BEHAVIORAL lane-clear oracle. On the real tilted lane
+      geometry, fire a launch at MIN power (and a low/mid power) and assert the ball's apex crosses
+      up-table PAST the lane exit / arch into the play area (ball center crosses up-table of
+      LAUNCH_REACHED_PLAY_Z / the lane-divider top), then settles in the OPEN playfield, NOT back in
+      the lane. Use the ball's MEASURED position as the oracle (position cannot lie). Owner:
+      gamedev-test-builder + gamedev-qa-lead. Files: tests/test_plunger_launch.gd (extend) or a new
+      tests/test_launch_clears_lane.gd. Acceptance: the lane-clear test FAILS against the current
+      too-low floor and PASSES after the fix (intended red-to-green); test_plunger_launch.gd +
+      test_plunger_lane_size.gd stay GREEN.
+- [ ] PHYSICS/QA: NO-TUNNEL RE-CONFIRM AT THE NEW MAX. If LAUNCH_SPEED_MAX is raised, update every
+      no-tunnel stress test to fire at >= 2x the NEW max and confirm zero tunneling through the plunger
+      face, lane pocket, walls, arch, targets, pop bumpers, slingshots, lane guides, and flippers,
+      against REAL instanced bodies measuring real position/velocity. Owner: gamedev-physics-programmer
+      + gamedev-qa-lead. Files: tests/test_plunger_launch.gd, tests/test_ball_tunneling.gd,
+      tests/test_target_no_tunneling.gd, tests/test_active_kicker_no_tunneling.gd. Acceptance: the full
+      stress suite GREEN on the homelab godot runner at >= 2x the new max (the artifact, not a doc claim).
+- [ ] PRODUCER: scope/finish gate. Confirm scope held (launch tuning + lane-clear test only, no new
+      element types/art/rescale) and that the lane-clear + no-tunnel claims are GREEN on the runner on
+      the pushed sha before any merge to main. Owner: gamedev-producer.
+
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.
