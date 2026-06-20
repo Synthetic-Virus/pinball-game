@@ -11,7 +11,13 @@ jobs:
   lint:
     runs-on: [self-hosted, godot]
     steps:
+      # lfs: true pulls the real binary assets (the *.glb flipper bat, the GUT GUI PNGs) instead of
+      # 130-byte LFS pointer files. Without it the runner checks out pointers and the Godot import
+      # pass below reads a pointer as if it were a glTF file, which breaks the web build (risk R2,
+      # docs/specs/asset-data-driven-foundation.md). git-lfs must be installed on the homelab runner.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: GDScript lint (gdtoolkit, advisory)
         run: |
           if command -v gdlint >/dev/null 2>&1; then
@@ -24,7 +30,12 @@ jobs:
     runs-on: [self-hosted, godot]
     needs: lint
     steps:
+      # lfs: true so the GUT import pass and the asset-load tests see the real *.glb, not a pointer
+      # (risk R2). The flipper visual mesh imports from assets/models/flipper_bat.glb; a pointer file
+      # would fail to import and the asset-present test would (correctly) fail.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: GUT headless tests
         run: |
           set -euo pipefail

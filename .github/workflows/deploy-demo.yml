@@ -13,7 +13,12 @@ jobs:
   web-demo:
     runs-on: [self-hosted, godot]
     steps:
+      # lfs: true so the web export embeds the REAL flipper bat *.glb, not a 130-byte pointer (risk
+      # R2). A pointer would import as a broken mesh and the deployed demo would show a missing/empty
+      # flipper visual. git-lfs must be installed on the homelab runner.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Export web build (headless)
         run: |
           mkdir -p build/web

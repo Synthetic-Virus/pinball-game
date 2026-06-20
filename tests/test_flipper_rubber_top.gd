@@ -37,15 +37,16 @@ func _make_flipper(action: String, mirrored: bool) -> Node3D:
 	return flipper
 
 
-## Resolve the bat MeshInstance3D (child of FlipperBody).
+## Resolve the PROCEDURAL bat MeshInstance3D (named "FlipperMesh"), the 2-tone gray-box mesh these
+## tests assert against. WHY find-by-NAME, not first-child: since the "first-real-3d-asset" slice
+## the FlipperBody carries TWO MeshInstance3D children - the procedural "FlipperMesh" AND the
+## imported "FlipperVisual" .glb. The imported visual has no white-rubber-top surface and is not an
+## ArrayMesh, so resolving "the first MeshInstance3D child" was correct ONLY by insertion order
+## (FlipperMesh is added first). Finding by name pins this test to the procedural mesh it means to
+## inspect, immune to any future reorder of the node adds in flipper.gd.
 func _bat_mesh(flipper: Node3D) -> MeshInstance3D:
-	var bat: Node = flipper.find_child("FlipperBody", true, false)
-	if bat == null:
-		return null
-	for child in bat.get_children():
-		if child is MeshInstance3D:
-			return child as MeshInstance3D
-	return null
+	var node: Node = flipper.find_child("FlipperMesh", true, false)
+	return node as MeshInstance3D
 
 
 ## True if the mesh has at least one surface whose material albedo is the white rubber-top color.
