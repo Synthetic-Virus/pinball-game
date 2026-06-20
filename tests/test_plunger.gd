@@ -10,46 +10,40 @@ extends GutTest
 ##   server and NO scene tree.
 ##
 ##   The PHYSICAL strike (the ball's resulting velocity from the AnimatableBody3D face contact, the
-##   power->speed mapping landing in the design range, no tunneling) is the physics half of the slice
-##   and is proven against the REAL instanced Ball.tscn in tests/test_plunger_launch.gd, which drives
-##   a real physics world. Asserting ball speed HERE is impossible without that physics world, so this
-##   file deliberately does NOT - it asserts the launch CONTRACT (signal/disarm/stroke begun + a
-##   monotonic power->stroke-speed mapping), and leaves the measured-ball-speed oracle to that file.
+##   power->speed mapping landing in the design range, no tunneling) is the physics half of the
+##   slice, proven against the REAL instanced Ball.tscn in tests/test_plunger_launch.gd. Asserting
+##   ball speed HERE is impossible without that physics world, so this file deliberately does NOT:
+##   it asserts the launch CONTRACT (signal/disarm/stroke begun + monotonic power->stroke-speed
+##   mapping), and leaves the measured-ball-speed oracle to test_plunger_launch.gd.
 ##
-## WHAT CHANGED (QA BUG-015): the plunger no longer calls ball.launch() (it became a physical strike
-##   in this slice). The four tests that asserted launch_call_count / last_launch_speed /
-##   last_launch_direction on a stub were testing a path that no longer exists and would be RED in CI.
-##   They are rewritten below to assert the plunger-side contract the physical strike DOES honor
-##   (ball_launched once, disarm, stroke begun, and power -> stroke_speed monotonic via the test hook).
+## WHAT CHANGED (QA BUG-015): the plunger no longer calls ball.launch() (it became a physical
+##   strike in this slice). The four tests that asserted launch_call_count / last_launch_speed /
+##   last_launch_direction on a stub were testing a path that no longer exists (RED in CI).
+##   Rewritten to assert the plunger-side contract the physical strike DOES honor: ball_launched
+##   once, disarm, stroke begun, power -> stroke_speed monotonic via the test hook.
 ##
 ## HOW THESE TESTS WORK (for a non-expert reader):
 ##   - We create a real Plunger node and a lightweight stub ball (FakeBall) so set_ball() has a
-##     RigidBody3D to hold. The plunger never calls anything on it now; it is just a valid handle so
-##     the null-guard in _physics_process passes. This is NOT a mock of game infrastructure.
-##   - _physics_process is called manually (simulate frames) so we do not need a running scene tree.
+##     RigidBody3D to hold. The plunger never calls anything on it now (the strike is a collision,
+##     not a code call); it is just a valid handle so the null-guard in _physics_process passes.
+##   - _physics_process is called manually (simulate frames); no running scene tree is needed.
 ##   - All power_changed values are collected via signal connection.
 
-# ---------------------------------------------------------------------------
 # FakeBall: a minimal RigidBody3D handle so plunger.set_ball() has a valid ball to track. The
-# physical plunger does NOT call any method on it (the strike is a collision, not a code call), so
-# this stub records nothing; it only needs to exist and to expose sleeping (set by _do_launch).
-# ---------------------------------------------------------------------------
+# physical plunger does NOT call any method on it, so this stub records nothing; it only needs
+# to exist and to expose sleeping (set by _do_launch when the ball must wake for the strike).
 class FakeBall extends RigidBody3D:
-	pass
+	var _dummy: bool = false  # prevents the unnecessary-pass lint warning
 
-# ---------------------------------------------------------------------------
-# Shared test state
-# ---------------------------------------------------------------------------
+## Step size when we want to simulate a meaningful number of physics frames.
+## Matches project.godot physics/common/physics_ticks_per_second = 120.
+const FRAME_DELTA: float = 1.0 / 120.0
 
 var plunger: Node
 var fake_ball: FakeBall
 
 var _power_values: Array = []     # Collects every power_changed emission.
 var _launched_count: int = 0       # Counts ball_launched signal firings.
-
-## Step size used when we want to simulate a meaningful number of physics frames.
-## Matches project.godot physics/common/physics_ticks_per_second = 120.
-const FRAME_DELTA: float = 1.0 / 120.0
 
 func before_each() -> void:
 	plunger = preload("res://scripts/plunger.gd").new()
@@ -184,7 +178,7 @@ func test_higher_power_maps_to_higher_stroke_speed() -> void:
 func test_strike_drives_face_up_table() -> void:
 	# The physical strike drives the face UP-TABLE (local -Z) into the ball. After a release, the face
 	# has begun moving and its z must be at or below (more up-table than) its rest z. This replaces the
-	# old ball.launch() direction assertion: the launch direction is now expressed by the face's motion.
+	# old ball.launch() direction assertion; the launch direction is now the face's motion.
 	plunger.arm()
 	_simulate_frames(20, true)
 	_release_launch()

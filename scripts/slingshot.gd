@@ -65,11 +65,19 @@ func _make_body_shape() -> Shape3D:
 	return shape
 
 
-## Detector box, padded by one BALL_RADIUS on the thin axis so body_entered fires as the ball
-## arrives.
+## Detector box, padded by one BALL_RADIUS on the thin axis AND the long axis so body_entered fires
+## as the ball arrives anywhere on the face - including at the ENDS of the angled face (QA BUG-018).
+## The detector is rotated by _detector_yaw() (== _body_yaw) in the base, so it stays concentric
+## with the rotated solid body; padding the long axis too means a ball striking near a corner of the
+## angled face still trips the detector before it enters the solid, so the active kick + score fire
+## (no silent "limp bounce" corner contact).
 func _make_detector_shape() -> Shape3D:
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(_length, _height, _thickness + TableConfig.BALL_RADIUS * 2.0)
+	shape.size = Vector3(
+		_length + TableConfig.BALL_RADIUS * 2.0,
+		_height,
+		_thickness + TableConfig.BALL_RADIUS * 2.0
+	)
 	return shape
 
 

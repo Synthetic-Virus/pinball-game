@@ -163,10 +163,15 @@ static func _build_lane_pocket(parent: Node3D) -> void:
 	var t: float = TableConfig.LANE_POCKET_THICKNESS
 	var inner_x: float = TableConfig.LANE_INNER_X
 	var hw: float = TableConfig.HALF_WIDTH
-	# Width spans the lane plus the wall thickness on each side so it seals against the right wall and
-	# the lane divider with no corner gap a ball could squeeze through.
-	var width: float = (hw - inner_x) + t
-	var center_x: float = (inner_x + hw) * 0.5
+	# Width spans the lane (LANE_INNER_X .. HALF_WIDTH) plus HALF a wall thickness of seal slack on the
+	# +X (right-wall) side ONLY. We deliberately do NOT pad the -X (divider) side: padding both sides
+	# pushed the -X face to x=7.6, 0.4 units PAST LANE_INNER_X into the open center drain region, where
+	# a draining ball would clip the protruding corner before the drain plane (QA BUG-020). With the
+	# pad on the right side only, the -X face lands exactly at LANE_INNER_X and the seal against the
+	# right wall is preserved. The lane divider at LANE_INNER_X already closes the -X corner (no gap).
+	var width: float = (hw - inner_x) + t * 0.5
+	# Center so the -X face sits at LANE_INNER_X and the +X face overlaps the right wall by t*0.5.
+	var center_x: float = inner_x + width * 0.5
 	# Center the box in Z so its UP-TABLE face lands exactly at LANE_POCKET_FACE_Z.
 	var center_z: float = TableConfig.LANE_POCKET_FACE_Z + t * 0.5
 	_make_box_body(

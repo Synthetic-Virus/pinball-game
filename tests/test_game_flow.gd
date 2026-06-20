@@ -2,8 +2,8 @@ extends GutTest
 ## Test matrix entry: GAME FLOW state machine (scoring, balls, drain, game over, restart).
 ## Owner: test-builder + gameplay-programmer.
 ##
-## Pure-logic tests: drive GameFlow via its public methods/signals; no physics frames needed. This is
-## the cheapest, most reliable coverage and should be filled first.
+## Pure-logic tests: drive GameFlow via its public methods/signals; no physics frames needed.
+## This is the cheapest, most reliable coverage and should be filled first.
 ##
 ## HOW THESE TESTS WORK (for a non-expert reader):
 ##   - We create a real GameFlow node (no mocks) and call its public methods directly.

@@ -138,3 +138,54 @@ func test_sling_scores_once_per_contact() -> void:
 	_drop_into_sling()
 	await wait_physics_frames(APPROACH_FRAMES)
 	assert_signal_emit_count(_sling, "scored", 1, "slingshot must score exactly once per kick")
+
+
+func test_sling_corner_contact_still_kicks_and_scores() -> void:
+	## REGRESSION for QA BUG-018: the slingshot solid body is a BoxShape3D rotated by _body_yaw, so
+	## its corners poke past an AXIS-ALIGNED detector. A ball striking near a CORNER of the angled face
+	## used to enter the solid body WITHOUT tripping body_entered, so the active kick + score silently
+	## never fired and the ball only got the passive material bounce (the "limp bounce" the active
+	## element exists to prevent). Now the detector is rotated to match the body and padded on the long
+	## axis, so a corner contact must ALSO trip body_entered. We fire the ball at the up-table END of
+	## the angled face and assert the kick fired (scored once AND the ball left at the kick floor).
+	## ORACLE: the REAL scored signal count AND the REAL ball's measured speed.
+	await _setup_sling(false)
+	watch_signals(_sling)
+
+	# Compute a point just off a CORNER of the LEFT slingshot's angled face, then fire the ball into
+	# that corner. The solid body is a BoxShape3D rotated about Y by _body_yaw(), so we derive the
+	# face axes from THAT SAME rotation (not a hand-written sin/cos, which previously had a sign error
+	# on the long axis and aimed the ball at empty space PAST the face - it then only ever got a
+	# passive glancing bounce, never a real corner contact, masking the behavior under test).
+	#   along       = the face LONG axis  = Basis(Y, yaw) * +X  (one end is a corner).
+	#   face_normal = the face THIN axis  = Basis(Y, yaw) * +Z  (the direction the ball stands off on).
+	# Using the real rotated basis guarantees `corner` lies on the actual angled face the ball strikes.
+	var yaw: float = _sling._body_yaw()
+	var body_basis := Basis(Vector3(0.0, 1.0, 0.0), yaw)
+	var along: Vector3 = body_basis * Vector3(1.0, 0.0, 0.0)       # face long axis (rotated +X).
+	var face_normal: Vector3 = body_basis * Vector3(0.0, 0.0, 1.0)  # face thin axis (rotated +Z).
+	# Corner = the end of the long axis, out on the face surface (+half thickness along the thin axis).
+	var corner: Vector3 = (
+		along * (TableConfig.SLINGSHOT_LENGTH * 0.5)
+		+ face_normal * (TableConfig.SLINGSHOT_THICKNESS * 0.5)
+	)
+	var standoff: float = TableConfig.BALL_RADIUS + 1.5
+	_ball.position = corner + face_normal * standoff
+	_ball.position.y = 0.0  # strike the face edge-on at body mid-height, not over/under it.
+	_ball.linear_velocity = -face_normal * SLOW_FIRE_SPEED  # fire into the corner of the face.
+	_ball.angular_velocity = Vector3.ZERO
+	_ball.sleeping = false
+	await wait_physics_frames(APPROACH_FRAMES)
+
+	assert_signal_emit_count(
+		_sling, "scored", 1,
+		"a corner contact on the angled slingshot face must still score (QA BUG-018)"
+	)
+	assert_gt(
+		_ball.current_speed(),
+		TableConfig.KICK_MIN_OUTGOING_SPEED,
+		(
+			"a corner contact must still get the ACTIVE kick (>= KICK_MIN_OUTGOING_SPEED), not a "
+			+ "limp passive bounce (QA BUG-018). speed=%f"
+		) % _ball.current_speed()
+	)

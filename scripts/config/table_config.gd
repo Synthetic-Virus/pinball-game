@@ -85,7 +85,18 @@ const FLIPPER_UP_ANGLE: float = 0.15
 ## trigger 2 units OUTSIDE the playfield - if a naive bottom wall were ever built it would block the
 ## drain (QA BUG-004). Keeping it inside the field removes that dependency.
 const DRAIN_Z: float = HALF_LENGTH - 1.0
-const DRAIN_WIDTH: float = HALF_WIDTH * 2.0
+## DRAIN spans ONLY the OPEN CENTER region, NOT the launch lane (QA B3 / BUG-003-class fix).
+## DESIGN mandates an "open CENTER drain between/below the flippers"; the launch lane on the +X side
+## (x in [LANE_INNER_X, HALF_WIDTH]) is a RESTING chute, not a drain. A full-width drain volume
+## overlapped the lane and would swallow the resting/dribbled-back ball at BALL_START - correct
+## behavior then depended ENTIRELY on a GameFlow state guard (drain only while BALL_IN_PLAY), which
+## is fragile defense-in-depth masking wrong geometry: a dribble launch that rolls the ball back to
+## rest in the lane WHILE BALL_IN_PLAY would drain it from the lane. We instead size the drain to
+## the open center mouth so the geometry never catches a lane ball. The drain spans the open
+## region x in [-HALF_WIDTH, LANE_INNER_X] and is centered there.
+const DRAIN_WIDTH: float = HALF_WIDTH + LANE_INNER_X  ## Open center: -HALF_WIDTH .. +LANE_INNER_X.
+## Midpoint of the open center region (NOT 0): the X the drain volume is centered on.
+const DRAIN_CENTER_X: float = (LANE_INNER_X - HALF_WIDTH) * 0.5
 const DRAIN_DEPTH: float = 6.0
 
 ## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
