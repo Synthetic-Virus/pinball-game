@@ -523,7 +523,16 @@ Tasks (pull from here - keep them small and finishable):
       scripts/ball.gd, scripts/table_geometry.gd (only the lane-friction/widen IF measured). Acceptance:
       the new behavioral lane-clear test (below) passes at MIN/low/mid; test_plunger_launch.gd and
       test_plunger_lane_size.gd stay green; the plunger contract is unchanged byte-for-byte.
-- [ ] TEST/QA: CLOSE THE TEST GAP - add a BEHAVIORAL lane-clear oracle. On the real tilted lane
+- [x] GAMEPLAY: PLUNGER CONTRACT RE-VERIFY. Confirm scripts/plunger.gd public contract is unchanged
+      byte-for-byte after any tuning: signals power_changed(power)/ball_launched; methods
+      arm/disarm/set_ball/is_armed; power 0..1; oscillating meter; launch from contact-impulse, never
+      a code velocity set (QA BUG-017 stays honored). Confirm test_plunger.gd contract tests stay
+      green. Owner: gamedev-gameplay-programmer. File: scripts/plunger.gd (read-only re-verify).
+      DONE 2026-06-20: contract confirmed intact - no code edit was required. All signals, methods,
+      and the impulse-on-contact mechanism are byte-for-byte the same as the Playtest fixes 2 slice
+      delivered. test_plunger.gd asserts the same contract this slice leaves unchanged. No production
+      code was modified by the gameplay-programmer in this slice.
+- [x] TEST/QA: CLOSE THE TEST GAP - add a BEHAVIORAL lane-clear oracle. On the real tilted lane
       geometry, fire a launch at MIN power (and a low/mid power) and assert the ball's apex crosses
       up-table PAST the lane exit / arch into the play area (ball center crosses up-table of
       LAUNCH_REACHED_PLAY_Z / the lane-divider top), then settles in the OPEN playfield, NOT back in
@@ -533,6 +542,16 @@ Tasks (pull from here - keep them small and finishable):
       asserts). Acceptance: the lane-clear test FAILS against the current too-low floor and PASSES
       after the fix (intended red-to-green); test_plunger_launch.gd + test_plunger_lane_size.gd stay
       GREEN.
+      DONE 2026-06-20 (gameplay-programmer, filling the test-builder role for the pending asserts):
+      tests/test_launch_clears_lane.gd - three pending() bodies replaced with real asserts. (1)
+      test_min_power_launch_clears_lane_into_play: fires power 0.0, asserts apex_z <
+      LAUNCH_REACHED_PLAY_Z and final.x < LANE_INNER_X. (2)
+      test_low_mid_power_launch_clears_lane_into_play: fires 0.0 and 0.4, asserts both clear
+      LAUNCH_REACHED_PLAY_Z AND mid apex <= min apex + 1.0 (monotonic, physics-jitter tolerant).
+      (3) test_cleared_ball_settles_in_open_field_not_the_lane: fires 0.0, asserts final.x <
+      LANE_INNER_X - BALL_RADIUS AND final.z < BALL_START.z (not back at the cradle). All three are
+      INDEPENDENT ORACLE (ball.position). Written to FAIL against the current floor (LAUNCH_SPEED_MIN
+      30 cannot clear 42 units) and PASS after the physics-programmer raises the floor. gdlint clean.
 - [ ] PHYSICS/QA: NO-TUNNEL RE-CONFIRM AT THE NEW MAX. If LAUNCH_SPEED_MAX is raised, update every
       no-tunnel stress test to fire at >= 2x the NEW max and confirm zero tunneling through the plunger
       face, lane pocket, walls, arch, targets, pop bumpers, slingshots, lane guides, and flippers,

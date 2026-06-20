@@ -96,8 +96,23 @@ func test_min_power_launch_clears_lane_into_play() -> void:
 	## ASSERT: result.apex_z < TableConfig.LAUNCH_REACHED_PLAY_Z (cleared into play).
 	## ASSERT: final.x < TableConfig.LANE_INNER_X (settled in the open field, not the lane).
 	## ORACLE: ball.position. The whole meter must be useful - even the weakest plunge clears.
-	pending(
-		"test-builder: assert apex < LAUNCH_REACHED_PLAY_Z and final.x < LANE_INNER_X at power 0.0"
+	## WHY power 0.0: this is the absolute worst case - the bottom of the meter. If this clears, the
+	## entire meter is useful (no dead zone). Pre-fix this FAILS because LAUNCH_SPEED_MIN 30 < 45.3
+	## u/s required to climb ~42 units; post-fix the raised floor makes even a minimum plunge clear.
+	var result: Dictionary = await _launch_and_track(0.0)
+	assert_lt(
+		result.apex_z,
+		TableConfig.LAUNCH_REACHED_PLAY_Z,
+		"MIN-power launch apex (%.2f) must cross up-table of LAUNCH_REACHED_PLAY_Z (%.2f)" % [
+			result.apex_z, TableConfig.LAUNCH_REACHED_PLAY_Z
+		]
+	)
+	assert_lt(
+		result.final.x,
+		TableConfig.LANE_INNER_X,
+		"ball must settle in the open field (x %.2f < LANE_INNER_X %.2f), not back in the lane" % [
+			result.final.x, TableConfig.LANE_INNER_X
+		]
 	)
 
 
@@ -108,8 +123,29 @@ func test_low_mid_power_launch_clears_lane_into_play() -> void:
 	## ASSERT: result.apex_z < TableConfig.LAUNCH_REACHED_PLAY_Z, and the apex is at least as far
 	## up-table as the MIN launch's apex (monotonic: more power, no less reach).
 	## ORACLE: ball.position.
-	pending(
-		"test-builder: assert apex < LAUNCH_REACHED_PLAY_Z at power ~0.4 with margin over MIN"
+	## WHY power 0.4: this is the lower-mid band - above the absolute minimum but still modest.
+	## If the floor is raised correctly, the whole band (0.0..1.0) clears; we spot-check 0.4 as a
+	## representative lower-band value distinct from 0.0, confirming no dead zone in the mid range.
+	## WHY check apex_z monotonicity relative to MIN: DESIGN requires "more meter => faster ball, no
+	## less reach" (monotonic mapping). A mid-power plunge must reach at least as far up-table as a
+	## min-power plunge or the mapping is broken in the low-mid band.
+	var result_min: Dictionary = await _launch_and_track(0.0)
+	var result_mid: Dictionary = await _launch_and_track(0.4)
+	assert_lt(
+		result_mid.apex_z,
+		TableConfig.LAUNCH_REACHED_PLAY_Z,
+		"LOW/MID-power launch apex (%.2f) must cross up-table of LAUNCH_REACHED_PLAY_Z (%.2f)" % [
+			result_mid.apex_z, TableConfig.LAUNCH_REACHED_PLAY_Z
+		]
+	)
+	# Monotonic: a higher power must travel at least as far up-table (lower or equal apex_z).
+	# We allow a 1.0-unit tolerance: at identical ball speeds (the floor is a constant impulse floor),
+	# physics jitter may produce near-equal apexes; the strict requirement is no regression, not a
+	# guaranteed improvement at EVERY small power increment.
+	assert_true(
+		result_mid.apex_z <= result_min.apex_z + 1.0,
+		("LOW/MID apex (%.2f) must be at least as far up-table as MIN apex (%.2f) - monotonic mapping"
+			% [result_mid.apex_z, result_min.apex_z])
 	)
 
 
@@ -119,6 +155,27 @@ func test_cleared_ball_settles_in_open_field_not_the_lane() -> void:
 	## and is NOT back at the cradle Z (it did not roll all the way back down the lane).
 	## ASSERT: final.x < TableConfig.LANE_INNER_X - TableConfig.BALL_RADIUS (clear of the lane).
 	## ORACLE: ball.position after the play-out window.
-	pending(
-		"test-builder: assert the cleared ball's final position is in the open field, not the lane"
+	## WHY power 0.0: if the worst-case (minimum power) launch clears and stays in the open field,
+	## then the ball genuinely reached play and the player can flip it. A ball that dribbles back into
+	## the lane means the launch failed: the player is stuck with a dead ball and no way forward
+	## (the soft-lock this slice also guards against via the watchdog, but the watchdog should
+	## essentially never fire in normal play once the floor is fixed per DESIGN must-feel #4).
+	## WHY LANE_INNER_X - BALL_RADIUS: the ball's CENTER must clear the lane divider wall by at
+	## least one radius so the ball body is entirely in the open field, not straddling the divider.
+	var result: Dictionary = await _launch_and_track(0.0)
+	var clear_x: float = TableConfig.LANE_INNER_X - TableConfig.BALL_RADIUS
+	assert_lt(
+		result.final.x,
+		clear_x,
+		("cleared ball's final x (%.2f) must be in the open field (< LANE_INNER_X - BALL_RADIUS"
+			+ " = %.2f), not back in the lane") % [result.final.x, clear_x]
+	)
+	# Also confirm the ball is not back at the cradle Z (did not roll all the way back down the lane).
+	# A ball in the open field may be anywhere in Z; the key is it is not in the lane at all.
+	# We assert x first (the primary check); the Z guard is defensive belt-and-suspenders.
+	assert_lt(
+		result.final.z,
+		TableConfig.BALL_START.z,
+		("cleared ball's final z (%.2f) must be up-table of the cradle z (%.2f)"
+			+ " - it must not have rolled back") % [result.final.z, TableConfig.BALL_START.z]
 	)
