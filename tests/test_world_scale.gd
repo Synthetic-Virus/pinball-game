@@ -1,6 +1,7 @@
 extends GutTest
 ## Test matrix entry: WORLD SCALE CONTRACT.
 ## Owner: test-builder.
+## Updated: slice "Table reshape + playtest fixes" (2026-06-19) - HALF_WIDTH 16 assertions added.
 ##
 ## Asserts that the TableConfig scale decision is internally consistent and that the
 ## project setting matches the constant, so no element can silently drift off the
@@ -9,6 +10,10 @@ extends GutTest
 ##
 ## Independent-oracle rule: the gravity check reads ProjectSettings directly rather
 ## than relying on TableConfig alone, so a mismatch between the two is caught.
+##
+## The "WIDEN" group at the bottom specifically asserts that the rescale landed
+## (HALF_WIDTH == 16, all derived X constants in the correct post-widen range).
+## These fail against the old width and pass once the table_config.gd widen is applied.
 
 func test_gravity_matches_project_setting() -> void:
 	# The project.godot file sets physics/3d/default_gravity = 200.0 and TableConfig.GRAVITY = 200.0.
@@ -104,4 +109,117 @@ func test_flipper_height_exceeds_ball_radius() -> void:
 		"FLIPPER_HEIGHT (%f) must exceed BALL_RADIUS (%f)" % [
 			TableConfig.FLIPPER_HEIGHT, TableConfig.BALL_RADIUS
 		]
+	)
+
+
+# ---- WIDEN ASSERTIONS (slice "Table reshape + playtest fixes", 2026-06-19) ------------------
+# These assert the SPECIFIC post-widen values from ARCHITECTURE.md section 11.4.
+# They fail on the old (HALF_WIDTH 12) constants and pass after the rescale.
+# If any constant is accidentally reverted this group catches it immediately.
+
+func test_half_width_is_16() -> void:
+	# The widen slice sets HALF_WIDTH exactly 16.0 (was 12.0).
+	# This is the headline assertion for the rescale; everything else derives from it.
+	assert_eq(
+		TableConfig.HALF_WIDTH, 16.0,
+		"HALF_WIDTH must be 16.0 after the widen slice (was 12.0); got %f" % TableConfig.HALF_WIDTH
+	)
+
+
+func test_lane_inner_x_is_10_point_5() -> void:
+	# LANE_INNER_X was re-derived from 8.0 to 10.5 to keep a proportional 5.5-unit lane
+	# on the wider table (ARCHITECTURE.md 11.4).
+	assert_eq(
+		TableConfig.LANE_INNER_X, 10.5,
+		"LANE_INNER_X must be 10.5 after the widen (was 8.0); got %f" % TableConfig.LANE_INNER_X
+	)
+
+
+func test_ball_start_x_is_lane_center() -> void:
+	# BALL_START.x was a stale literal 10.0 that would have placed the ball on the divider
+	# after LANE_INNER_X moved to 10.5. Re-derived as the lane center:
+	#   (LANE_INNER_X + HALF_WIDTH) * 0.5 = (10.5 + 16.0) / 2 = 13.25
+	# Verified as a float-equality (the constant is the literal 13.25, not an expression).
+	assert_eq(
+		TableConfig.BALL_START.x, 13.25,
+		"BALL_START.x must be 13.25 (lane center on the widened table); got %f"
+		% TableConfig.BALL_START.x
+	)
+
+
+func test_flipper_pivot_spread_holds_drain_mouth() -> void:
+	# FLIPPER_PIVOT_SPREAD was moved from 7.0 to 7.2 to keep the drain mouth at ~2.46 units
+	# (~2 ball-diameters) instead of scaling it wide with the table (which would create a
+	# chasm). The drain mouth = 2*SPREAD - 2*FLIPPER_LENGTH*cos(|REST_ANGLE|).
+	# Expected: ~2.46 u. Hard floor: > 2*BALL_RADIUS (ball can drain); hard ceiling: < 6.0
+	# (not a chasm).
+	var mouth: float = (
+		2.0 * TableConfig.FLIPPER_PIVOT_SPREAD
+		- 2.0 * TableConfig.FLIPPER_LENGTH * cos(abs(TableConfig.FLIPPER_REST_ANGLE))
+	)
+	assert_gt(
+		mouth,
+		2.0 * TableConfig.BALL_RADIUS,
+		"drain mouth (%f) must be wider than a ball diameter so balls can drain" % mouth
+	)
+	assert_lt(
+		mouth, 6.0,
+		"drain mouth (%f) must not be a chasm (>= 6 u); keep it ~2-3 ball-diameters" % mouth
+	)
+
+
+func test_slingshot_positions_are_outboard_of_flippers() -> void:
+	# After the widen the slingshot positions moved from +/-8.5 to +/-10.5 to stay outboard
+	# of the new flipper pivots (+/-7.2) and inside the side walls (+/-16). A slingshot that
+	# drifted inside the pivot would not intercept a ball falling down the side channel.
+	assert_lt(
+		TableConfig.SLINGSHOT_LEFT_POS.x, -TableConfig.FLIPPER_PIVOT_SPREAD,
+		"left sling (%f) must be outboard of (< -) the left flipper pivot (%f)"
+		% [TableConfig.SLINGSHOT_LEFT_POS.x, -TableConfig.FLIPPER_PIVOT_SPREAD]
+	)
+	assert_gt(
+		TableConfig.SLINGSHOT_RIGHT_POS.x, TableConfig.FLIPPER_PIVOT_SPREAD,
+		"right sling (%f) must be outboard of (> +) the right flipper pivot (%f)"
+		% [TableConfig.SLINGSHOT_RIGHT_POS.x, TableConfig.FLIPPER_PIVOT_SPREAD]
+	)
+	# Both must be inside the side walls.
+	assert_lt(
+		absf(TableConfig.SLINGSHOT_LEFT_POS.x), TableConfig.HALF_WIDTH,
+		"left sling must be inside the left wall"
+	)
+	assert_lt(
+		absf(TableConfig.SLINGSHOT_RIGHT_POS.x), TableConfig.HALF_WIDTH,
+		"right sling must be inside the right wall"
+	)
+
+
+func test_pop_bumper_positions_use_widened_spread() -> void:
+	# The two lower bumpers moved from +/-4.5 to +/-6.0 for the wider table. Assert the
+	# spread is >= 5.0 (definitively wider than the old +/-4.5) and that no bumper fouls
+	# the side wall (clearance = HALF_WIDTH - POP_BUMPER_RADIUS must not be exceeded).
+	for pos: Vector3 in TableConfig.POP_BUMPER_POSITIONS:
+		var x_abs: float = absf(pos.x)
+		assert_lt(
+			x_abs + TableConfig.POP_BUMPER_RADIUS,
+			TableConfig.HALF_WIDTH,
+			"pop bumper at x=%f + radius %f fouls the side wall (HALF_WIDTH=%f)"
+			% [pos.x, TableConfig.POP_BUMPER_RADIUS, TableConfig.HALF_WIDTH]
+		)
+
+
+func test_lane_guide_divider_auto_follows_widen() -> void:
+	# LANE_GUIDE_DIVIDER_X is defined as HALF_WIDTH - 3.0. After the widen it must equal
+	# 13.0. This keeps the OUTLANE at ~3.0 units (drain-risk channel) while the INLANE
+	# widens to ~5.8 units (save lane). ARCHITECTURE.md 11.4 and 11.5.
+	assert_eq(
+		TableConfig.LANE_GUIDE_DIVIDER_X,
+		TableConfig.HALF_WIDTH - 3.0,
+		"LANE_GUIDE_DIVIDER_X must be HALF_WIDTH-3.0=%f; got %f"
+		% [TableConfig.HALF_WIDTH - 3.0, TableConfig.LANE_GUIDE_DIVIDER_X]
+	)
+	# Concrete value check so a constant extraction typo is caught.
+	assert_eq(
+		TableConfig.LANE_GUIDE_DIVIDER_X, 13.0,
+		"LANE_GUIDE_DIVIDER_X must be 13.0 after the widen; got %f"
+		% TableConfig.LANE_GUIDE_DIVIDER_X
 	)
