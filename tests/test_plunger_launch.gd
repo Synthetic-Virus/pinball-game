@@ -296,3 +296,54 @@ func test_max_strike_does_not_tunnel_ball_behind_plunger_or_pocket() -> void:
 			-TableConfig.BALL_RADIUS * 2.0,
 			"iter %d: ball dropped through the surface. y=%f" % [i, _ball.position.y]
 		)
+
+
+# ---- STRESS: a fast ball fired HEAD-ON at the narrowed plunger FACE never tunnels it -------------
+
+func test_fast_ball_head_on_does_not_tunnel_the_plunger_face() -> void:
+	## SLICE "Playtest fixes 2", fix 3b: the plunger face was NARROWED (PLUNGER_FACE_WIDTH follows the
+	## resized lane). A narrower kinematic barrier is the worst case for tunneling, so we fire the
+	## ball HEAD-ON into the face at >= 2x LAUNCH_SPEED_MAX and assert it never passes to the far side
+	## of it. PLUNGER_FACE_WIDTH/THICKNESS are read LIVE from the config (never hardcoded), so the gate
+	## re-validates automatically if the lane is resized again. The face is a solid AnimatableBody3D on
+	## KINEMATIC_OBSTACLES backed by the ball's continuous_cd; this proves that holds at worst-case
+	## speed for the narrowed face. ORACLE: the ball's measured Z relative to the real face position.
+	const ITERATIONS: int = 30
+	var test_speed: float = 2.0 * TableConfig.LAUNCH_SPEED_MAX
+
+	var face: Node3D = _plunger.find_child("PlungerFace", true, false) as Node3D
+	assert_not_null(face, "the plunger must build a PlungerFace to stress")
+	if face == null:
+		return
+
+	# The face's local Z (its thickness axis) center and the far (+Z, down-table) edge of the barrier.
+	# PLUNGER_FACE_THICKNESS is read live so the threshold tracks the real face size, not a constant.
+	var face_z: float = TableConfig.PLUNGER_REST_POS.z
+	var far_edge_z: float = face_z + TableConfig.PLUNGER_FACE_THICKNESS * 0.5
+	var tunnel_threshold: float = far_edge_z + TableConfig.BALL_RADIUS * 0.5
+
+	# Disarm so no stroke fires; we are testing the STATIC barrier the face presents, not a launch.
+	_plunger.disarm()
+	_ball.gravity_scale = 0.0
+
+	# Fire from UP-table of the face (smaller Z), centered on the face width (live PLUNGER_FACE_WIDTH),
+	# straight DOWN-table (+Z) into the face. Up-table is -Z, so the start is one face-thickness plus a
+	# stand-off up-table of the face.
+	var start_z: float = face_z - (TableConfig.PLUNGER_FACE_THICKNESS + TableConfig.BALL_RADIUS + 3.0)
+	var face_x: float = TableConfig.PLUNGER_REST_POS.x
+	var face_y: float = TableConfig.PLUNGER_REST_POS.y
+
+	for i in range(ITERATIONS):
+		_ball.position = Vector3(face_x, face_y, start_z)
+		_ball.linear_velocity = Vector3(0.0, 0.0, test_speed)
+		_ball.angular_velocity = Vector3.ZERO
+		_ball.sleeping = false
+		await wait_physics_frames(20)
+
+		assert_lt(
+			_ball.position.z,
+			tunnel_threshold,
+			"iter %d: fast ball tunneled the narrowed plunger face (width=%f). z=%f, far edge=%f" % [
+				i, TableConfig.PLUNGER_FACE_WIDTH, _ball.position.z, far_edge_z
+			]
+		)

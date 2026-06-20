@@ -471,17 +471,13 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 		# Two triangles per side quad (wound so the normal faces outward).
 		_emit_tri(st_body, a_top, a_bot, b_top, flip_winding)
 		_emit_tri(st_body, b_top, a_bot, b_bot, flip_winding)
-	# Bottom cap (fan from the first point), wound to face DOWN (-Y). The outline is CCW in X-Z, whose
-	# fan in FORWARD order (0, i, i+1) at -half_h faces -Y - exactly what a bottom cap wants - so we do
-	# NOT reverse it here (contrast the top cap below, which is reversed to face +Y). See concern (B).
+	# Bottom cap (fan from the first point), wound to face DOWN (-Y). We orient the cap from the
+	# outline's ACTUAL signed area in the X-Z plane (the proven slingshot BUG-032 technique) so the
+	# bottom always faces -Y for BOTH the left (CCW) and the mirrored right (CW) outline, with no
+	# per-side flag to thread. The bottom cap is the OPPOSITE winding of the top cap below.
+	var top_forward: bool = _cap_top_is_forward(outline)
 	for i in range(1, n - 1):
-		_emit_tri(
-			st_body,
-			Vector3(outline[0].x, -half_h, outline[0].y),
-			Vector3(outline[i].x, -half_h, outline[i].y),
-			Vector3(outline[i + 1].x, -half_h, outline[i + 1].y),
-			flip_winding
-		)
+		_emit_cap_tri(st_body, outline, i, -half_h, not top_forward)
 	st_body.generate_normals()
 	var body_mat := StandardMaterial3D.new()
 	body_mat.albedo_color = BODY_COLOR
@@ -489,20 +485,15 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 	st_body.commit(mesh)
 
 	# --- Surface 1: WHITE RUBBER TOP cap (the up-facing face). ---
-	# Wound to face UP (+Y) - the face the top-down camera sees. The outline is CCW in X-Z, whose fan
-	# in FORWARD order (0, i, i+1) at +half_h faces -Y (concern (B) above), so we emit the top cap
-	# REVERSED (0, i+1, i) so its normal points +Y. test_flipper_rubber_top.gd asserts this (the cap's
-	# average normal Y must be POSITIVE on both bats); the naive forward order failed it on BOTH sides.
+	# Wound to face UP (+Y) - the face the top-down camera sees. Orientation is derived from the
+	# outline's signed area (_cap_top_is_forward) so the top cap faces +Y on BOTH the left and the
+	# mirrored right bat. test_flipper_rubber_top.gd asserts this (the cap's average normal Y must be
+	# POSITIVE on both bats); deriving from signed area removes the brittle hand-picked winding that
+	# faced the cap DOWN on both bats (the SEND_BACK failure).
 	var st_top := SurfaceTool.new()
 	st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(1, n - 1):
-		_emit_tri(
-			st_top,
-			Vector3(outline[0].x, half_h, outline[0].y),
-			Vector3(outline[i + 1].x, half_h, outline[i + 1].y),
-			Vector3(outline[i].x, half_h, outline[i].y),
-			flip_winding
-		)
+		_emit_cap_tri(st_top, outline, i, half_h, top_forward)
 	st_top.generate_normals()
 	var top_mat := StandardMaterial3D.new()
 	top_mat.albedo_color = RUBBER_TOP_COLOR
@@ -512,11 +503,10 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 	return mesh
 
 
-## Emit one triangle to a SurfaceTool, flipping the winding (swapping v1/v2) when flip is true. This
-## is the single point the right-bat winding correction lives: an X-mirrored outline reverses the
-## perimeter order, so the mirrored bat must flip every triangle to keep its normals facing the same
-## way (top cap up, so the white rubber top is not culled). Keeps the fix in ONE readable helper
-## instead of scattering swapped vertex orders through the mesh builder.
+## Emit one triangle to a SurfaceTool, flipping the winding (swapping v1/v2) when flip is true. Used
+## by the SIDE WALLS: an X-mirrored outline reverses the perimeter order, so the mirrored bat flips
+## every side triangle to keep its outward normals consistent. The CAPS use _emit_cap_tri instead
+## (their orientation is derived from the outline's signed area, not from a per-side flag).
 func _emit_tri(st: SurfaceTool, v0: Vector3, v1: Vector3, v2: Vector3, flip: bool) -> void:
 	st.add_vertex(v0)
 	if flip:
@@ -525,3 +515,44 @@ func _emit_tri(st: SurfaceTool, v0: Vector3, v1: Vector3, v2: Vector3, flip: boo
 	else:
 		st.add_vertex(v1)
 		st.add_vertex(v2)
+
+
+## Signed area of the (x, z) outline in the X-Z plane (the shoelace formula). Positive = the points
+## wind counter-clockwise (the left bat), negative = clockwise (the mirrored right bat). Used to
+## orient the prism caps so the TOP always faces +Y regardless of the per-side mirror, the same
+## proven technique slingshot.gd uses for its triangular prism (QA BUG-032).
+func _signed_area_xz(outline: PackedVector2Array) -> float:
+	var area: float = 0.0
+	var n: int = outline.size()
+	for i in range(n):
+		var a: Vector2 = outline[i]
+		var b: Vector2 = outline[(i + 1) % n]
+		area += a.x * b.y - b.x * a.y
+	return area * 0.5
+
+
+## Whether the TOP cap fan should be emitted in FORWARD order (0, i, i+1) to face +Y. Derived from
+## the outline's signed area so it self-corrects for the mirrored bat: a CCW outline (positive area,
+## the left bat) needs the forward order to face the top cap +Y; a CW outline (negative area, the
+## mirrored right bat) needs the reversed order. The exact mapping (which sign uses forward) was
+## pinned against the REAL mesh normals that test_flipper_rubber_top.gd reads from
+## generate_normals() under Godot's built-in winding convention, NOT a hand-written cross-product
+## (the previous code's hand cross-product assumed the opposite convention and faced both caps DOWN
+## - the SEND_BACK failure).
+func _cap_top_is_forward(outline: PackedVector2Array) -> bool:
+	return _signed_area_xz(outline) > 0.0
+
+
+## Emit one cap fan triangle (apex outline[0], then outline[i], outline[i+1]) at height y. When
+## forward is false the i / i+1 pair is swapped, flipping the cap's facing. Keeps the cap winding in
+## one helper shared by the top (+Y) and bottom (-Y) caps of both bats.
+func _emit_cap_tri(
+	st: SurfaceTool, outline: PackedVector2Array, i: int, y: float, forward: bool
+) -> void:
+	st.add_vertex(Vector3(outline[0].x, y, outline[0].y))
+	if forward:
+		st.add_vertex(Vector3(outline[i].x, y, outline[i].y))
+		st.add_vertex(Vector3(outline[i + 1].x, y, outline[i + 1].y))
+	else:
+		st.add_vertex(Vector3(outline[i + 1].x, y, outline[i + 1].y))
+		st.add_vertex(Vector3(outline[i].x, y, outline[i].y))

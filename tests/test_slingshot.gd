@@ -47,12 +47,23 @@ func _setup_sling(mirrored: bool) -> void:
 	await wait_frames(2)
 
 
-## Drop the ball onto the slingshot from down-table (the side a draining ball comes from), moving
-## up-and-in toward the face so it makes contact.
+## Drop the ball onto the FRONT of the slingshot's angled kicking face, moving INTO the face so it
+## makes contact. SLICE "Playtest fixes 2", fix 3: the sling is now a rotated triangular hull whose
+## kicking face normal is the kick direction (slingshot.gd._body_yaw maps the face's local +Z onto
+## _kick_dir, the BUG-030 orientation the live table relies on). A draining ball strikes that face
+## on its FRONT (the kick-normal side), so we stand the ball off along +kick_dir and fire it back
+## along -kick_dir into the face; the active kick then sends it out along +kick_dir (into play). The
+## earlier version dropped the ball from straight down-table (-Z), which struck the BACK of the face
+## and only ever got a passive bounce - it passed only when the face was (incorrectly) flipped to
+## point down-table, which broke the live-table launch path (test_soft_lock_integration).
 func _drop_into_sling() -> void:
-	_ball.position = Vector3(0.0, 0.0, TableConfig.BALL_RADIUS + 2.0)
-	# Push gently toward the sling (up-table) so a contact occurs; the active kick does the rest.
-	_ball.linear_velocity = Vector3(0.0, 0.0, -SLOW_FIRE_SPEED)
+	var kick_dir: Vector3 = _sling._kick_dir
+	var standoff: float = TableConfig.BALL_RADIUS + 2.0
+	_ball.position = kick_dir * standoff
+	_ball.position.y = 0.0  # strike the face at body mid-height, not over/under it.
+	# Fire INTO the face (opposite the kick normal) so a real contact occurs; the active kick does the
+	# rest, sending the ball back out along +kick_dir (up-table and toward center).
+	_ball.linear_velocity = -kick_dir * SLOW_FIRE_SPEED
 	_ball.angular_velocity = Vector3.ZERO
 	_ball.sleeping = false
 

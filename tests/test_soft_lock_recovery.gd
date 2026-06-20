@@ -72,10 +72,12 @@ func test_failed_launch_recovers_without_spending_a_ball() -> void:
 		_flow, "request_relaunch",
 		"a failed launch must request a relaunch (re-seat + re-arm the SAME ball)"
 	)
-	# No ball spent: balls_changed must NOT have fired during the recovery.
+	# No ball spent: balls_changed must NOT fire during the recovery. watch_signals() is set up AFTER
+	# start_game() (before_each), so start_game's initial balls_changed is NOT counted here; the
+	# recovery path emits NONE, so the watched count must be EXACTLY 0 (a too-weak launch is free).
 	assert_signal_emit_count(
-		_flow, "balls_changed", 1,
-		"recovery must NOT spend a ball (balls_changed fires only once, from start_game)"
+		_flow, "balls_changed", 0,
+		"recovery must NOT spend a ball (no balls_changed after the post-start_game watch begins)"
 	)
 	# Belt-and-braces: the relaunch path is distinct from request_new_ball (no new ball consumed).
 	assert_signal_not_emitted(
@@ -116,9 +118,11 @@ func test_drain_after_reaching_play_still_spends_a_ball() -> void:
 		_flow.current_state(), _flow.State.READY_TO_LAUNCH,
 		"a genuine drain returns to READY_TO_LAUNCH for the next ball"
 	)
+	# watch_signals() begins AFTER start_game() (before_each), so only the drain's balls_changed is
+	# counted here: a genuine drain spends EXACTLY one ball, so the watched count is 1.
 	assert_signal_emit_count(
-		_flow, "balls_changed", 2,
-		"a genuine drain DOES spend a ball (start_game once + the drain once)"
+		_flow, "balls_changed", 1,
+		"a genuine drain DOES spend a ball (one balls_changed after the post-start_game watch begins)"
 	)
 
 
