@@ -58,6 +58,38 @@ Status: NOT REACHED.
   tunneling -> QA_BACKLOG (do NOT block resubmission). Gate 0 NOT scheduled until the suite is green on
   the runner.
 
+- 2026-06-19 SEND_BACK - SLICE "Table reshape + playtest fixes": SCOPE HELD (five fixes only, no new
+  element types/art/length change - the board's design-intent and architecture lenses both APPROVE; the
+  cut list is intact). BLOCKED ON THE DELIVERY GATE - the same gate the two prior slices tripped on.
+  The runner artifact is RED, not a doc claim: CI run 27858434688 on pushed sha 73f8fc7 (PR #10) =
+  FAILURE, 143 tests / 137 passing / 6 FAILING. A PASS requires ci_conclusion == success; this is a
+  hard fail. The headline fix is DEAD in CI. Required to clear (re-derive GREEN from a fresh runner run,
+  not the BACKLOG):
+    1. test_plunger_launch.gd (5 reds) - the #1 fix, the launch, imparts ~0 velocity. Root cause is
+       seating geometry, not the impulse design: the settled ball drifts under tilt to z~24.08 (against
+       the lane pocket), DOWN-table of PLUNGER_REST_POS.z=24.0, so ball.is_touching(_face) is never true
+       and no impulse fires. Re-derive PLUNGER_REST_POS.z / BALL_START.z so the settled ball CONTACTS the
+       face (and add a test asserting is_touching(face)==true after settle), or strike on the first fresh
+       forward-stroke contact. PHYSICS.
+    2. test_table_integration.gd (1 red) - the BUG-023 drain fix made the CONFIG arithmetic assert pass
+       but a real ball at the cradle (z~23.06) STILL fires Drain.ball_drained. Make the BEHAVIORAL oracle
+       green, not just the math. LEAD/PHYSICS (verify the live drain Area3D in the instanced Table.tscn).
+    3. test_target_no_tunneling.gd (1 red) - stale local POST_RADIUS=1.5 vs the resized 2.0; the resized-
+       post no-tunnel gate is not actually measuring the resized post. Read POST_RADIUS live from the
+       deflector shape so it cannot drift. TEST-BUILDER.
+  PLUS one coverage gap flagged by the board (fold in before resubmission, it is THIS slice's own headline
+  gate): no stress test fires a >=2x LAUNCH_SPEED_MAX ball at the NEW convex-hull flipper bat - the only
+  ball-vs-flipper test fires at 50 u/s. DESIGN must-feel #6 requires zero tunneling through the capsule
+  flipper at >=2x, proven against the real instanced body (resting AND mid-swing). Add it.
+  PLUS the UX controls items the producer's prior SEND_BACK already ruled IN SCOPE for the gray-box-clarity
+  intent and are still unmet: re-issue the HOLD LAUNCH prompt on every ball arm (not just ball 1), and name
+  the actual restart key (SPACE), since Gate 0 is the next stop and a player who cannot launch ball 2 fails
+  the fun check on a control problem. Colorblind-safe power meter is cheap (width already encodes power) -
+  fold it. HUD font size -> include. DEFER (do NOT block): table_viz.py line-length, the mid-word comment
+  reflow in table_config.gd, the test ordering nit in test_ball_tunneling.gd, nudge tuning. Gate 0 stays
+  NOT scheduled until GUT is GREEN on the runner on the pushed sha with the capsule-flipper stress test
+  executing (not pending/skipped).
+
 ## Sunk-cost rule (the producer enforces this)
 Hours already spent are gone whether we continue or not. The only question at each gate is whether
 the NEXT chunk of hours is the best use of them. Past investment is never an argument to continue.
