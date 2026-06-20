@@ -29,8 +29,8 @@ const MIN_MOMENTUM_FRACTION: float = 0.4
 ## count is much less than the frame count (the cooldown is actually blocking per-frame farming).
 const CONTACT_HOLD_FRAMES: int = 120
 ## The post radius used in target.gd for the CylinderShape3D. Must match the implementation
-## (target.gd const POST_RADIUS = 1.5).
-const POST_RADIUS: float = 1.5
+## (target.gd const POST_RADIUS = 2.0 after the "Table reshape" resize slice).
+const POST_RADIUS: float = 2.0
 
 const TARGET_SCENE: PackedScene = preload("res://scenes/elements/Target.tscn")
 const BALL_SCENE: PackedScene = preload("res://scenes/elements/Ball.tscn")
