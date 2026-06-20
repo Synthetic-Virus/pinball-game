@@ -141,18 +141,38 @@ const DRAIN_DEPTH: float = 1.6
 ## up-table edge at 24.26, cleanly below the bats and above the open bottom. The test_world_scale
 ## config assert (DRAIN_Z - DRAIN_DEPTH/2 > FLIPPER_BAT_MAX_Z) machine-checks this boundary.
 const DRAIN_Z: float = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH * 0.5
-## DRAIN spans ONLY the OPEN CENTER region, NOT the launch lane (QA B3 / BUG-003-class fix).
-## DESIGN mandates an "open CENTER drain between/below the flippers"; the launch lane on the +X side
-## (x in [LANE_INNER_X, HALF_WIDTH]) is a RESTING chute, not a drain. A full-width drain volume
-## overlapped the lane and would swallow the resting/dribbled-back ball at BALL_START - correct
-## behavior then depended ENTIRELY on a GameFlow state guard (drain only while BALL_IN_PLAY), which
-## is fragile defense-in-depth masking wrong geometry: a dribble launch that rolls the ball back to
-## rest in the lane WHILE BALL_IN_PLAY would drain it from the lane. We instead size the drain to
-## the open center mouth so the geometry never catches a lane ball. The drain spans the open
-## region x in [-HALF_WIDTH, LANE_INNER_X] and is centered there.
-const DRAIN_WIDTH: float = HALF_WIDTH + LANE_INNER_X  ## Open center: -HALF_WIDTH .. +LANE_INNER_X.
-## Midpoint of the open center region (NOT 0): the X the drain volume is centered on.
-const DRAIN_CENTER_X: float = (LANE_INNER_X - HALF_WIDTH) * 0.5
+## DRAIN spans ONLY the CENTER MOUTH between the flipper tips - the actual gap a ball falls through
+## (QA BUG-023 behavioral fix, SLICE "Table reshape + playtest fixes", 2026-06-19).
+##
+## ROOT CAUSE this replaces: the drain previously spanned the WHOLE open-center width
+## (x in [-HALF_WIDTH, LANE_INNER_X], ~26.5 units). DESIGN says "open CENTER drain between/below the
+## flippers", but a volume that wide also covered the X under the flipper BODIES (the pivots sit at
+## +/-FLIPPER_PIVOT_SPREAD = +/-7.2). The BUG-023 fix only cleared the drain in Z (up-table edge
+## below the bats), but a ball seated in the catch zone at the LEFT pivot X (-7.2) is NOT on the
+## angled bat there (near the pivot the bat sits up at z~PIVOT_Z=20, far up-table of the ball),
+## so it rolls straight down-table and the over-wide drain swallowed it - the exact core-loop break
+## behavioral oracle (a real ball dropped at z~23.06) still caught after the Z-only math fix.
+##
+## THE FIX (geometry, not a guard): a real ball only LEAVES the table through the GAP BETWEEN THE
+## FLIPPER TIPS (the inverted-V mouth). The drain must be exactly that mouth, centered on the table
+## centerline (x = 0, between the symmetric flippers), NOT the whole open width. A ball over a
+## flipper body (x ~= +/-7.2) is the flipper's to catch/flip; it can never be in the drain volume
+## now, so the cradle/catch-zone ball cannot drain (BUG-023). A ball that slips through the center
+## gap still drains; a ball lost down a side channel is caught by the OOB failsafe (OOB_DRAIN_Y).
+## The launch lane (far +X) is also far outside this central mouth, so a lane/dribble ball never
+## drains here (QA B3 stays honored by geometry, no GameFlow state guard needed).
+##
+## WIDTH = the inter-tip mouth (2*(SPREAD - FLIPPER_LENGTH*cos|REST_ANGLE|)) PLUS one ball diameter
+## of capture margin so a ball entering the mouth slightly off-center is still caught cleanly. With
+## SPREAD 7.2, reach ~5.97 the mouth is ~2.46; +1.2 gives ~3.66 (span ~ +/-1.83), comfortably inside
+## the +/-7.2 flipper zone (no catch-zone overlap) and wide enough to read as the drain mouth.
+const _DRAIN_MOUTH: float = 2.0 * (
+	FLIPPER_PIVOT_SPREAD - FLIPPER_LENGTH * cos(absf(FLIPPER_REST_ANGLE))
+)
+const DRAIN_WIDTH: float = _DRAIN_MOUTH + 2.0 * BALL_RADIUS  ## Mouth + ball-diameter capture slack.
+## Centered on the table centerline (x = 0): the drain is the symmetric gap BETWEEN the flippers,
+## NOT the full open region. This keeps a ball over a flipper body (x ~= +/-7.2) out of the drain.
+const DRAIN_CENTER_X: float = 0.0
 
 ## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
 ## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A
@@ -412,6 +432,21 @@ const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 ## guides, mirrored), so the widen gives BOTH sides a proper outlane+inlane (item #4: gutters both
 ## sides). Verified by test_furniture_layout + table_viz feed-path plot.
 const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
+## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix).
+## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): after the WIDEN the LAUNCH LANE
+## occupies the whole RIGHT edge (x in [LANE_INNER_X=10.5, HALF_WIDTH=16]). The symmetric guide at
+## +13.0 therefore landed INSIDE the launch lane, directly across the ball's spawn (BALL_START.x =
+## 13.25) and its entire up-lane launch path: the freshly-armed ball spawned WEDGED in that guide
+## wall and could not be launched at all (the producer's "no kick on the first stroke" - the impulse
+## fired but a wall pinned the ball). The launch lane already has its own inner divider
+## (LANE_INNER_X) and the right wall; it needs NO extra wall down its middle. The RIGHT inlane/
+## outlane guide belongs INBOARD of the lane, in the open field between the lane divider (10.5) and
+## the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2), exactly mirroring the LEFT guide's job
+## (split the side channel into an outlane feeding the drain and an inlane feeding the flipper) but
+## on the field side of the lane. 9.0 sits cleanly between 7.2 and 10.5 (a real right inlane/outlane
+## split) and is well clear of the ball's x=13.25 launch path, so the lane is a clean chute again.
+## The LEFT guide is unchanged (the left side has no launch lane, so its symmetric placement holds).
+const LANE_GUIDE_RIGHT_DIVIDER_X: float = 9.0
 ## The divider runs from just above the flipper pivot row down toward the drain, length below.
 ## QA BUG-024 FIX: the offset was 2.0, putting LANE_GUIDE_TOP_Z at 18.0. The slingshot KickerBody is
 ## an angled box (SLINGSHOT_LENGTH x SLINGSHOT_THICKNESS, yawed by atan2(0.6,0.8) = 36.87 deg) whose

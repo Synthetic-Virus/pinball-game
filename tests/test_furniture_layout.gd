@@ -157,26 +157,42 @@ func test_standup_bank_at_widened_positions() -> void:
 
 
 func test_both_lane_guides_at_correct_widened_spacing() -> void:
-	## After the widen LANE_GUIDE_DIVIDER_X = HALF_WIDTH - 3.0 = 13.0. Both guides are symmetric.
-	## Assert the guides' X positions are consistent with the new divider constant.
-	## LaneGuideLeft sits at x = -LANE_GUIDE_DIVIDER_X (on the left), LaneGuideRight at +X.
-	## This is the item-4 (gutters both sides) independent check on the INSTANCED nodes.
-	var expected_x: float = TableConfig.LANE_GUIDE_DIVIDER_X
+	## After the widen the two guides are ASYMMETRIC, because the LAUNCH LANE occupies the whole RIGHT
+	## edge (x in [LANE_INNER_X, HALF_WIDTH]).
+	##   LEFT  guide: open left field, at x = -LANE_GUIDE_DIVIDER_X (= -13.0).
+	##   RIGHT guide: INBOARD of the launch lane, at x = +LANE_GUIDE_RIGHT_DIVIDER_X (= +9.0), between
+	##               the lane divider (LANE_INNER_X = 10.5) and the right flipper pivot
+	##               (FLIPPER_PIVOT_SPREAD = 7.2). A symmetric right guide at +13.0 sat INSIDE the lane
+	##               across the ball's launch path and pinned the ball so it could never be launched
+	##               (the launch-lane fix, TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X). This is the item-4
+	##               (gutters both sides) independent check on the INSTANCED nodes.
 	var left: Node3D = _table.find_child("LaneGuideLeft", true, false) as Node3D
 	var right: Node3D = _table.find_child("LaneGuideRight", true, false) as Node3D
 	if left != null:
-		# Guide position is on the left side; X magnitude should equal LANE_GUIDE_DIVIDER_X
-		# within one wall-thickness (the StaticBody may be centered, not edge-aligned).
+		# Left guide is at -LANE_GUIDE_DIVIDER_X within one wall-thickness (body is centered).
 		assert_gt(
-			absf(left.position.x), expected_x - TableConfig.WALL_THICKNESS,
-			"LaneGuideLeft position x=%f should be near LANE_GUIDE_DIVIDER_X=%f on the left side"
-			% [left.position.x, -expected_x]
+			absf(left.position.x),
+			TableConfig.LANE_GUIDE_DIVIDER_X - TableConfig.WALL_THICKNESS,
+			"LaneGuideLeft position x=%f should be near -LANE_GUIDE_DIVIDER_X=%f"
+			% [left.position.x, -TableConfig.LANE_GUIDE_DIVIDER_X]
 		)
 	if right != null:
-		assert_gt(
-			absf(right.position.x), expected_x - TableConfig.WALL_THICKNESS,
-			"LaneGuideRight position x=%f should be near LANE_GUIDE_DIVIDER_X=%f on the right side"
-			% [right.position.x, expected_x]
+		# Right guide is INBOARD of the launch lane: it must sit BETWEEN the right flipper pivot and
+		# the lane divider, and crucially CLEAR of the ball's launch path so the lane is a clean chute.
+		assert_almost_eq(
+			right.position.x,
+			TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X,
+			TableConfig.WALL_THICKNESS,
+			"LaneGuideRight position x=%f should be near LANE_GUIDE_RIGHT_DIVIDER_X=%f (inboard "
+			% [right.position.x, TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X]
+			+ "of the launch lane, not in it)"
+		)
+		assert_lt(
+			right.position.x + TableConfig.WALL_THICKNESS * 0.5,
+			TableConfig.BALL_START.x - TableConfig.BALL_RADIUS,
+			"LaneGuideRight (x=%f) must stay CLEAR of the launch-lane ball path (BALL_START.x=%f); a "
+			% [right.position.x, TableConfig.BALL_START.x]
+			+ "guide in the lane pins the ball and breaks the launch"
 		)
 
 

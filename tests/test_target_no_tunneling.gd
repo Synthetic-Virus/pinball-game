@@ -23,10 +23,6 @@ const TEST_ITERATIONS: int = 100
 ## the post's far face, which is exactly what we check.
 const STEP_FRAMES: int = 30
 
-## The post deflector cylinder radius as built by target.gd. Must match the script value (1.5).
-## We use a named constant so the intent is obvious and a mismatch flags a maintenance issue.
-const POST_RADIUS: float = 1.5
-
 ## Starting distance in front of the post (z offset from the post face toward the ball).
 const START_OFFSET: float = 5.0
 
@@ -65,19 +61,39 @@ func before_each() -> void:
 	await wait_frames(2)  # let _ready() build the deflector body and shape
 
 
+## Read the deflector post radius LIVE from the instanced target's actual collision shape, so the
+## tunnel threshold can never drift from a stale hardcoded test constant (the producer SEND_BACK:
+## a test-local POST_RADIUS = 1.5 disagreed with the resized target radius of 2.0). The deflector is
+## the child StaticBody3D "Deflector" with a CylinderShape3D; we return its radius. Returns 0.0 only
+## if the deflector is somehow absent (caller asserts > 0), but the tests below
+## guard that the deflector exists. This is the independent oracle: the radius the SOLVER actually
+## sees, not a number a human kept in sync by hand.
+func _live_post_radius() -> float:
+	var deflector: Node = _target.find_child("Deflector", true, false)
+	if deflector == null:
+		return 0.0
+	for child in deflector.get_children():
+		if child is CollisionShape3D and (child as CollisionShape3D).shape is CylinderShape3D:
+			return ((child as CollisionShape3D).shape as CylinderShape3D).radius
+	return 0.0
+
+
 func test_full_speed_ball_never_tunnels_the_target() -> void:
 	## Fire the ball straight at the post at worst-case speed (2x LAUNCH_SPEED_MAX) TEST_ITERATIONS
 	## times and assert it NEVER ends up on the far side of the post. The pass threshold is the post's
-	## far face (+POST_RADIUS from origin) plus half a ball radius of epsilon (the same tolerance used
+	## far face (+post_radius from origin) plus half a ball radius of epsilon (the same tolerance used
 	## in test_ball_tunneling.gd for the flat wall). Anything beyond that means the sphere exited
 	## through the solid body: a tunnel.
 	##
 	## ORACLE: _ball.position.z measured after each shot. Position cannot lie about tunneling.
 	## If the physics-programmer forgot CCD on the ball, or if Jolt's CCD does not cover cylindrical
 	## bodies at this speed, this loop will find it within a handful of iterations.
-	var post_far_face_z: float = POST_RADIUS
+	## The post radius is read LIVE from the instanced deflector shape so it never drifts from config.
+	var post_radius: float = _live_post_radius()
+	assert_gt(post_radius, 0.0, "could not read the live deflector radius (Deflector/CylinderShape3D)")
+	var post_far_face_z: float = post_radius
 	var tunnel_threshold: float = post_far_face_z + TableConfig.BALL_RADIUS * 0.5
-	var ball_start_z: float = -(POST_RADIUS + TableConfig.BALL_RADIUS + START_OFFSET)
+	var ball_start_z: float = -(post_radius + TableConfig.BALL_RADIUS + START_OFFSET)
 
 	for i in range(TEST_ITERATIONS):
 		# Reset ball in front of the post, zero velocity, awake.
@@ -103,36 +119,34 @@ func test_full_speed_ball_never_tunnels_the_target() -> void:
 		)
 
 
-func test_tunneling_check_matches_flat_wall_test_threshold() -> void:
-	## Structural guard: assert our POST_RADIUS constant matches the actual deflector shape radius
-	## so the tunnel_threshold in the loop above is accurate. We do this by finding the Deflector
-	## child on the target and reading its CylinderShape3D radius. If the physics-programmer changes
-	## the post radius in target.gd but does not update POST_RADIUS here, this test flags it as a
-	## test-maintenance issue rather than silently using a wrong threshold.
+func test_deflector_radius_is_read_live_and_matches_config() -> void:
+	## The deflector post radius drives the tunnel threshold above; this test guarantees that radius is
+	## read LIVE from the instanced collision shape (never a stale test constant) and that the shipping
+	## target's radius equals the single source of truth (Target.POST_RADIUS in target.gd). The
+	## producer SEND_BACK was exactly a drift: a test-local POST_RADIUS = 1.5 disagreed with the
+	## resized 2.0 post. We derive everything from the live shape, so this asserts the live read works
+	## and that target.gd's own constant and its built shape agree (they cannot silently diverge).
 	var deflector: Node = _target.find_child("Deflector", true, false)
 	if deflector == null:
-		# The deflector does not exist yet (implementation pending); we cannot check the radius.
-		# The structural test in test_target_physical.gd already covers the existence gate.
+		# The deflector does not exist yet (implementation pending); the existence gate lives in
+		# test_target_physical.gd. We cannot check the radius without it.
 		pending("Deflector not yet built in target.gd; skip radius consistency check")
 		return
 
-	# Find the CollisionShape3D on the deflector.
-	var col: CollisionShape3D = null
-	for child in deflector.get_children():
-		if child is CollisionShape3D:
-			col = child
-			break
+	var live_radius: float = _live_post_radius()
+	assert_gt(
+		live_radius, 0.0,
+		"the deflector must expose a CylinderShape3D so the radius can be read live"
+	)
 
-	if col == null or not (col.shape is CylinderShape3D):
-		# Shape type not yet set; cannot check.
-		pending("Deflector shape is not a CylinderShape3D yet; skip radius consistency check")
-		return
-
-	var actual_radius: float = (col.shape as CylinderShape3D).radius
-	assert_eq(
-		actual_radius,
-		POST_RADIUS,
-		"test constant POST_RADIUS (%.3f) does not match the actual deflector radius (%.3f). "
-		% [POST_RADIUS, actual_radius]
-		+ "Update POST_RADIUS in this test to match the implementation."
+	# The live shape radius must equal target.gd's own POST_RADIUS constant (the single source of
+	# truth). Reading the script constant via the instanced node keeps both in lockstep automatically.
+	var script_radius: float = _target.get_script().get_script_constant_map().get("POST_RADIUS", -1.0)
+	assert_almost_eq(
+		live_radius,
+		script_radius,
+		0.001,
+		"the built deflector radius (%.3f) must equal target.gd POST_RADIUS (%.3f); reading it live "
+		% [live_radius, script_radius]
+		+ "means the tunnel threshold can never drift from the configured post size"
 	)
