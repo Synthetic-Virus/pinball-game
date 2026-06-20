@@ -312,7 +312,7 @@ Tasks (pull from here - keep them small and finishable):
       risk), the INLANE widens to ~5.8 u (save). The developer's "only a left gutter" is a STALE
       CACHED BUILD: the symmetric code is correct, no edit needed. QA confirms on the rebuilt scene
       via the runner (test_furniture_layout green at the new width) + the table_viz feed-path plot.
-- [ ] GAMEPLAY+PHYSICS: RESIZE + RESPACE TARGETS AND BUMPERS for the wider table ("too small, not
+- [~] GAMEPLAY+PHYSICS: RESIZE + RESPACE TARGETS AND BUMPERS for the wider table ("too small, not
       spaced well"). Bigger standup targets (target size / post radius up) and bigger pop bumpers
       (POP_BUMPER_RADIUS up), with wider sensible spacing (STANDUP_BANK_POSITIONS, POP_BUMPER_POSITIONS)
       that stays flipper-makeable. Owner: gamedev-gameplay-programmer (sizes/positions) +
@@ -320,6 +320,14 @@ Tasks (pull from here - keep them small and finishable):
       scripts/table.gd. Acceptance: tests/test_shot_geometry.gd - standup bank inside the flipper-tip
       sweep window and bumpers clear of walls/arch on the NEW constants; targets/bumpers kick + score on
       contact (behavioral); no tunneling at >= 2x LAUNCH_SPEED_MAX.
+      GAMEPLAY HALF DONE 2026-06-19 (slice/table-reshape e131f41): scripts/target.gd POST_RADIUS raised
+      1.5 -> 2.0 with WHY-comment. The detector shell (POST_RADIUS + BALL_RADIUS) and the solid deflector
+      CylinderShape3D both read from this constant and auto-follow. tests/test_target_physical.gd local
+      POST_RADIUS updated to 2.0 to match. POP_BUMPER_RADIUS already raised to 2.0 in TableConfig by the
+      lead (the config half of item 5). Plunger public contract re-verified: unchanged byte-for-byte
+      (power_changed/ball_launched; arm/disarm/set_ball/is_armed; stroke_speed/face_position/is_stroking
+      test hooks all present; no production path sets ball velocity). BLOCKED on physics-programmer:
+      no-tunnel re-confirm on the bigger post at >= 2x LAUNCH_SPEED_MAX (test_target_no_tunneling.gd).
 - [x] LEAD/QA: EXTEND tools/table_viz.py to re-validate the NEW layout deterministically (CAD method):
       flipper-tip reach to the resized targets/bumpers, lane feeds, drain mouth, both gutter feed paths.
       Tool EXITS NON-ZERO if a shot is unmakeable or a kick aims at the drain. Owner:
