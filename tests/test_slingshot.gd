@@ -152,15 +152,26 @@ func test_sling_corner_contact_still_kicks_and_scores() -> void:
 	await _setup_sling(false)
 	watch_signals(_sling)
 
-	# Compute a point just off the up-table corner of the LEFT slingshot's angled face. The face long
-	# axis is X rotated by the body yaw; the up-table corner is at +half-length along that axis. We
-	# place the ball a little outside the face there and fire it into the face.
+	# Compute a point just off a CORNER of the LEFT slingshot's angled face, then fire the ball into
+	# that corner. The solid body is a BoxShape3D rotated about Y by _body_yaw(), so we derive the
+	# face axes from THAT SAME rotation (not a hand-written sin/cos, which previously had a sign error
+	# on the long axis and aimed the ball at empty space PAST the face - it then only ever got a
+	# passive glancing bounce, never a real corner contact, masking the behavior under test).
+	#   along       = the face LONG axis  = Basis(Y, yaw) * +X  (one end is a corner).
+	#   face_normal = the face THIN axis  = Basis(Y, yaw) * +Z  (the direction the ball stands off on).
+	# Using the real rotated basis guarantees `corner` lies on the actual angled face the ball strikes.
 	var yaw: float = _sling._body_yaw()
-	var along := Vector3(cos(yaw), 0.0, sin(yaw))   # the face long axis (rotated X) on the plane.
-	var face_normal := Vector3(sin(yaw), 0.0, -cos(yaw))  # the face normal (rotated -Z) on the plane.
-	var corner: Vector3 = along * (TableConfig.SLINGSHOT_LENGTH * 0.5)
-	var standoff: float = TableConfig.SLINGSHOT_THICKNESS * 0.5 + TableConfig.BALL_RADIUS + 1.5
+	var body_basis := Basis(Vector3(0.0, 1.0, 0.0), yaw)
+	var along: Vector3 = body_basis * Vector3(1.0, 0.0, 0.0)       # face long axis (rotated +X).
+	var face_normal: Vector3 = body_basis * Vector3(0.0, 0.0, 1.0)  # face thin axis (rotated +Z).
+	# Corner = the end of the long axis, out on the face surface (+half thickness along the thin axis).
+	var corner: Vector3 = (
+		along * (TableConfig.SLINGSHOT_LENGTH * 0.5)
+		+ face_normal * (TableConfig.SLINGSHOT_THICKNESS * 0.5)
+	)
+	var standoff: float = TableConfig.BALL_RADIUS + 1.5
 	_ball.position = corner + face_normal * standoff
+	_ball.position.y = 0.0  # strike the face edge-on at body mid-height, not over/under it.
 	_ball.linear_velocity = -face_normal * SLOW_FIRE_SPEED  # fire into the corner of the face.
 	_ball.angular_velocity = Vector3.ZERO
 	_ball.sleeping = false
