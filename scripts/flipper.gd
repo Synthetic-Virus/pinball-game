@@ -66,6 +66,41 @@ const _HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
 ## Bat collision/material tuning. High friction lets the bat grip and sling the ball rather than
 ## letting it skid.
 const BAT_FRICTION: float = 0.7
+
+## --- BAT SHAPE (SLICE "Table reshape + playtest fixes", 2026-06-19) ------------------------------
+## The bat is a TAPERED ROUNDED "stadium" form: FAT at the pivot, narrowing to a smaller ROUNDED tip
+## (DESIGN must-feel #2 "the flipper is a flipper shape", ARCHITECTURE.md 11.3). It REPLACES the old
+## BoxMesh/BoxShape3D plank, in BOTH the visible mesh AND the collision shape, with the two AGREEING
+## so "where on the bat the ball hits matters" (a tip shot vs a base shot read differently).
+##
+## WHY A CONVEX HULL, NOT A CAPSULE: a CapsuleShape3D has a CONSTANT radius (no taper) and rounded
+## END CAPS that bulge past the pivot, so it cannot be both fat-at-pivot and thin-at-tip. We build a
+## ConvexPolygonShape3D hull (allowed by the structural test as a non-box shape) whose footprint is
+## a TAPERED rounded stadium on the surface plane: full FLIPPER_WIDTH from the pivot through the mid
+## face, then narrowing to TIP_WIDTH_FRACTION at the rounded tip. The matching mesh is built from
+## the SAME outline points (extruded to FLIPPER_HEIGHT) so the collider and the mesh agree exactly.
+##
+## WHY FULL WIDTH THROUGH THE MID FACE (not tapering from the pivot): the rubber-rebound gate
+## (test_flipper_rubber.gd) fires the ball HEAD-ON at the MID-BAT point and stands it off by
+## FLIPPER_WIDTH*0.5 + BALL_RADIUS, so the mid face must be ~FLIPPER_WIDTH wide and present a
+## flat-ish face there. Keeping full width across the inner ~60% of the bat (TAPER_START_FRACTION)
+## preserves that head-on contact; the taper lives only over the outer tip half. The lever arm and
+## tip_speed() are unchanged (the pivot-to-tip distance is still FLIPPER_LENGTH).
+## Fraction of FLIPPER_WIDTH the rounded TIP narrows to (the bat is thinner at the tip than base).
+const TIP_WIDTH_FRACTION: float = 0.45
+## Fraction of FLIPPER_LENGTH from the pivot at which the taper BEGINS. Inboard the bat keeps full
+## FLIPPER_WIDTH (so the mid-face head-on contact stays flat); outboard of this it narrows.
+const TAPER_START_FRACTION: float = 0.55
+## How many segments approximate each rounded end of the stadium outline. More = smoother, but a
+## hull needs few points; 4 per end gives a clean rounded read without bloating the convex hull.
+const ROUND_SEGMENTS: int = 4
+
+## --- 2-TONE GRAY-BOX MATERIAL (no art dependency) -----------------------------------------------
+## BLACK body + WHITE rubber TOP surface (DESIGN/ARCHITECTURE.md 11.3: a 2-tone gray-box look only;
+## the kenney.nl CC0 art pass is LATER and must NOT block this slice). The white top is a VISUAL cue
+## for the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial, unchanged).
+const BODY_COLOR: Color = Color(0.05, 0.05, 0.05)   ## Near-black bat body.
+const RUBBER_TOP_COLOR: Color = Color(0.92, 0.92, 0.92)  ## White rubber top cap.
 ## Bat restitution: the RUBBER SLEEVE. DESIGN must-feel #3 / "RUBBER THAT REBOUNDS": a ball striking
 ## the flipper face rebounds with a live, slightly-springy feel (a rubber-sleeved bat), not off a
 ## dead board. WHY 0.70 (rubber, NOT a trampoline): the built-in Jolt physics in Godot 4.6 does NOT
@@ -148,24 +183,16 @@ func _build_flipper() -> void:
 	material.bounce = BAT_BOUNCE
 	_body.physics_material_override = material
 
-	# Collision shape: a box centered at half-length so one end sits at the pivot (this node's
-	# origin) and the other end is the tip at distance FLIPPER_LENGTH. The X offset SIGN is set by
-	# _apply_handedness so a mirrored (right) flipper extends along -X (QA BUG-001).
+	# Collision shape + mesh: a TAPERED ROUNDED STADIUM (NOT a box). The actual hull/mesh geometry is
+	# built in _rebuild_bat_geometry() (called from _apply_handedness) because the taper direction
+	# depends on handedness: the FAT pivot end must sit at the pivot and the THIN tip reach toward
+	# CENTER, which is +X for the left flipper and -X for the mirrored right flipper. We create the
+	# empty nodes here; _apply_handedness fills them with the correctly-oriented geometry.
 	_shape = CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	var fl: float = TableConfig.FLIPPER_LENGTH
-	var fh: float = TableConfig.FLIPPER_HEIGHT
-	var fw: float = TableConfig.FLIPPER_WIDTH
-	box.size = Vector3(fl, fh, fw)
-	_shape.shape = box
 	_body.add_child(_shape)
 
-	# Gray-box mesh matching the collision box so the flipper is visible without art.
 	_mesh_instance = MeshInstance3D.new()
 	_mesh_instance.name = "FlipperMesh"
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = box.size
-	_mesh_instance.mesh = box_mesh
 	_body.add_child(_mesh_instance)
 
 	add_child(_body)
@@ -200,16 +227,14 @@ func _apply_handedness() -> void:
 	_rest_angle = TableConfig.FLIPPER_REST_ANGLE * hand_sign
 	_up_angle = TableConfig.FLIPPER_UP_ANGLE * hand_sign
 
-	# Seat the bat box on the correct side of the pivot. The bat must reach FROM the pivot TOWARD the
-	# table center: +X for the left flipper, -X for the mirrored right flipper. Without this the right
-	# bat pointed AWAY from center (toward the right wall) and could never intercept a draining ball -
-	# the inverted V could not form (QA BUG-001). Mirroring the angle alone is not enough; the lever
-	# arm itself must flip. half_len keeps one end pinned at the pivot (this node's origin).
-	var bat_offset_x: float = TableConfig.FLIPPER_LENGTH * 0.5 * hand_sign
-	if _shape != null:
-		_shape.position = Vector3(bat_offset_x, 0.0, 0.0)
-	if _mesh_instance != null:
-		_mesh_instance.position = Vector3(bat_offset_x, 0.0, 0.0)
+	# Build the tapered bat geometry on the correct side of the pivot. The bat must reach FROM the
+	# pivot (fat end) TOWARD the table center (thin tip): +X for the left flipper, -X for the mirrored
+	# right flipper. Without this the right bat pointed AWAY from center (toward the right wall) and
+	# could never intercept a draining ball - the inverted V could not form (QA BUG-001). Mirroring the
+	# angle alone is not enough; the lever arm itself must flip. The taper is asymmetric (fat pivot ->
+	# thin tip), so a simple position offset cannot mirror it; we rebuild the outline with the X sign
+	# applied so the fat end stays pinned at the pivot (this node's origin) for BOTH sides.
+	_rebuild_bat_geometry(hand_sign)
 
 	# Hinge limits are an absolute lower..upper range; order them so lower <= upper regardless of
 	# the mirror sign. These hard stops back up the spring: the ball can never push the bat past
@@ -315,3 +340,134 @@ func tip_speed() -> float:
 	var axis_world: Vector3 = (global_transform.basis * _HINGE_AXIS_LOCAL).normalized()
 	var ang_vel_about_axis: float = _body.angular_velocity.dot(axis_world)
 	return absf(ang_vel_about_axis) * TableConfig.FLIPPER_LENGTH
+
+
+## --- TAPERED BAT GEOMETRY (the capsule/stadium shape swap) ---------------------------------------
+## Build the bat's top-down OUTLINE on the surface plane (the X-Z footprint): a TAPERED ROUNDED
+## stadium with the FAT pivot end at X=0 and the THIN rounded tip at X=FLIPPER_LENGTH. Returned as
+## 2D points in (x, half_width) form along the +X long axis; the caller mirrors X for the right
+## flipper and extrudes to height. The outline keeps full FLIPPER_WIDTH from the pivot through the
+## mid face (so the rubber-rebound head-on contact at mid-bat stays flat) and narrows over the tip.
+##
+## Points are ordered around the perimeter (CCW) so the mesh builder can fan-triangulate the top/
+## bottom caps. The convex hull builder ignores order (a hull only needs the point cloud).
+func _build_bat_outline() -> PackedVector2Array:
+	var fl: float = TableConfig.FLIPPER_LENGTH
+	var base_half: float = TableConfig.FLIPPER_WIDTH * 0.5
+	var tip_half: float = base_half * TIP_WIDTH_FRACTION
+	var taper_x: float = fl * TAPER_START_FRACTION  ## Full width up to here, then narrow to the tip.
+	var tip_x: float = fl - tip_half                 ## The rounded tip cap is centered here.
+
+	# Build the two long edges as (x, +/-half_width) pairs, full width to taper_x then narrowing to
+	# tip_half at the tip cap center. We then add rounded end caps (pivot + tip) as arcs.
+	var pts := PackedVector2Array()
+
+	# Pivot (fat) rounded end cap: a half-circle of radius base_half centered at x = base_half,
+	# sweeping from the +width edge around the back (x < base_half) to the -width edge (rounds pivot).
+	var pivot_cx: float = base_half
+	for i in range(ROUND_SEGMENTS + 1):
+		var t: float = float(i) / float(ROUND_SEGMENTS)
+		var ang: float = PI * 0.5 + t * PI  # from +90 deg (top) around the back to +270 deg (bottom)
+		pts.append(Vector2(pivot_cx + cos(ang) * base_half, sin(ang) * base_half))
+
+	# Bottom long edge from the pivot toward the tip: full width to the taper start, then narrowing.
+	pts.append(Vector2(taper_x, -base_half))
+	pts.append(Vector2(tip_x, -tip_half))
+
+	# Tip (thin) rounded end cap: a half-circle of radius tip_half centered at x = tip_x, sweeping
+	# from the -width edge around the front (x > tip_x) to the +width edge.
+	for i in range(ROUND_SEGMENTS + 1):
+		var t: float = float(i) / float(ROUND_SEGMENTS)
+		var ang: float = -PI * 0.5 + t * PI  # from -90 deg (bottom) around the front to +90 deg (top)
+		pts.append(Vector2(tip_x + cos(ang) * tip_half, sin(ang) * tip_half))
+
+	# Top long edge back from the tip to the taper start (closing the loop toward the pivot cap).
+	pts.append(Vector2(tip_x, tip_half))
+	pts.append(Vector2(taper_x, base_half))
+
+	return pts
+
+
+## Rebuild the collision hull and visible mesh for the given handedness sign (+1 left, -1 right).
+## The outline's long axis is +X; negating every X for the mirrored right flipper flips the whole
+## tapered bat to the -X side, keeping the FAT end pinned at the pivot (origin) for BOTH sides.
+func _rebuild_bat_geometry(hand_sign: float) -> void:
+	var outline: PackedVector2Array = _build_bat_outline()
+	if hand_sign < 0.0:
+		var mirrored := PackedVector2Array()
+		for p in outline:
+			mirrored.append(Vector2(-p.x, p.y))
+		outline = mirrored
+
+	var height: float = TableConfig.FLIPPER_HEIGHT
+	if _shape != null:
+		var hull := ConvexPolygonShape3D.new()
+		hull.points = _extrude_outline_to_hull(outline, height)
+		_shape.shape = hull
+	if _mesh_instance != null:
+		_mesh_instance.mesh = _build_bat_mesh(outline, height)
+
+
+## Convert the 2D surface outline into the 3D point cloud for a ConvexPolygonShape3D: each outline
+## point becomes two 3D points, one at +height/2 and one at -height/2 (the outline is the X-Z
+## footprint, height along Y, the surface normal). The convex hull of this cloud is the solid bat.
+func _extrude_outline_to_hull(outline: PackedVector2Array, height: float) -> PackedVector3Array:
+	var half_h: float = height * 0.5
+	var cloud := PackedVector3Array()
+	for p in outline:
+		cloud.append(Vector3(p.x, half_h, p.y))
+		cloud.append(Vector3(p.x, -half_h, p.y))
+	return cloud
+
+
+## Build the visible bat mesh from the SAME outline the collider uses (so mesh and collider AGREE).
+## An ArrayMesh with two surfaces: surface 0 is the black BODY (sides + bottom cap); surface 1 is
+## the white RUBBER TOP cap (the up-facing face) - the 2-tone gray-box look (DESIGN/ARCH 11.3).
+func _build_bat_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
+	var half_h: float = height * 0.5
+	var mesh := ArrayMesh.new()
+
+	# --- Surface 0: BLACK BODY (sides + bottom cap). ---
+	var st_body := SurfaceTool.new()
+	st_body.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Side walls: for each outline edge, a quad (top->bottom) connecting consecutive points.
+	var n: int = outline.size()
+	for i in range(n):
+		var a: Vector2 = outline[i]
+		var b: Vector2 = outline[(i + 1) % n]
+		var a_top := Vector3(a.x, half_h, a.y)
+		var b_top := Vector3(b.x, half_h, b.y)
+		var a_bot := Vector3(a.x, -half_h, a.y)
+		var b_bot := Vector3(b.x, -half_h, b.y)
+		# Two triangles per side quad (wound so the normal faces outward).
+		st_body.add_vertex(a_top)
+		st_body.add_vertex(a_bot)
+		st_body.add_vertex(b_top)
+		st_body.add_vertex(b_top)
+		st_body.add_vertex(a_bot)
+		st_body.add_vertex(b_bot)
+	# Bottom cap (fan from the first point), wound to face down (-Y).
+	for i in range(1, n - 1):
+		st_body.add_vertex(Vector3(outline[0].x, -half_h, outline[0].y))
+		st_body.add_vertex(Vector3(outline[i + 1].x, -half_h, outline[i + 1].y))
+		st_body.add_vertex(Vector3(outline[i].x, -half_h, outline[i].y))
+	st_body.generate_normals()
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = BODY_COLOR
+	st_body.set_material(body_mat)
+	st_body.commit(mesh)
+
+	# --- Surface 1: WHITE RUBBER TOP cap (the up-facing face). ---
+	var st_top := SurfaceTool.new()
+	st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(1, n - 1):
+		st_top.add_vertex(Vector3(outline[0].x, half_h, outline[0].y))
+		st_top.add_vertex(Vector3(outline[i].x, half_h, outline[i].y))
+		st_top.add_vertex(Vector3(outline[i + 1].x, half_h, outline[i + 1].y))
+	st_top.generate_normals()
+	var top_mat := StandardMaterial3D.new()
+	top_mat.albedo_color = RUBBER_TOP_COLOR
+	st_top.set_material(top_mat)
+	st_top.commit(mesh)
+
+	return mesh
