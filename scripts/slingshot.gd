@@ -9,18 +9,31 @@ extends "res://scripts/active_kicker.gd"
 ## drain. Unlike the pop bumper (radial), the direction is constant so the ball always returns into
 ## play regardless of exactly where it touched the angled face.
 ##
-## GEOMETRY (TableConfig): a flat angled wall (BoxShape3D) of SLINGSHOT_LENGTH x
-## SLINGSHOT_THICKNESS,
-## SLINGSHOT_HEIGHT tall. The base builds the solid StaticBody3D + detector; this subclass supplies
-## the
-## box shape and the fixed kick direction. The kick direction comes from TableConfig per side
-## (SLINGSHOT_LEFT_KICK_DIR / SLINGSHOT_RIGHT_KICK_DIR) and is set via configure(mirrored).
+## GEOMETRY (SLICE "Playtest fixes 2", fix 3 - TRIANGLE, not a box): the slingshot solid body AND
+## its visible mesh are now a TRIANGULAR prism (footprint = a right triangle), left-handed above
+## the LEFT flipper and mirrored (right-handed) above the RIGHT flipper, like a real pinball
+## slingshot. The long KICKING FACE (the hypotenuse the ball strikes) lies along the body's local +X
+## at +Z (the face whose normal _body_yaw rotates to the kick direction), so the EXISTING kick is
+## UNCHANGED: same SLINGSHOT_LEFT/RIGHT_KICK_DIR, same score, same cooldown, same CCD-safe cap (all
+## owned by the ActiveKicker base). Only the SHAPE the ball bounces off and the visible mesh change
+## from a box to the triangle; both AGREE (same outline points). The DETECTOR keeps the BUG-018
+## corner-contact guarantee (it stays padded + yawed to match the body so a ball striking near a
+## corner of the angled face still trips body_entered and gets the active kick + score).
 ##
-## OWNERSHIP: lead scaffolds; physics-programmer fills _build_body/_apply_kick in the BASE (shared);
+## OWNERSHIP: lead scaffolds the triangle outline + the shape/mesh hooks; physics-programmer fills
+## _build_body/_apply_kick in the BASE (shared) and owns the no-tunnel gate on the triangular face;
 ## this file's _kick_direction_for + configure are small and stable.
 ##
 ## STABLE CONTRACT: inherits scored(points), kicked(direction), set_ball, points from ActiveKicker.
 ##   func configure(mirrored: bool) -> void   # mirrored = true builds the RIGHT slingshot.
+
+## How far the triangle extends BACK (away from the kicking face, local -Z) from the face to its
+## apex. A real slingshot is a shallow-ish triangle; we use SLINGSHOT_THICKNESS scaled up so the
+## triangle reads clearly as a triangle (not a sliver) while staying a compact body that does not
+## intrude into the flipper/lane-guide space. WHY a local constant (not TableConfig): it is a pure
+## visual/collision proportion of the existing SLINGSHOT_LENGTH/THICKNESS, not a world-scale or
+## placement number, so it lives with the shape it describes (no TableConfig edit needed for fix 3).
+const TRIANGLE_BACK_DEPTH: float = TableConfig.SLINGSHOT_LENGTH * 0.55
 
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
@@ -43,10 +56,10 @@ func configure(mirrored: bool) -> void:
 	_height = TableConfig.SLINGSHOT_HEIGHT
 	points = TableConfig.SLINGSHOT_SCORE
 	# The kick direction is the load-bearing "into play, never the drain" guarantee. Pick per side.
-	_kick_dir = (
-		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored
-		else TableConfig.SLINGSHOT_LEFT_KICK_DIR
-	).normalized()
+	var raw_dir: Vector3 = (
+		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
+	)
+	_kick_dir = raw_dir.normalized()
 
 
 ## FIXED kick: always the face normal into play, independent of the contact point (ball_pos unused).
@@ -57,35 +70,186 @@ func _kick_direction_for(_ball_pos: Vector3) -> Vector3:
 	return _kick_dir
 
 
-## Flat angled wall. The base _build_body reads this for the StaticBody3D collision shape; long axis
-## is local X, rotated by _body_yaw so the face angles into play.
+## The TRIANGULAR solid body the ball bounces off (fix 3: was a BoxShape3D). A ConvexPolygonShape3D
+## hull whose top-down footprint is a right triangle: the long KICKING FACE runs along local +X at
+## +Z (its normal is +Z, which _body_yaw rotates to the kick direction - so the kick is UNCHANGED),
+## tapering back to an apex on -Z, offset per handedness so the left and right slings are mirrored.
+## The hull is extruded to _height. The structural test asserts this is NOT a BoxShape3D.
 func _make_body_shape() -> Shape3D:
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(_length, _height, _thickness)
-	return shape
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = _extrude_triangle_to_hull(_triangle_outline(), _height)
+	return hull
 
 
-## Detector box, padded by one BALL_RADIUS on the thin axis AND the long axis so body_entered fires
-## as the ball arrives anywhere on the face - including at the ENDS of the angled face (QA BUG-018).
-## The detector is rotated by _detector_yaw() (== _body_yaw) in the base, so it stays concentric
-## with the rotated solid body; padding the long axis too means a ball striking near a corner of the
-## angled face still trips the detector before it enters the solid, so the active kick + score fire
-## (no silent "limp bounce" corner contact).
+## Detector shape: a triangle outline PADDED by one BALL_RADIUS so body_entered fires as the ball
+## arrives anywhere on the face, including near the CORNERS of the angled face (QA BUG-018). The
+## base yaws this detector by _detector_yaw() (== _body_yaw) to stay concentric with the body, so a
+## corner contact still trips body_entered (no silent "limp bounce"). We pad by inflating the tri
+## outline outward (a simple uniform expand: scale each point away from the triangle centroid by one
+## BALL_RADIUS-worth), keeping the same triangular footprint a ball-radius larger.
 func _make_detector_shape() -> Shape3D:
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(
-		_length + TableConfig.BALL_RADIUS * 2.0,
-		_height,
-		_thickness + TableConfig.BALL_RADIUS * 2.0
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = _extrude_triangle_to_hull(
+		_padded_triangle_outline(TableConfig.BALL_RADIUS), _height
 	)
-	return shape
+	return hull
 
 
-## Yaw the box so its flat face normal aligns with the kick direction (the face kicks the ball along
-## its normal). The kick direction is in XZ; the face normal of an unrotated box (thin in Z) is
-## +/-Z,
-## so the yaw is the angle from -Z to the kick direction about Y. This keeps the visible angled wall
-## consistent with where the ball is actually fired.
+## The TRIANGULAR visible mesh (fix 3: was a box), built from the SAME outline as the collider so
+## the visible slingshot AGREES with the body it bounces off. The base adds this to the kicker root;
+## we bake the body yaw into the mesh here so the visible triangle angles into play exactly like the
+## (yawed) solid body. The structural test asserts the mesh is not a BoxMesh.
+func _make_mesh() -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = _build_triangle_mesh(_triangle_outline(), _height)
+	# The solid body is yawed by _body_yaw() in the base; yaw the visible mesh the same so they agree.
+	mesh_instance.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
+	return mesh_instance
+
+
+## The triangle footprint in the body's LOCAL X-Z plane (before _body_yaw). The long KICKING FACE is
+## the edge A to B along +X at +Z (its outward normal is +Z, which _body_yaw turns into the kick
+## direction). The apex C sits BACK on -Z, offset toward one end per handedness so the left sling is
+## a left-handed triangle and the right (mirrored) sling a right-handed one. Returned CCW so the cap
+## fan/winding is consistent. Three (x, z) points.
+func _triangle_outline() -> PackedVector2Array:
+	var half_l: float = _length * 0.5
+	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
+	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
+	# Apex X offset per handedness: a real slingshot's apex sits toward the OUTER (side-wall) end. The
+	# mirror flips which end. hand_sign is +1 for the left sling, -1 for the right (mirror).
+	var hand_sign: float = -1.0 if _mirrored else 1.0
+	var apex_x: float = half_l * hand_sign
+	var pts := PackedVector2Array()
+	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
+	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
+	pts.append(Vector2(apex_x, apex_z))  ## C: apex (back, offset per side)
+	return pts
+
+
+## The triangle outline expanded OUTWARD by `pad` (world units) for the detector, so the detector is
+## one ball-radius larger than the solid body on every side + corner (QA BUG-018 corner guarantee).
+## We push each vertex away from the centroid by `pad`; for a compact triangle this keeps the same
+## shape a uniform margin larger, which is all the corner-contact detector needs.
+func _padded_triangle_outline(pad: float) -> PackedVector2Array:
+	var base: PackedVector2Array = _triangle_outline()
+	var cx: float = (base[0].x + base[1].x + base[2].x) / 3.0
+	var cz: float = (base[0].y + base[1].y + base[2].y) / 3.0
+	var out := PackedVector2Array()
+	for p: Vector2 in base:
+		var dir := Vector2(p.x - cx, p.y - cz)
+		if dir.length() > 0.0001:
+			dir = dir.normalized()
+		out.append(Vector2(p.x + dir.x * pad, p.y + dir.y * pad))
+	return out
+
+
+## Extrude a top-down (x, z) triangle outline to a 3D point cloud for a ConvexPolygonShape3D: each
+## outline point becomes two 3D points at +/- height/2 (Y is the surface normal). The convex hull of
+## the cloud is the solid triangular prism. Mirrors flipper.gd._extrude_outline_to_hull in spirit.
+func _extrude_triangle_to_hull(outline: PackedVector2Array, height: float) -> PackedVector3Array:
+	var half_h: float = height * 0.5
+	var cloud := PackedVector3Array()
+	for p: Vector2 in outline:
+		cloud.append(Vector3(p.x, half_h, p.y))
+		cloud.append(Vector3(p.x, -half_h, p.y))
+	return cloud
+
+
+## Build the visible triangular-prism mesh from the same (x, z) outline as the collider so the two
+## AGREE. A single-surface gray-box mesh (sides + top cap + bottom cap).
+##
+## QA BUG-032 HARDENING (2026-06-20): the caps were emitted with a FIXED vertex order (A->B->C top,
+## A->C->B bottom). QA flagged that the mirrored RIGHT slingshot could face the top cap DOWN (-Y)
+## and be back-face-culled (the same class of mirrored-winding bug flipper.gd fixes). On THIS
+## triangle the fixed order happens to face +Y for BOTH sides (the kicking-face vertices A and B are
+## fixed and only
+## the apex moves along the same z-line, so the mirror does NOT reverse the winding sign here - QA's
+## analysis assumed a full X-negation like flipper.gd's). To make the cap orientation correct
+## REGARDLESS of any future outline change, we now orient each cap from the outline's ACTUAL signed
+## area in the X-Z plane so the TOP cap always faces +Y and the BOTTOM always faces -Y, with no
+## per-side flag to thread. The side walls wrap the perimeter and read fine under generate_normals.
+func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
+	var half_h: float = height * 0.5
+	var mesh := ArrayMesh.new()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n: int = outline.size()
+	# Side walls: a quad per outline edge (top -> bottom), wound outward.
+	for i in range(n):
+		var a: Vector2 = outline[i]
+		var b: Vector2 = outline[(i + 1) % n]
+		var a_top := Vector3(a.x, half_h, a.y)
+		var b_top := Vector3(b.x, half_h, b.y)
+		var a_bot := Vector3(a.x, -half_h, a.y)
+		var b_bot := Vector3(b.x, -half_h, b.y)
+		st.add_vertex(a_top)
+		st.add_vertex(a_bot)
+		st.add_vertex(b_top)
+		st.add_vertex(b_top)
+		st.add_vertex(a_bot)
+		st.add_vertex(b_bot)
+	# Caps: orient from the outline's signed area so the TOP faces +Y and the BOTTOM faces -Y for both
+	# the left (CCW) and the mirrored right (CW) outlines (QA BUG-032). A CCW X-Z triangle's forward
+	# fan normal (via (v1-v0)x(v2-v0)) points -Y, so a CCW outline needs the top cap REVERSED to face
+	# +Y; a CW outline (the mirrored sling) needs it forward. _signed_area_xz < 0 means CW.
+	var top_forward: bool = _signed_area_xz(outline) < 0.0
+	var i0: int = 0
+	var i1: int = 1
+	var i2: int = 2
+	# Top cap (+Y).
+	st.add_vertex(Vector3(outline[i0].x, half_h, outline[i0].y))
+	if top_forward:
+		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
+		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
+	else:
+		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
+		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
+	# Bottom cap (-Y): the opposite winding of the top cap.
+	st.add_vertex(Vector3(outline[i0].x, -half_h, outline[i0].y))
+	if top_forward:
+		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
+		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
+	else:
+		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
+		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
+	st.generate_normals()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.55, 0.55, 0.58)
+	st.set_material(mat)
+	st.commit(mesh)
+	return mesh
+
+
+## Signed area of a top-down (x, z) outline in the X-Z plane (the shoelace formula). Positive when
+## the points wind counter-clockwise, negative when clockwise. Used to orient the prism caps so the
+## top always faces +Y regardless of the per-side mirror (QA BUG-032).
+func _signed_area_xz(outline: PackedVector2Array) -> float:
+	var area: float = 0.0
+	var n: int = outline.size()
+	for i in range(n):
+		var a: Vector2 = outline[i]
+		var b: Vector2 = outline[(i + 1) % n]
+		area += a.x * b.y - b.x * a.y
+	return area * 0.5
+
+
+## Yaw the body (and, via _detector_yaw + _make_mesh, the detector and the visible mesh) so the
+## KICKING FACE normal aligns with the kick direction. The triangle outline puts the long kicking
+## face (edge A-B) at the body's LOCAL +Z, so its outward normal is local +Z; we rotate so that
+## local +Z maps to _kick_dir (into play). The face then faces where the ball is fired, the visible
+## triangle reads correctly (the player sees the ball strike the long inner face, not the
+## apex), and the solid body + detector enclose that contact.
+##
+## QA BUG-030 FIX (2026-06-20): the prior formula atan2(x, -z) rotated local +Z to the OPPOSITE of
+## the kick direction (it aligned +Z with -_kick_dir), so the visible kicking face pointed at the
+## DRAIN while the ball was actually fired up-table. The physics outcome was already correct (the
+## base _apply_kick SETS the velocity along _kick_dir, independent of this yaw), but the MESH and
+## the solid body faced the wrong way, so the player saw the ball bounce off the BACK (apex) of the
+## triangle. The correct heading that maps a body-local +Z column vector to _kick_dir under Godot's
+## Y-basis is atan2(kick.x, kick.z) (verified against the arch's proven atan2(-chord.z, chord.x)
+## heading convention). For the left kick (0.6, 0, -0.8) this yaw maps local +Z -> (0.6, 0, -0.8)
+## exactly; the previous formula mapped it to (0.6, 0, +0.8), into the drain.
 func _body_yaw() -> float:
-	# atan2(x, -z): heading of the kick direction measured from the up-table (-Z) axis about +Y.
-	return atan2(_kick_dir.x, -_kick_dir.z)
+	# Heading that rotates the face normal (body-local +Z) onto the kick direction about +Y.
+	return atan2(_kick_dir.x, _kick_dir.z)

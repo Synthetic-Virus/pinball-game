@@ -268,6 +268,36 @@ def validate_layout():
     if not (KICK_MIN < KICK_MAX < 2.0 * launch_max):
         problems.append("kick bounds out of band: min=%.1f cap=%.1f stress=%.1f"
                         % (KICK_MIN, KICK_MAX, 2.0 * launch_max))
+    # 5. LAUNCH FURNITURE FITS THE BALL (SLICE "Playtest fixes 2", fix 4). After the lane/plunger
+    #    resize the lane must be a SNUG ~ball-width chute and the ball + plunger face must line up
+    #    inside it with no part poking through a wall. Deterministic, not eyeballed:
+    #      a) the lane width = HALF_WIDTH - LANE_INNER_X must be a snug chute (between ~1 and ~3 ball
+    #         diameters): wide enough for the ball, narrow enough to read as a chute not a box.
+    #      b) the resting ball (BALL_START.x) must sit at the lane CENTER, fully inside the lane in X.
+    #      c) the plunger face (PLUNGER_FACE_WIDTH) must be WIDER than the ball (strikes squarely) and
+    #         fit inside the lane with clearance (no part of the face inside the divider or the wall).
+    lane_w = HALF_W - LANE_INNER_X
+    ball_dia = 2.0 * BALL_R
+    lane_center = (LANE_INNER_X + HALF_W) / 2.0
+    face_w_m = re.search(r"const PLUNGER_FACE_WIDTH:\s*float\s*=\s*LANE_WIDTH\s*-\s*([\d.]+)", CFG)
+    face_w = (lane_w - float(face_w_m.group(1))) if face_w_m else None
+    if not (ball_dia <= lane_w <= 3.0 * ball_dia):
+        problems.append("lane width %.2f not a snug ~ball-width chute (ball dia %.2f; want 1..3 dia)"
+                        % (lane_w, ball_dia))
+    # The ball at BALL_START.x must sit inside the lane in X with at least a ball radius of clearance.
+    if not (LANE_INNER_X + BALL_R <= BALL_START[0] <= HALF_W - BALL_R):
+        problems.append("ball start x=%.2f not inside the lane [%.2f, %.2f] with clearance"
+                        % (BALL_START[0], LANE_INNER_X + BALL_R, HALF_W - BALL_R))
+    if abs(BALL_START[0] - lane_center) > 0.01:
+        problems.append("ball start x=%.2f not centered in the lane (center %.2f) - off the plunger"
+                        % (BALL_START[0], lane_center))
+    if face_w is not None:
+        if face_w <= ball_dia:
+            problems.append("plunger face %.2f not wider than the ball (dia %.2f) - off-center misses"
+                            % (face_w, ball_dia))
+        if face_w >= lane_w:
+            problems.append("plunger face %.2f does not fit inside the lane (width %.2f)"
+                            % (face_w, lane_w))
     return problems
 
 

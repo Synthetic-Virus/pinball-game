@@ -153,23 +153,25 @@ func test_half_width_is_16() -> void:
 	)
 
 
-func test_lane_inner_x_is_10_point_5() -> void:
-	# LANE_INNER_X was re-derived from 8.0 to 10.5 to keep a proportional 5.5-unit lane
-	# on the wider table (ARCHITECTURE.md 11.4).
+func test_lane_inner_x_is_14() -> void:
+	# LANE_INNER_X was re-derived from 10.5 to 14.0 (SLICE "Playtest fixes 2", 2026-06-20)
+	# to give a SNUG ~ball-width chute: LANE_WIDTH = 16 - 14 = 2.0 units (~1.7 ball diameters).
+	# Before: the lane was 5.5 units wide (over 4 ball diameters); the plunger face read as a box.
+	# After: the ball (diameter 1.2) sits snugly with ~0.4 units clearance each side.
 	assert_eq(
-		TableConfig.LANE_INNER_X, 10.5,
-		"LANE_INNER_X must be 10.5 after the widen (was 8.0); got %f" % TableConfig.LANE_INNER_X
+		TableConfig.LANE_INNER_X, 14.0,
+		"LANE_INNER_X must be 14.0 after the resize (was 10.5); got %f" % TableConfig.LANE_INNER_X
 	)
 
 
 func test_ball_start_x_is_lane_center() -> void:
-	# BALL_START.x was a stale literal 10.0 that would have placed the ball on the divider
-	# after LANE_INNER_X moved to 10.5. Re-derived as the lane center:
-	#   (LANE_INNER_X + HALF_WIDTH) * 0.5 = (10.5 + 16.0) / 2 = 13.25
-	# Verified as a float-equality (the constant is the literal 13.25, not an expression).
+	# BALL_START.x was re-derived to 15.0 (SLICE "Playtest fixes 2", 2026-06-20), the new lane
+	# center: (LANE_INNER_X + HALF_WIDTH) * 0.5 = (14.0 + 16.0) / 2 = 15.0. The old value 13.25
+	# would sit OUTSIDE the narrowed lane (on the divider), so the ball could not seat against the
+	# plunger. Verified as a float-equality (the constant is the literal 15.0, not an expression).
 	assert_eq(
-		TableConfig.BALL_START.x, 13.25,
-		"BALL_START.x must be 13.25 (lane center on the widened table); got %f"
+		TableConfig.BALL_START.x, 15.0,
+		"BALL_START.x must be 15.0 (lane center on the resized table); got %f"
 		% TableConfig.BALL_START.x
 	)
 

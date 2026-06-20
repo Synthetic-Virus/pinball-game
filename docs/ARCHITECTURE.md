@@ -653,3 +653,189 @@ Test-builder + qa-lead:
 - tests/*.gd  the ONE new file (test_flipper_shape.gd) + the width/furniture UPDATES + the VERIFY
   re-runs. Update the width-dependent asserts in test_world_scale / test_furniture_layout /
   test_shot_geometry for HALF_WIDTH 16. addons/gut already vendored.
+
+## 12. SLICE: Playtest fixes 2 (gray-box, physics-based, 2026-06-20)
+Second playtest-driven FIX pass on the deployed wider table (main 286356e). DESIGN intent: docs/
+DESIGN.md "Slice design intent: Playtest fixes 2"; cut list "Cut from the Playtest fixes 2 slice".
+Eight items: two CORRECTNESS (soft-lock recovery, lane/plunger resize), two SHAPE/MATERIAL (right-
+flipper rubber top, triangular slingshots), four UX (every-ball prompt, named restart key, colorblind
+meter, bigger HUD font). NO new element TYPES; same COUNTS (3 bumpers, 3 targets, 2 slings, 2
+flippers, 1 plunger, 2 gutters). This is NOT a table rescale: HALF_WIDTH 16 / HALF_LENGTH 25 / ball
+radius 0.6 / gravity 200 / flipper geometry / furniture positions all STAY (only the LANE narrows and
+the PLUNGER FACE + SLINGSHOT shapes + the FLIPPER material change).
+
+### 12.0 What is UNCHANGED (the contracts every fix lives behind)
+- SCENE TREE (section 5): unchanged. Same Table -> Playfield -> {geometry, flippers, targets,
+  bumpers, slings, plunger, drains, ball} + GameFlow + HUD. The fixes are internal to those nodes.
+- PHYSICS LAYERS + MASKS (section 3): UNCHANGED. NO new layer, NO mask edit. The triangular sling
+  body stays a StaticBody3D on STATIC_OBSTACLES (exactly the box sling's layer); the resized plunger
+  face stays an AnimatableBody3D on KINEMATIC_OBSTACLES. The flipper/ball tests CANNOT regress from a
+  layer change (there is none).
+- INPUT MAP (section 4): UNCHANGED. launch is still SPACE (the named restart key in fix 6).
+- PLUNGER PUBLIC CONTRACT: UNCHANGED (power_changed/ball_launched; arm/disarm/set_ball/is_armed;
+  power 0..1; the meter + power->stroke-speed mapping; the test hooks). The face RESIZE and the soft-
+  lock re-arm are INTERNAL / behind it.
+- FLIPPER PUBLIC CONTRACT + DRIVE: UNCHANGED. configure/is_energized/tip_speed/force_energized;
+  BAT_MASS 0.40 / BAT_BOUNCE 0.70; the drive, snap, cradle, _apply_handedness, the convex-hull shape.
+  Fix 2 is MATERIAL/MESH-WINDING correctness only.
+- SLINGSHOT / ACTIVE-KICKER KICK CONTRACT: UNCHANGED. scored/kicked/set_ball; the kick DIRECTION
+  (SLINGSHOT_LEFT/RIGHT_KICK_DIR), the cap/floor (KICK_MIN/MAX), the cooldown (KICK_COOLDOWN_S), the
+  BUG-018 corner detector guarantee. Fix 3 is a SHAPE swap (box -> triangular hull) behind that kick.
+- GameFlow public SIGNATURES: start_game/on_target_scored/on_ball_launched/on_ball_drained/restart/
+  current_state STAY. The soft-lock fix ADDS new contract (LAUNCHING state, request_relaunch,
+  tick_launch_watch, notify_ball_reached_play, on_launch_failed) - additive, not a break.
+
+### 12.1 Fix 1 - SOFT-LOCK RECOVERY (state machine + watchdog) - GAMEPLAY + PHYSICS
+ROOT CAUSE: on_ball_launched went READY_TO_LAUNCH -> BALL_IN_PLAY and the plunger disarmed. A ball
+that never reached play and never drained left the machine stuck in BALL_IN_PLAY with a dead plunger
+forever - the reported soft-lock. A too-weak launch (dribble back) or a stall is unrecoverable.
+THE FIX (a positional watchdog, NOT a ball-save, NOT a new mechanic):
+  - GameFlow gains a LAUNCHING state between launch and confirmed-in-play. on_ball_launched enters
+    LAUNCHING (not BALL_IN_PLAY).
+  - table.gd._physics_process feeds the ball's MEASURED playfield-local Z to
+    GameFlow.tick_launch_watch(ball.position.z, delta) every frame (independent oracle - the real
+    body position, never a flag). GameFlow only acts on it while LAUNCHING.
+  - tick_launch_watch: if the ball crossed up-table of TableConfig.LAUNCH_REACHED_PLAY_Z (=
+    FLIPPER_PIVOT_Z) -> notify_ball_reached_play -> BALL_IN_PLAY (normal play, drain/spend unchanged);
+    else once TableConfig.LAUNCH_SETTLE_TIME_S (2.0 s) elapses with the ball still in the lane ->
+    on_launch_failed -> READY_TO_LAUNCH + request_relaunch (re-seat + re-arm the SAME ball), and
+    CRITICALLY no balls_changed (no ball spent).
+  - table.gd wires request_relaunch to the SAME _on_request_new_ball reset+arm path as a new ball; the
+    distinct signal makes the recovery intent explicit and lets a test tell a recovery from a fresh
+    ball (no ball consumed).
+THRESHOLD CONTRACT (TableConfig, with WHY-comments): LAUNCH_REACHED_PLAY_Z = FLIPPER_PIVOT_Z (the
+ball is unambiguously in play once it is up-table of the flipper row; a dribble stays near z=23, far
+down-table of the 20.0 line); LAUNCH_SETTLE_TIME_S = 2.0 (a real launch crosses the line in well
+under a second; 2.0 s never falsely recovers a slow-but-successful launch yet breaks a real soft-lock
+fast). The watchdog re-checks each frame after the timer so a ball crawling up after the window is
+still handled correctly.
+FILES: scripts/game_flow.gd (state + recovery, GAMEPLAY), scripts/table.gd (feed the watchdog + wire
+request_relaunch, LEAD wiring), scripts/config/table_config.gd (the two threshold constants, LEAD),
+scripts/ball.gd (only if the physics-programmer needs a re-seat/contact tweak; reset_to_start already
+exists). PHYSICS owns confirming the positional oracle is robust against tilt drift in the live scene.
+
+### 12.2 Fix 2 - RIGHT FLIPPER RUBBER TOP (mesh winding) - PHYSICS
+ROOT CAUSE: _rebuild_bat_geometry mirrors the bat outline by negating X for the right flipper, which
+REVERSES the perimeter winding. _build_bat_mesh wound the top cap (surface 1, RUBBER_TOP_COLOR) and
+sides for the +X order, so on the mirrored bat the white top cap faces DOWN (-Y) and is backface-
+culled - the right flipper renders all black.
+THE FIX (lead scaffolded the correction point; physics owns/verifies it): _build_bat_mesh now takes
+hand_sign and emits every triangle through _emit_tri(..., flip := hand_sign < 0), which swaps the two
+non-apex vertices for the mirrored bat so all windings (top cap, bottom cap, sides) keep their normals
+facing the same way. The white rubber top faces +Y on BOTH bats. Drive/shape/material UNCHANGED.
+FILE: scripts/flipper.gd ONLY.
+
+### 12.3 Fix 3 - TRIANGULAR SLINGSHOTS (shape swap behind the same kick) - PHYSICS (+ gameplay verify)
+ROOT CAUSE: slingshot._make_body_shape returned a BoxShape3D and the base drew a generic box mesh, so
+the slings read as small squares.
+THE FIX: a triangular prism. active_kicker.gd gains a _make_mesh() override hook (the base returns the
+old box for the round pop bumper; the slingshot overrides it). slingshot.gd builds a right-triangle
+footprint via _triangle_outline (long KICKING FACE along local +X at +Z so its normal is +Z, which
+_body_yaw rotates to the EXISTING kick direction - the kick is byte-for-byte unchanged), apex offset
+per handedness (left- vs right-handed), extruded to a ConvexPolygonShape3D body + a matching mesh
+(they AGREE). The detector is the same triangle padded one BALL_RADIUS (keeps the BUG-018 corner-
+contact guarantee). TRIANGLE_BACK_DEPTH is a local proportion constant (no TableConfig edit). Kick
+direction/score/cooldown/CCD cap UNCHANGED (the base owns them). PHYSICS owns the no-tunnel re-confirm
+on the triangular face; gameplay re-verifies score/cooldown unchanged.
+FILES: scripts/slingshot.gd (triangle shape + mesh), scripts/active_kicker.gd (the _make_mesh hook).
+
+### 12.4 Fix 4 - LANE + PLUNGER RESIZE (TableConfig geometry) - LEAD (+ physics verify)
+The lane narrows to a snug ~ball-width chute: LANE_INNER_X 10.5 -> 14.0 (LANE_WIDTH 5.5 -> 2.0, ~1.7
+ball diameters). PLUNGER_FACE_WIDTH = LANE_WIDTH - 0.6 auto-follows to 1.4 (a ball-and-a-bit, wider
+than the 1.2 ball so an off-center rest is struck square, fits the lane with clearance). The lane
+center moves to 15.0; BALL_START.x re-derived 13.25 -> 15.0 (the lane center, head-on with the face;
+PLUNGER_REST_POS.x is the same expression, auto-follows). The right lane-guide divider (9.0) still
+sits inboard of the new lane (between pivot 7.2 and 14.0), no change. NOT a rescale: HALF_WIDTH 16 /
+HALF_LENGTH 25 stay. Re-validated DETERMINISTICALLY by tools/table_viz.py validate_layout() (new check
+5: the lane is a snug ball-width chute, the ball is centered and inside the lane, the face is wider
+than the ball and fits the lane) - PASSES on the new constants, EXITS NON-ZERO on a broken lane
+(verified). PHYSICS confirms the resized face still strikes the seated ball with no gap and never
+tunnels (test_plunger_launch). FILES: scripts/config/table_config.gd (LEAD), tools/table_viz.py
+(LEAD), scripts/plunger.gd / scripts/table_geometry.gd (READ the constants - face box + lane pocket
+auto-follow PLUNGER_FACE_WIDTH / LANE_WIDTH; no literal edit expected, physics verifies).
+
+### 12.5 Fixes 5-8 - UX WIRING (Gate-0 readiness, no CI gate) - GAMEPLAY
+5. EVERY-BALL PROMPT: GameFlow.on_ball_drained re-arm now emits "BALL DRAINED\nHOLD LAUNCH - release
+   to fire" (was just "BALL DRAINED"); on_launch_failed re-emits the prompt too. Ball 1 already got it
+   from start_game. So the prompt appears on every ball arm.
+6. NAMED RESTART KEY: hud.show_game_over says "press SPACE to restart" (launch is bound to SPACE,
+   verified in project.godot). Was the ambiguous "press LAUNCH to restart".
+7. COLORBLIND-SAFE METER: hud.set_meter already encodes power as bar WIDTH (the primary cue); the
+   color lerp is now explicitly SECONDARY and a high-contrast white OUTLINE (METER_OUTLINE_COLOR) is
+   drawn around the meter so the filled LENGTH reads without relying on hue.
+8. BIGGER HUD FONT: hud._apply_font_size sets HUD_FONT_SIZE (28) on every label and
+   GAME_OVER_FONT_SIZE (34) on the game-over panel via add_theme_font_size_override.
+FILE: scripts/hud.gd (6/7/8), scripts/game_flow.gd (5). These do not fail CI but are in scope; folded
+in, not deferred.
+
+### 12.6 Physics north-star (unchanged, re-asserted on the new shapes)
+Ball continuous_cd at 240 Hz; ZERO tunneling at >= ~2x LAUNCH_SPEED_MAX through the RESIZED plunger
+face and the NEW triangular slingshot face (and every existing body). Proven by GUT against REAL
+instanced bodies measuring real position/velocity (independent oracle). The triangular sling body is
+STATIC and the kick stays capped at KICK_MAX_OUTGOING_SPEED (120, well under the 180 stress band), so
+the no-tunnel gate holds exactly as the box sling's did - physics RE-CONFIRMS, does not re-tune.
+
+### 12.7 Test matrix for this slice (CI is the source of truth; independent-oracle rule applies)
+
+| File | Class | Proves | Owner |
+|------|-------|--------|-------|
+| test_soft_lock_recovery.gd (NEW) | behavioral | a too-weak launch recovers (READY_TO_LAUNCH + request_relaunch) and does NOT spend a ball; a launch that reaches play promotes to BALL_IN_PLAY; a genuine drain still spends; the every-ball prompt re-issues. Real GameFlow state + ball count + signals, never a counter. | gameplay + test-builder |
+| test_flipper_rubber_top.gd (NEW) | structural | BOTH bats carry the white RUBBER_TOP_COLOR surface AND the right bat's top cap faces +Y (not culled). Real instanced left + right mesh surfaces/normals. | physics + test-builder |
+| test_plunger_lane_size.gd (NEW) | structural | LANE_WIDTH is a snug ball-width chute; PLUNGER_FACE_WIDTH is wider than the ball and fits the lane; ball + plunger share the lane center; the BUILT PlungerFace box width == PLUNGER_FACE_WIDTH. | lead + test-builder |
+| test_slingshot.gd (UPDATE) | structural | the slingshot body is a ConvexPolygonShape3D (NOT a box) and the mesh is non-box; left and right are MIRRORED; the existing kick-into-play / score / corner-contact behavioral tests stay green. | physics + gameplay + test-builder |
+| test_plunger_launch.gd (VERIFY) | behavioral+stress | the RESIZED face still launches from rest on the first stroke (monotonic, in-range, no-ball no-op) and never tunnels the face/pocket at the new lane width (x=15.0). | physics + test-builder |
+| test_plunger.gd (VERIFY) | contract | the unchanged plunger contract + stroke_speed mapping stay green. | gameplay |
+| test_flipper_momentum.gd / test_flipper_rubber.gd / test_flipper_shape.gd / test_flipper_no_overlap.gd (VERIFY) | regression | drive/snap/rebound/shape unchanged after the mesh-winding fix (the fix touches only mesh winding, not the collider or drive). | physics |
+| test_active_kicker_no_tunneling.gd (VERIFY/EXTEND) | stress | no tunneling through the NEW triangular sling face at >= ~2x LAUNCH_SPEED_MAX, real instanced body. | physics + qa |
+| test_shot_geometry.gd (VERIFY) | geometry | sling kicks still point into play on the unchanged kick dirs; the new lane geometry validates. | lead + qa |
+| test_world_scale.gd / test_furniture_layout.gd / test_table_integration.gd (UPDATE/VERIFY) | structural integration | the new LANE_WIDTH / BALL_START / lane-pocket are consistent; the real Table.tscn still builds + the ball seats in the resized lane. | test-builder |
+| test_game_flow.gd (UPDATE) | unit | the new LAUNCHING state + transitions are exercised; existing transitions still pass with the new state inserted. | gameplay + test-builder |
+
+INDEPENDENT-ORACLE RULE (hard): every physics/behavioral assertion reads the REAL ball position /
+current_speed()/linear_velocity OR the REAL built node's shape/material, never a self-reported flag.
+The soft-lock behavioral test is MANDATORY and NEW.
+
+### 12.8 File ownership for THIS slice (DISJOINT - no two coders edit the same lines)
+Read-only CONTRACT files (lead-owned; FROZEN after this scaffold):
+- scripts/config/table_config.gd  the lane/plunger RESIZE (LANE_INNER_X/LANE_WIDTH/BALL_START) + the
+  two soft-lock threshold constants (LAUNCH_REACHED_PLAY_Z, LAUNCH_SETTLE_TIME_S). No further edits;
+  physics/gameplay READ it. Frozen.
+- scripts/config/physics_layers.gd  NO CHANGE (frozen).
+
+Lead-programmer (geometry resize + the watchdog wiring + the CAD tool + this doc):
+- scripts/config/table_config.gd  the resize + thresholds (DONE).
+- scripts/table.gd  feed GameFlow.tick_launch_watch from _physics_process + wire request_relaunch
+  (DONE - wiring only, no game rules).
+- tools/table_viz.py  the lane-fit validation check 5 (DONE; PASSES on the new constants, fails a
+  broken lane - verified).
+- scripts/active_kicker.gd  the _make_mesh() override HOOK (DONE - boilerplate, the base returns the
+  old box; the slingshot fills the triangle mesh).
+- docs/ARCHITECTURE.md (this section), docs/BACKLOG.md slice tasks.
+
+Physics-programmer (the soft-lock positional oracle + the flipper winding + the triangle no-tunnel):
+- scripts/game_flow.gd  ONLY if the positional oracle needs a different threshold/logic than the
+  scaffold (the recovery state machine itself is gameplay's, below - keep disjoint by function:
+  physics owns "did it reach play" detection robustness, gameplay owns the state transitions).
+- scripts/flipper.gd  fix 2: verify/tune the _emit_tri winding correction so the right bat's rubber
+  top faces +Y (the scaffold implements it; physics confirms in the headless render-surface test).
+- scripts/slingshot.gd  fix 3: own the triangular body's no-tunnel guarantee; tune TRIANGLE_BACK_DEPTH
+  if the stress test needs it. The triangle outline + mesh are scaffolded; physics owns correctness.
+- scripts/ball.gd  ONLY if the soft-lock re-seat needs a contact/sleep tweak (reset_to_start exists).
+- Owns: test_flipper_rubber_top.gd physics/render asserts, test_plunger_launch.gd re-confirm, the
+  triangular sling no-tunnel re-run, the soft-lock positional-oracle robustness in the live scene.
+
+Gameplay-programmer (the recovery state machine + the UX wiring):
+- scripts/game_flow.gd  the LAUNCHING state + tick_launch_watch/notify_ball_reached_play/
+  on_launch_failed + the every-ball prompt (scaffolded functional; gameplay owns/finishes it).
+- scripts/hud.gd  fixes 6/7/8 (named restart key, colorblind meter outline, bigger font) - scaffolded
+  functional; gameplay/ux finishes/tunes the visual values.
+- scripts/plunger.gd  re-verify the public contract after the lane resize (it READS the resized
+  constants; no internal mechanism edit for this slice).
+- Owns: test_soft_lock_recovery.gd behavioral asserts, test_game_flow.gd state-machine update,
+  test_slingshot.gd score/cooldown verify.
+
+Test-builder + qa-lead:
+- tests/*.gd  the three NEW files (test_soft_lock_recovery, test_flipper_rubber_top,
+  test_plunger_lane_size) + the test_slingshot triangle structural UPDATE + the VERIFY re-runs +
+  the width-dependent UPDATES (test_world_scale / test_furniture_layout / test_table_integration for
+  LANE_WIDTH 2.0 / BALL_START.x 15.0). addons/gut already vendored.

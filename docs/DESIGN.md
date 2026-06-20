@@ -398,6 +398,162 @@ first small win of every ball" (core loop step 1); this slice is what makes that
   PR and confirms GREEN on the homelab runner. Do NOT touch main. The producer requires green CI on
   the pushed sha to PASS; the human merges.
 
+## Slice design intent: "Playtest fixes 2" (gray-box, physics-based, 2026-06-20)
+This is the SECOND playtest-driven slice. The developer played the deployed wider table (main
+286356e) and reported a fresh batch of problems. Like the last one, this is a FIX pass, not a feature
+pass: it adds NO new element TYPES, keeps the same element COUNTS, and keeps every interaction
+physics-based. Two of the fixes are CORRECTNESS (a soft-lock that ends the session, and a launch lane
+sized wrong); two are SHAPE/MATERIAL legibility (a flipper that renders wrong, slingshots that read
+as boxes); four are the UX-clarity items the producer has already ruled in scope for Gate-0 readiness
+(prompt on every ball, name the restart key, colorblind-safe meter, bigger HUD font). The designer
+confirms the intent below. The physics-programmer owns the soft-lock recovery, the resized plunger
+launch, the no-tunnel gate on the new shapes; the lead owns the TableConfig geometry edits; the
+gameplay-programmer owns the game-state recovery + the HUD/prompt wiring; the test-builder/QA own the
+independent-oracle suite. References: docs/REFERENCES.md, docs/ARCHITECTURE.md, docs/pinhead-tech-notes.md.
+
+### Why this slice matters (the core-loop stakes)
+Gate 0 asks "does one ball make the player want the next ball." Two of these bugs make that
+impossible to even evaluate. The SOFT-LOCK is the worst: a weak launch that leaves the ball dribbling
+in the lane FREEZES the whole game - the player cannot relaunch, the ball count never moves, the
+session is dead. That is not a fun problem, it is a "the game stopped" problem, and it fails Gate 0 on
+a control failure before fun is ever in question. The undersized/oversized launch furniture is the
+adjacent risk: the launch is "the first small win of every ball" (core loop step 1), and a lane that
+does not line up with the ball undermines the reliability of that first beat. The flipper-material and
+slingshot-shape fixes make the table READ correctly (a player must instantly recognise a flipper and a
+slingshot as what they are), and the four UX items make the controls legible so a player can launch
+ball 2 and ball 3 and knows how to restart. All gray-box; no art, no audio.
+
+### Player-facing goal (what the player should be able to do and feel)
+- NEVER BE STUCK. If a launch is too weak and the ball never reaches play (it dribbles back into the
+  lane or stalls below the arch), the player can ALWAYS launch again. The plunger re-arms (and/or the
+  ball returns to the cradle) so there is no dead state where the ball is sitting in the lane and the
+  game has stopped responding. A failed launch costs the player nothing but a re-pull.
+- READ THE TABLE INSTANTLY. BOTH flippers look the same: a black bat with a white rubber top. The two
+  active kickers above the flippers look like real SLINGSHOTS - angled triangles whose long face
+  points into play - not little boxes. A player recognises every piece of furniture for what it is.
+- A LAUNCH LANE THAT FITS THE BALL. The plunger and launch lane are sized to the ball (about its
+  width), so the ball sits squarely in the lane and the plunger face strikes it head-on. The lane
+  reads as a snug chute, not a bulky oversized box, and the launch still fires reliably on the first
+  pull.
+- KNOW HOW TO PLAY EVERY BALL. On every ball (not just the first), the "HOLD LAUNCH - release to fire"
+  prompt appears. On game over the screen names the actual key to restart (SPACE / the launch action).
+- READ THE HUD WITHOUT STRAINING OR GUESSING AT COLOR. The HUD text is large enough to read at a
+  glance, and the launch power meter is legible without relying on color (the bar WIDTH already encodes
+  power; that must be the primary cue so a colorblind player reads it fine).
+
+### Must-feel qualities (the bar the engineers hit, gray boxes only)
+1. A FAILED LAUNCH IS ALWAYS RECOVERABLE (the headline correctness fix). If the ball does NOT reach
+   play after a launch (it is still in the launch lane / below the arch, e.g. it dribbled back or
+   stalled), the game returns the player to a launchable state: the plunger is RE-ARMED and/or the
+   ball is returned to the cradle, so another launch is always possible. There is NO state where a
+   live ball sits in the lane and the plunger is dead. CRITICAL: a too-weak launch must NOT silently
+   cost the player a ball - re-arming for the same ball is the correct behavior, not spending a ball
+   the player never got into play. (Whether a true drain still spends a ball is unchanged; this is
+   specifically the "ball never left the lane" recovery.) Judged by a behavioral test that drives a
+   too-weak launch and asserts the ball is recoverable (plunger re-armed and/or ball back at the
+   cradle), never a soft-lock.
+2. BOTH FLIPPERS RENDER IDENTICALLY (black body + white rubber top). The right (mirrored) flipper
+   shows the SAME white rubber TOP surface as the left. The mirroring must not drop, hide, or
+   wrong-face the rubber-top material (the mesh normals/UVs/material assignment must survive the X
+   mirror). A side-by-side look shows two matching bats, not one black and one two-tone.
+3. SLINGSHOTS ARE TRIANGLES (shape + collider). Each slingshot is a proper slingshot TRIANGLE: a
+   left-handed triangle above the LEFT flipper and a right-handed (mirrored) triangle above the RIGHT
+   flipper, with the long KICKING FACE angled INTO play (toward center-up), like a real pinball
+   slingshot. BOTH the collision shape AND the visible mesh become triangular. The existing active
+   kick is unchanged: same kick DIRECTION (into play, validated by table_viz), same score, same
+   cooldown, same CCD-safe cap. The face the ball strikes is the long inner face of the triangle.
+4. THE LAUNCH FURNITURE FITS THE BALL. The plunger face and the launch lane are sized to roughly the
+   ball's WIDTH (ball diameter ~1.2, radius 0.6): a NARROW plunger face and a NARROWER lane that line
+   up with the ball, replacing the current too-wide/bulky box. The launch must still fire reliably on
+   the FIRST stroke (the plunger contract and the impulse-on-contact launch are preserved), and the
+   resized face must still strike the ball head-on with no gap to tunnel across.
+5. CONTROLS AND HUD ARE LEGIBLE EVERY BALL. The launch prompt re-issues on EVERY ball arm (balls 2
+   and 3, not only ball 1). The game-over screen names the real restart key (SPACE / the launch
+   action). The power meter reads without color (width is the primary cue). The HUD font is larger.
+6. NOTHING TUNNELS, EVER. At the top ball speed the table produces (a full launch, a full flip, a
+   stacked kick - so >= ~2x LAUNCH_SPEED_MAX) the ball never passes through the RESIZED plunger face,
+   the NEW triangular slingshot face, a flipper, a target, a pop bumper, a lane guide, a wall, or the
+   arch. Hard gate on the ball's REAL measured position/velocity, proven by GUT against real instanced
+   bodies at 240 Hz with continuous_cd on. The new triangular slingshot face and the narrowed plunger
+   face both hold the no-tunnel gate.
+
+### Design constraints the engineers must honor (do NOT re-litigate)
+- SCOPE: FIX, DO NOT ADD. Exactly the eight reported items (four functional/visual fixes + four UX
+  items). NO new element TYPES, ramps, modes, multiball, multipliers, rollover scoring, art, or audio.
+  Same element COUNTS: 3 pop bumpers, 3 standup targets, 2 slingshots, 2 flippers, 1 plunger, 2
+  gutters. Only shape/size/material/state-logic change.
+- SOFT-LOCK FIX IS A STATE-MACHINE + PLUNGER RECOVERY, NOT A NEW MECHANIC. The fix lives across
+  scripts/game_flow.gd, scripts/plunger.gd, scripts/ball.gd, scripts/config/table_config.gd. The
+  recovery condition is positional: if, some short settling time after a launch, the ball is still in
+  the launch lane / below the arch (it never crossed into the playfield), treat the launch as FAILED
+  and re-arm the plunger for the SAME ball (re-seat the ball at the cradle if needed). Do NOT decrement
+  the ball count for a failed launch. Do NOT change the drain behavior for a ball that genuinely
+  reached play and then drained. Add a behavioral test: a too-weak launch leaves the ball recoverable
+  (plunger re-armed / ball back at cradle), never a soft-lock. The exact threshold (settle time, the Z
+  / arch line that defines "reached play") is the physics/gameplay programmer's call, written down in
+  TableConfig or the relevant script with a WHY-comment, then it is the contract.
+- PRESERVE THE PLUNGER CONTRACT EXACTLY. Signals power_changed(power)/ball_launched; methods
+  arm/disarm/set_ball/is_armed; power stays 0..1; the oscillating meter and the power->launch-speed
+  mapping are unchanged in CONTRACT. The plunger-face RESIZE and the soft-lock re-arm are INTERNAL
+  changes behind that contract. Production launch must still come FROM the contact/impulse, not a code
+  velocity set on the ball (test_plunger_launch.gd asserts this).
+- PRESERVE THE FLIPPER CONTRACT AND DRIVE. configure()/is_energized()/tip_speed()/force_energized()
+  unchanged; BAT_MASS 0.40 / BAT_BOUNCE 0.70; the force/hinge/return-spring drive, the ~50 ms snap,
+  the cradle, _apply_handedness untouched. The right-flipper fix is a MATERIAL/MESH correctness fix
+  (the rubber-top surface must render on both sides after the X mirror), NOT a drive or shape change.
+  The capsule/convex-hull collider and the tapered stadium mesh stay; only the material/mesh-normal/UV
+  handling that drops the right rubber top is corrected.
+- SLINGSHOT TRIANGLE IS A SHAPE SWAP BEHIND THE SAME KICK. Replace the slingshot BoxShape3D solid body
+  AND its gray-box mesh with a TRIANGULAR form (a convex hull / prism whose top-down footprint is a
+  right triangle), left-handed for the left sling and mirrored for the right, with the long hypotenuse
+  / inner face angled INTO play along the existing SLINGSHOT_LEFT/RIGHT_KICK_DIR. The kick DIRECTION,
+  score, cooldown, and CCD-safe cap are UNCHANGED (the active-kick base owns those). Both the
+  collision shape and the visible mesh become triangular and must AGREE. The detector volume must
+  still trip on contact anywhere along the long face (keep the BUG-018 corner-contact guarantee). Files:
+  scripts/slingshot.gd (and scripts/active_kicker.gd if the body/mesh is built there). Re-validate the
+  kick still points into play with table_viz; keep the no-tunnel stress test green for the triangular
+  face.
+- RESIZE THE LAUNCH FURNITURE, KEEP THE LAUNCH RELIABLE. The plunger face and launch lane shrink to ~
+  the ball's width. Edit TableConfig (LANE_WIDTH / LANE_INNER_X / PLUNGER_FACE_WIDTH / lane-pocket and
+  lane geometry) so the face is about a ball-and-a-bit wide and the lane is a snug chute, re-deriving
+  every dependent constant with a WHY-comment (PLUNGER_REST_POS.x, BALL_START.x stay the lane center;
+  nothing may end up in a wall or off the field). The launch must still fire on the FIRST stroke and
+  the face must seat in contact with the resting ball (no gap to tunnel). Files: table_config.gd,
+  plunger.gd, table_geometry.gd. Validate the resized lane geometry with tools/table_viz.py
+  deterministically (do NOT eyeball); keep test_plunger_launch.gd green.
+- WORLD SCALE STAYS LOCKED OTHERWISE. HALF_WIDTH 16, HALF_LENGTH 25, ball radius 0.6, gravity 200,
+  FLIPPER geometry, the furniture positions all UNCHANGED. This slice narrows the LANE and resizes the
+  PLUNGER FACE and the SLINGSHOT shape and fixes the flipper material; it does NOT re-rescale the
+  table. Do not re-litigate the widen from the prior slice.
+- UX ITEMS ARE WIRING, NOT FEATURES. Re-issue the "HOLD LAUNCH - release to fire" prompt on every ball
+  arm (game_flow.gd request_new_ball path / message emit, or plunger.gd arm()). Name the real restart
+  key in the game-over panel (hud.gd show_game_over: the launch action is SPACE). Make the meter
+  colorblind-safe (hud.gd: width is the primary encoding; do not rely on the green->red color alone -
+  a colorblind player must read the charge from the bar length, optionally a tick/outline, never color
+  only). Raise the HUD font size (hud.gd: set a larger font size on the labels). These do not fail CI
+  but ARE in scope for Gate-0 readiness; fold them in, do not defer.
+- VALIDATE SHOTS DETERMINISTICALLY (CAD discipline). Use tools/table_viz.py to re-validate the resized
+  plunger/lane geometry and confirm the new triangular slingshot kick still points into play. The tool
+  must exit non-zero if the lane no longer lines up with the ball or a kick aims at the drain. The GUT
+  twin (tests/test_shot_geometry.gd) is the CI source of truth.
+- INDEPENDENT-ORACLE TESTS (three classes, all required, "test the game like a web app"). STRUCTURAL:
+  both flippers carry the white-rubber-top material/mesh surface; the slingshot solid body + mesh are
+  the triangular (non-box) shape; the plunger face width matches the resized constant; the lane width
+  matches the resized constant. BEHAVIORAL: a too-weak launch leaves the ball recoverable (plunger
+  re-armed and/or ball back at cradle) and does NOT spend a ball (the soft-lock test); the plunger
+  still launches a ball from rest at full power on the first stroke (no regression); the slingshot
+  still kicks into play and scores on contact. STRESS: no tunneling at >= ~2x LAUNCH_SPEED_MAX through
+  the resized plunger face and the new triangular slingshot face. Real instanced bodies, measured ball
+  position/velocity (independent oracle), never a self-reported counter.
+- PHYSICS NORTH-STAR: ball continuous_cd at 240 Hz; zero tunneling anywhere, including the resized
+  plunger face and the triangular slingshot.
+- House style: typed GDScript, snake_case, document the WHY, no emojis, no em-dash characters; lines
+  <= 100 chars; gdlint clean (~/.local/bin/gdlint).
+- DELIVERY: the team's Setup phase creates the slice branch. Build/QA agents COMMIT but do NOT push.
+  Deliver verifies GREEN locally (fetch headless Godot 4.x, run the FULL GUT suite) BEFORE pushing,
+  then opens ONE PR and confirms GREEN on the homelab runner. Do NOT touch main. The producer requires
+  green CI on the pushed sha to PASS; the human merges.
+
 ## Out of scope for v1 (the cut list - keep honest)
 v1 direction (producer + designer): ONE polished table before any others; defer extra worlds.
 
@@ -445,3 +601,24 @@ pass. Explicitly held OUT (creep that the five reported items could pull in):
 Why hold the line: the player cannot even launch the ball today. The win is making the EXISTING table
 launch, read, and play correctly - not adding more to a table that does not yet start. One great
 table first.
+
+### Cut from the "Playtest fixes 2" slice (2026-06-20) - defended:
+A second fix pass on developer playtest feedback against the deployed wider table. Eight items, no new
+mechanics. Explicitly held OUT (creep the eight items could pull in):
+- NEW element types or counts: no new bumpers/targets/slingshots/ramps/spinners/kickbacks/magnets.
+  Same counts; only shape/size/material/state-logic change.
+- RE-RESCALING the table: HALF_WIDTH 16 / HALF_LENGTH 25 / ball radius / gravity / flipper geometry /
+  furniture positions all STAY. This slice narrows the LANE and resizes the PLUNGER FACE and the
+  SLINGSHOT shape only; it is not another widen/length change.
+- The kenney.nl CC0 ART pass: still LATER. Gray-box materials only (the flipper stays the 2-tone
+  black-body/white-rubber-top look; the fix is making that render on BOTH bats, not adding art).
+- RE-TUNING the launch FEEL numbers (speed range, meter sweep) or the flipper DRIVE: the plunger
+  resize is geometry behind the same contract/feel; the flipper fix is material/mesh correctness
+  behind the same drive. Do not re-litigate the tuned constants while fixing the geometry/material.
+- A general ball-save / outlane-save system: the soft-lock fix is specifically "a ball that NEVER
+  reached play is recoverable", not a ball-save for a ball that genuinely drained. Rollover scoring,
+  lights, ball-save, modes, multiball - still deferred (v1 cut list stands).
+Why hold the line: a soft-lock that ends the session and a launch lane that does not fit the ball are
+control failures that block Gate 0 outright. Fix the EXISTING table so a failed launch is always
+recoverable, every piece reads as what it is, and the controls/HUD are legible every ball - then judge
+the fun. One great table first.

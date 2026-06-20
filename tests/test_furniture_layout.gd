@@ -161,7 +161,7 @@ func test_both_lane_guides_at_correct_widened_spacing() -> void:
 	## edge (x in [LANE_INNER_X, HALF_WIDTH]).
 	##   LEFT  guide: open left field, at x = -LANE_GUIDE_DIVIDER_X (= -13.0).
 	##   RIGHT guide: INBOARD of the launch lane, at x = +LANE_GUIDE_RIGHT_DIVIDER_X (= +9.0), between
-	##               the lane divider (LANE_INNER_X = 10.5) and the right flipper pivot
+	##               the lane divider (LANE_INNER_X = 14.0) and the right flipper pivot
 	##               (FLIPPER_PIVOT_SPREAD = 7.2). A symmetric right guide at +13.0 sat INSIDE the lane
 	##               across the ball's launch path and pinned the ball so it could never be launched
 	##               (the launch-lane fix, TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X). This is the item-4

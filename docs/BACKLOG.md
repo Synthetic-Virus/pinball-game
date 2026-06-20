@@ -358,6 +358,112 @@ Tasks (pull from here - keep them small and finishable):
       that the launch + capsule + width + gutter + resize claims are GREEN on the runner on the pushed
       sha before any merge to main. Owner: gamedev-producer.
 
+## SLICE: Playtest fixes 2 (gray-box, physics-based) - gamedev-* team
+SECOND playtest-driven slice: the developer played the deployed wider table (main 286356e) and
+reported a fresh batch of problems. Fix them in ONE slice. NO new mechanics or element types - only
+shape, size, material, and state-logic change. Same element counts (3 bumpers, 3 targets, 2
+slingshots, 2 flippers, 1 plunger, 2 gutters). Design intent confirmed in DESIGN.md ("Slice design
+intent: Playtest fixes 2"). Cut list in DESIGN.md ("Cut from the Playtest fixes 2 slice"). Flow:
+game-designer (DONE - intent below) -> lead-programmer (TableConfig geometry: lane/plunger resize +
+any soft-lock threshold constant) -> physics-programmer (soft-lock recovery + resized launch + no-tunnel
+stress on the new shapes) -> gameplay-programmer (game-state recovery wiring + HUD/prompt UX) ->
+test-builder + qa-lead (structural/behavioral/stress, independent oracle) -> review board -> producer
+(scope/finish gate, GREEN CI on the pushed sha). The team's Setup phase creates the slice branch;
+build/QA agents COMMIT but do NOT push; Deliver verifies the FULL GUT suite GREEN locally (fetch
+headless Godot 4.x) BEFORE pushing ONE PR. Do NOT touch main.
+
+Tasks (pull from here - keep them small and finishable):
+- [ ] PHYSICS+GAMEPLAY: FIX THE SOFT-LOCK ON FAILED LAUNCH (the #1 fix - critical correctness). When
+      the ball fails to leave the launch lane (a weak launch, or it stalls in the lane and never
+      reaches the playfield), the game LOCKS UP: the player cannot relaunch and nothing progresses
+      (on_ball_launched -> BALL_IN_PLAY with the plunger disarmed, but the ball never drains, so
+      GameFlow never re-arms). FIX the game-state machine + plunger so a ball that does not reach play
+      can ALWAYS be relaunched: if, a short settle time after launch, the ball is still in the launch
+      lane / below the arch, treat the launch as FAILED and RE-ARM the plunger for the SAME ball
+      (re-seat the ball at the cradle if needed). Do NOT spend a ball for a failed launch; do NOT
+      change drain behavior for a ball that genuinely reached play. Owner: gamedev-physics-programmer
+      (detect "did not reach play", positional, independent oracle) + gamedev-gameplay-programmer
+      (state recovery + re-arm). Files: scripts/game_flow.gd, scripts/plunger.gd, scripts/ball.gd,
+      scripts/config/table_config.gd (the settle-time / arch-line threshold constant with a WHY).
+      Acceptance: a NEW behavioral test drives a too-weak launch and asserts the ball is recoverable
+      (plunger re-armed AND/OR ball back at the cradle), the ball count was NOT decremented, and there
+      is no soft-lock; a normal launch -> BALL_IN_PLAY -> drain path is unchanged and stays green.
+- [ ] PHYSICS: FIX THE RIGHT FLIPPER MISSING ITS WHITE RUBBER TOP. The LEFT flipper renders with the
+      white rubber top; the RIGHT (mirrored) flipper renders all black (the rubber-top surface is
+      dropped/hidden on the right side). The X-mirror of the bat outline (negating X in
+      _rebuild_bat_geometry) likely inverts the triangle winding so the white TOP cap (surface 1) faces
+      down / is culled on the right bat. FIX so BOTH flippers show the same black body + white rubber
+      top: the mirror must not drop or wrong-face the rubber-top material / the mesh normals/UVs on the
+      right side. Owner: gamedev-physics-programmer. File: scripts/flipper.gd. Acceptance: a STRUCTURAL
+      test asserts BOTH bats carry the white-rubber-top material/mesh surface (surface count + the
+      RUBBER_TOP_COLOR material present, top cap faces +Y) on the right flipper as on the left;
+      test_flipper_momentum / test_flipper_rubber / test_flipper_no_overlap / test_flipper_shape stay
+      GREEN; no tunneling.
+- [ ] PHYSICS+GAMEPLAY: SLINGSHOTS AS TRIANGLES, not boxes. The two active kickers above the flippers
+      currently render as small boxes (slingshot.gd _make_body_shape returns a BoxShape3D; the base
+      gray-box mesh is a box). Make them proper slingshot TRIANGLES: a left-handed triangle for the
+      LEFT flipper and a right-handed (mirrored) triangle for the RIGHT, with the long kicking face
+      angled INTO play (toward center-up), like a real pinball slingshot. Update BOTH the collision
+      shape (a convex hull / triangular prism) AND the visible mesh to the triangular form; keep the
+      existing active-kick behavior, kick DIRECTION (SLINGSHOT_LEFT/RIGHT_KICK_DIR), score, and
+      cooldown UNCHANGED. Keep the BUG-018 corner-contact detector guarantee. Owner:
+      gamedev-physics-programmer (triangular body + mesh + no-tunnel) + gamedev-gameplay-programmer
+      (re-verify score/cooldown contract unchanged). Files: scripts/slingshot.gd (and
+      scripts/active_kicker.gd if the shape/mesh is built there), scripts/config/table_config.gd.
+      Acceptance: STRUCTURAL test asserts the slingshot solid body + mesh are triangular (a convex
+      hull / non-box), one per side mirrored; the kick still points into play (table_viz +
+      test_shot_geometry); BEHAVIORAL slingshot kick-into-play + score-on-contact stays green; STRESS
+      no tunneling at >= ~2x LAUNCH_SPEED_MAX through the triangular face.
+- [ ] LEAD+PHYSICS: RESIZE THE LAUNCH RAMP / PLUNGER smaller, to roughly the ball's WIDTH (ball
+      diameter ~1.2, radius 0.6). Narrow the plunger face and the launch lane so they line up with the
+      ball being launched (currently too wide/bulky). Keep the plunger functional (it must still strike
+      + launch the ball reliably on the FIRST stroke) and the stable contract. Owner:
+      gamedev-lead-programmer (TableConfig lane/plunger geometry + re-derive dependents with WHY) +
+      gamedev-physics-programmer (the resized face still strikes head-on, seats in contact, no gap to
+      tunnel). Files: scripts/config/table_config.gd (LANE_WIDTH / LANE_INNER_X / PLUNGER_FACE_WIDTH /
+      lane-pocket + lane geometry), scripts/plunger.gd, scripts/table_geometry.gd. Acceptance:
+      tools/table_viz.py confirms the resized lane lines up with the ball (deterministic, not
+      eyeballed); a STRUCTURAL test asserts PLUNGER_FACE_WIDTH and LANE_WIDTH match the new resized
+      constants; test_plunger_launch.gd stays green (launch from rest, monotonic, in-range, first
+      stroke fires, no tunneling of the resized face); test_world_scale / test_furniture_layout /
+      test_table_integration updated for the new lane width and green.
+- [ ] GAMEPLAY/UX: FOLD IN THE FOUR PRODUCER-FLAGGED UX ITEMS (Gate-0 readiness; do not fail CI but
+      in scope). (5) Re-issue the "HOLD LAUNCH - release to fire" prompt on EVERY ball arm (balls 2
+      and 3, not only ball 1). (6) Name the actual restart key in the game-over screen (it is SPACE /
+      the launch action). (7) Colorblind-safe power meter: the bar WIDTH is the primary cue; do not
+      rely on the green->red color alone. (8) Raise the HUD font size for readability. Owner:
+      gamedev-gameplay-programmer (+ ux-designer input). Files: scripts/hud.gd, scripts/plunger.gd,
+      scripts/game_flow.gd. Acceptance: a behavioral test asserts the launch prompt message is emitted
+      on every ball arm (not just the first); the game-over text names the restart key; (the meter and
+      font items are visual - confirm via the HUD setters and a viz/screenshot check, no CI gate).
+- [ ] TEST/QA: UPDATE + ADD the independent-oracle suite (test the game like a web app). STRUCTURAL:
+      both flippers carry the white-rubber-top surface; slingshot body+mesh are triangular (non-box);
+      plunger face width = resized constant; lane width = resized constant. BEHAVIORAL: too-weak launch
+      is recoverable AND does not spend a ball (the soft-lock test); full-power first-stroke launch
+      still works; slingshot kicks into play + scores; launch prompt on every ball arm. STRESS: no
+      tunneling at >= ~2x LAUNCH_SPEED_MAX through the resized plunger face and the triangular
+      slingshot. Real instanced bodies, measured position/velocity, never a self-reported counter.
+      Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance: the FULL updated suite runs GREEN on
+      the homelab godot runner (the artifact, not a doc claim).
+      LEAD POLISH 2026-06-20 (QA findings B2 + BUG-029..032): folded in the hardening this slice owns.
+      (B2) tests/test_soft_lock_integration.gd ADDED - instances the REAL Table.tscn, fires a too-weak
+      strike through the real plunger, lets the live watchdog run past LAUNCH_SETTLE_TIME_S, and
+      asserts plunger.is_armed() true + NO balls_changed (the headline soft-lock fix, on the integrated
+      tree, not just the unit GameFlow). The false "integration check at the bottom" header claim in
+      test_soft_lock_recovery.gd is corrected to point at the new file. (BUG-031, root-cause) hardened
+      LAUNCH_REACHED_PLAY_Z from the flipper-pivot row (z=20) to the slingshot row (FLIPPER_PIVOT_Z -
+      3.5 = 16.5) so a side-draining ball can no longer transiently dip across the line and falsely
+      promote to BALL_IN_PLAY (the secondary soft-lock path). (BUG-030) slingshot.gd _body_yaw() fixed
+      to atan2(x, z) so the visible triangle face + solid body + detector all face the actual kick
+      direction (was 180 deg off, pointing the face at the drain - physics was already correct).
+      (BUG-029) confirmed the right field band is a designed OUTLANE (OOB spends correctly); corrected
+      the stale LANE_GUIDE_RIGHT_DIVIDER_X comment (lane divider is 14.0, not 10.5). (BUG-032) NOT
+      reproducible (the cap already faces +Y on both sides - QA had a 2D-cross sign error); hardened the
+      cap winding via signed-area anyway. All changed files gdlint-clean, no emoji/em-dash, lines <=100.
+- [ ] PRODUCER: scope/finish gate. Confirm scope held (eight fixes only, no new element types/art/
+      rescale) and that the soft-lock + flipper-material + triangular-sling + lane-resize + UX claims
+      are GREEN on the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
+
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.

@@ -90,6 +90,49 @@ Status: NOT REACHED.
   NOT scheduled until GUT is GREEN on the runner on the pushed sha with the capsule-flipper stress test
   executing (not pending/skipped).
 
+- 2026-06-20 SEND_BACK - SLICE "Playtest fixes 2": SCOPE HELD (eight fixes only - soft-lock recovery,
+  right-flipper rubber top, triangular slings, lane/plunger resize, four UX items; same element counts
+  3/3/2/2/1/2; no rescale, no new types; cut list intact). FOUR of five board reviewers APPROVE on
+  architecture / physics-correctness / design-intent / UX. BLOCKED on the DELIVERY HARD GATE, the same
+  gate the prior three slices tripped on, and this time the runner truth is RED, not merely unproven:
+    1. CI NOT GREEN. ci_conclusion = failure. A headless Godot 4.6.3 run at HEAD 390aa1f shows 6 of 163
+       tests RED. A PASS requires ci_conclusion == success; this is a hard fail.
+    2. NOT PUSHED, NO PR. Branch slice/playtest-fixes-2 does not exist on origin; pr_url is empty.
+       "Green on the runner (the artifact, not a doc claim)" is unprovable - there is no run.
+    3. TREE NOT CLEAN. .claude/settings.json untracked plus ~150 engine .uid/.import artifacts dirty.
+  The six reds are not cosmetic; three are the slice's own headline fixes:
+    a. test_flipper_rubber_top (2 reds) - BOTH bats' rubber-top caps face -Y (avg_ny = -1.0), not +Y.
+       The winding correction in flipper.gd _build_bat_mesh is wrong on the left bat too, so fix #2 is
+       DEAD in CI. The board's structural oracle (avg normal Y > 0) is exactly what caught it - good
+       test, failing code. PHYSICS. File: scripts/flipper.gd.
+    b. test_slingshot (3 reds: both kicks-into-play + minimum-outgoing-speed) - after the BUG-030
+       _body_yaw fix the kicking face now correctly points up-table, but the test's _drop_into_sling
+       still drops the ball onto the BACK (apex) of the triangle, so the ball passive-bounces at vz=+31
+       (down-table) below the 40.0 floor. The fix and the test now disagree on geometry. TEST-BUILDER.
+       File: tests/test_slingshot.gd _drop_into_sling().
+    c. test_soft_lock_recovery (2 reds: lines 76, 119) - watch_signals(_flow) is called AFTER
+       before_each's start_game(), so the first balls_changed is never captured; the asserts expect the
+       uncaptured emission. The #1 headline fix is correct in production but its unit oracle is
+       miscounting. TEST-BUILDER. File: tests/test_soft_lock_recovery.gd.
+  Independently, the board's test-coverage reviewer REQUEST_CHANGES on a real, in-scope gap that must be
+  folded in BEFORE the green resubmission (it is THIS slice's own STRESS acceptance and a physics-first
+  hard gate, not deferrable polish):
+    d. The >=2x LAUNCH_SPEED_MAX no-tunnel STRESS is NOT measured against the two NEW shapes.
+       test_active_kicker_no_tunneling still models the sling as a thin axis-aligned box (fires straight
+       +Z at far_z = SLINGSHOT_THICKNESS*0.5) so it never strikes the yawed triangular face; the only
+       shot at the real triangle fires at 8 u/s. And no test fires a >=2x ball at the narrowed
+       PLUNGER_FACE_WIDTH=1.4 face. DESIGN must-feel #6 names both shapes. Derive the far extent from the
+       real rotated hull and fire along the kick normal; read the face width live. PHYSICS + TEST-BUILDER.
+  Required to clear (re-derive GREEN from a FRESH runner run on the pushed sha, never from BACKLOG notes):
+  fix (a) in production code; fix (b)(c) test miscounts; add the (d) stress assertions against the real
+  triangular sling face and the real resized plunger face; commit the whole slice (gitignore the engine
+  .uid/.import + .claude/settings.json or commit them - the tree must be clean); push ONE PR; produce the
+  runner log showing the FULL GUT suite executed (not pending/skipped) and GREEN. DEFER (do NOT block):
+  stale comments in active_kicker.gd / slingshot.gd BUG-032 / test_plunger.gd 120Hz, the missing-named
+  test_flipper_no_overlap rename, hud.gd hardcoded-offset layout, the slingshot detector Minkowski-offset
+  nicety, test_shot_geometry triangle hardening -> QA_BACKLOG. Gate 0 stays NOT scheduled until the suite
+  is GREEN on the runner with the two new-shape stress tests executing red-to-green.
+
 ## Sunk-cost rule (the producer enforces this)
 Hours already spent are gone whether we continue or not. The only question at each gate is whether
 the NEXT chunk of hours is the best use of them. Past investment is never an argument to continue.

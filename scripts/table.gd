@@ -364,6 +364,11 @@ func _wire_signals() -> void:
 	# GameFlow -> ball/plunger reset, and HUD displays.
 	if game_flow.has_signal("request_new_ball"):
 		game_flow.request_new_ball.connect(_on_request_new_ball)
+	# SOFT-LOCK FIX: GameFlow asks to RE-LAUNCH the SAME ball (a failed launch that never reached
+	# play). Same re-seat-and-arm path as a new ball, but reached via a distinct signal so the intent
+	# is explicit and a test can tell a recovery from a fresh ball (no balls_changed accompanies it).
+	if game_flow.has_signal("request_relaunch"):
+		game_flow.request_relaunch.connect(_on_request_new_ball)
 	if game_flow.has_signal("score_changed") and hud.has_method("set_score"):
 		game_flow.score_changed.connect(hud.set_score)
 	if game_flow.has_signal("balls_changed") and hud.has_method("set_balls"):
@@ -406,9 +411,20 @@ func _on_oob_body_entered(body: Node) -> void:
 ## must
 ## be a deliberate fresh press). The new ball's plunger then also requires its own release
 ## (BUG-008).
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if game_flow == null or not game_flow.has_method("current_state"):
 		return
+
+	# SOFT-LOCK FIX: feed the ball's MEASURED playfield-local Z to GameFlow's launch watchdog every
+	# physics frame. GameFlow only acts on it while LAUNCHING (a no-op otherwise), so this is cheap and
+	# safe to call unconditionally. The ball is parented under the tilted Playfield, so ball.position
+	# is already the playfield-local coordinate the TableConfig Z thresholds are written in - an
+	# independent oracle (the real body's position, not a self-reported flag). This is what breaks the
+	# soft-lock: a launch that never crosses LAUNCH_REACHED_PLAY_Z is recovered after the settle gap.
+	if ball != null and game_flow.has_method("tick_launch_watch"):
+		game_flow.tick_launch_watch(ball.position.z, delta)
+
+	# RESTART poll (GAME_OVER only).
 	if game_flow.current_state() != game_flow.State.GAME_OVER:
 		return
 	if Input.is_action_just_pressed("launch") and game_flow.has_method("restart"):

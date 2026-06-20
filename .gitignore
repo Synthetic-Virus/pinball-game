@@ -1,7 +1,21 @@
 # Godot 4
+# Import cache: always regenerated on open, never committed.
 .godot/
 /build/
 /export/
+
+# Vendored addon import sidecars (addons/gut/...). Godot rewrites these .import/.uid files when it
+# re-imports the addon's bundled assets (fonts, icons), and different Godot point releases add new
+# keys, so they CHURN the tree on every headless run. They are pure regenerated cache for VENDORED
+# assets (not our own scenes/scripts), so we ignore them. NOTE: this is scoped to addons/ ONLY - the
+# .import/.uid sidecars for our REAL project assets (scenes/, scripts/, tests/) ARE tracked, per
+# Godot 4.x practice, because they carry stable resource IDs the project references.
+addons/**/*.import
+addons/**/*.uid
+
+# Local agent tooling state (machine-specific, not project source).
+.claude/settings.json
+.claude/worktrees/
 
 # Build outputs
 *.exe

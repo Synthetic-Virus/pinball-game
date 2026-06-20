@@ -53,14 +53,24 @@ const WALL_THICKNESS: float = 0.8
 
 ## Launch lane up the RIGHT side. The lane is a narrow channel between the right outer wall and an
 ## inner divider; the plunger sits at its bottom and shoots the ball up into the arch.
-## WIDEN: LANE_INNER_X 8 -> 10.5 so the lane keeps a sane proportional WIDTH on the wider table. Old
-## lane width = 12 - 8 = 4; scaled by 16/12 = 5.33. We round to a 5.5-unit lane (LANE_INNER_X 10.5)
-## so the lane reads clearly and the plunger face (LANE_WIDTH - 0.6 = 4.9) fits with clearance. The
-## divider stays well inside the +16 right wall, and the OPEN center drain region [-16, 10.5] widens
-## proportionally with the table (the drain math below is all expressed off LANE_INNER_X / HALF_W
-## so it follows automatically).
-const LANE_INNER_X: float = 10.5    ## X of the inner divider wall (lane lives to its right).
-const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 5.5).
+## RESIZE (SLICE "Playtest fixes 2", 2026-06-20): LANE_INNER_X 10.5 -> 14.0 so the lane SHRINKS to a
+## SNUG ~ball-width chute. Developer playtest feedback: the launch ramp/plunger were too wide/bulky
+## and did not line up with the ball. The lane was 5.5 units wide (LANE_INNER_X 10.5) - over four
+## ball diameters; the ball rattled and the oversized plunger face read as a box. WHY 14.0: it gives
+## LANE_WIDTH = 16 - 14 = 2.0 units (~1.7 ball diameters), so the ball (radius 0.6, spanning a
+## 1.2-unit diameter) sits squarely in the chute with ~0.4 units clearance on each side - snug, not
+## sloppy. The plunger face (LANE_WIDTH - 0.6 = 1.4, a ball-and-a-bit) then strikes the ball square.
+## The lane center moves to (LANE_INNER_X + HALF_WIDTH)/2 = 15.0; BALL_START.x + PLUNGER_REST_POS.x
+## (both the lane center) auto-follow there so the ball/plunger stay aligned (BALL_START.x is a
+## hardcoded literal re-derived below). The divider at 14.0 stays well inside the +16 right wall
+## (ball at x=15.0 spans [14.4, 15.6], inside [14, 16]). This is NOT a table rescale: HALF_WIDTH 16
+## and HALF_LENGTH 25 are UNCHANGED (DESIGN cut list). The OPEN center drain region [-16, 14.0]
+## widens slightly (the divider moved outboard), and the drain math (all expressed off LANE_INNER_X
+## HALF_W) follows automatically. The right lane-guide divider (LANE_GUIDE_RIGHT_DIVIDER_X = 9.0)
+## still sits inboard of the new lane (between flipper pivot 7.2 and the divider 14.0), so it needs
+## no change. Re-validated by tools/table_viz.py + test_world_scale/test_furniture_layout.
+const LANE_INNER_X: float = 14.0    ## X of the inner divider wall (lane lives to its right).
+const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 2.0).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
 ## A half-arch across the top turns the ball launched up the lane back over into the playfield.
@@ -201,13 +211,15 @@ const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perime
 ## pocket and the plunger face. WHY z here: with ball radius 0.6 and the pocket face at
 ## HALF_LENGTH - 0.5 = 24.5, a rest z of HALF_LENGTH - 2.0 = 23.0 leaves the ball's down-table
 ## surface (z ~= 23.6) just shy of the pocket face, so it settles against the pocket, no overlap.
-## WIDEN: BALL_START.x was a hardcoded 10.0, which after LANE_INNER_X moved to 10.5 would sit OUT of
-## the lane (on the divider / in the center field). Re-derive it as the LANE CENTER so it rests
-## squarely in the widened lane: (LANE_INNER_X + HALF_WIDTH) * 0.5 = (10.5 + 16) / 2 = 13.25, the
-## same X the plunger face centers on (PLUNGER_REST_POS.x), so the face strikes the ball head-on.
-## Written as the literal 13.25 (not the expression) so the thin-client tools/table_viz.py parser,
-## which reads single-line Vector3 literals, stays simple; the derivation is the comment above.
-const BALL_START: Vector3 = Vector3(13.25, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
+## RESIZE (SLICE "Playtest fixes 2", 2026-06-20): the lane narrowed (LANE_INNER_X 10.5 -> 14.0), so
+## the lane CENTER moved from 13.25 to (LANE_INNER_X + HALF_WIDTH) * 0.5 = (14.0 + 16) / 2 = 15.0.
+## BALL_START.x is re-derived to 15.0, the same X the plunger face centers on (PLUNGER_REST_POS.x),
+## so the resized face strikes the ball head-on in the snug chute. (Before this edit x=13.25 would
+## sit OUTSIDE the narrowed lane, on the divider / in the open field, and the ball would never seat
+## against the plunger.) Written as the literal 15.0 (not the expression) so the thin-client
+## tools/table_viz.py parser, which reads single-line Vector3 literals, stays simple; the derivation
+## is the comment above.
+const BALL_START: Vector3 = Vector3(15.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
 
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
@@ -244,7 +256,12 @@ const PLUNGER_STROKE_LENGTH: float = 2.0
 ## u/step, so a 0.8 u thickness still gives ~2.5 steps of overlap depth AND the ball's own
 ## continuous_cd sweeps against the face; head-on tunneling is not possible. The thickness is also
 ## chosen so the plunger rest body sits just UP-TABLE of the lane pocket (no overlap, see REST_POS).
-const PLUNGER_FACE_WIDTH: float = LANE_WIDTH - 0.6  ## Fits inside the lane with clearance.
+## RESIZE (SLICE "Playtest fixes 2", 2026-06-20): with the narrowed lane (LANE_WIDTH 2.0) this is
+## 2.0 - 0.6 = 1.4 units - a snug ball-and-a-bit face (ball diameter 1.2), down from the old 4.9. It
+## still spans WIDER than the ball so an off-center rest is struck square, and fits inside the lane
+## (face at lane center 15.0 spans [14.3, 15.7], inside the [14, 16] lane) with clearance. The
+## structural test (tests/test_plunger_lane_size.gd) asserts this value matches the resized lane.
+const PLUNGER_FACE_WIDTH: float = LANE_WIDTH - 0.6  ## Snug ball-width face inside the lane (= 1.4).
 const PLUNGER_FACE_HEIGHT: float = 2.0              ## Spans the ball center (ball center y ~= 0.8).
 const PLUNGER_FACE_THICKNESS: float = 0.8           ## Tiles between the ball and the lane pocket.
 
@@ -260,6 +277,53 @@ const PLUNGER_REST_POS: Vector3 = Vector3(
 	BALL_RADIUS + 0.2,                                         ## Same height as the ball center.
 	BALL_START.z + BALL_RADIUS + PLUNGER_FACE_THICKNESS * 0.5  ## Face just behind the ball.
 )
+
+## ---- FAILED-LAUNCH RECOVERY (soft-lock fix, SLICE "Playtest fixes 2", 2026-06-20) ---------------
+## THE BUG: when a launch is too weak (the ball dribbles back into the lane) or the ball stalls in
+## the chute and never reaches the playfield, the game SOFT-LOCKS. The plunger fires ball_launched
+## (-> GameFlow BALL_IN_PLAY, plunger disarmed), but the ball never crosses into play and never
+## drains, so GameFlow never re-arms: the player is stuck with a dead ball in the lane and no way
+## forward. This is a Gate-0 control failure (the session is dead), so the recovery below is needed.
+##
+## THE FIX (a positional watchdog, NOT a new mechanic - see ARCHITECTURE.md 12): after a launch we
+## watch the ball for LAUNCH_SETTLE_TIME_S. If, when that timer expires, the ball is STILL in the
+## launch region (it never reached play), we treat the launch as FAILED: re-seat the ball at the
+## cradle and RE-ARM the plunger for the SAME ball, WITHOUT spending a ball. A ball that DID reach
+## play (crossed up-table of LAUNCH_REACHED_PLAY_Z) cancels the watchdog and plays normally; a
+## genuine drain after reaching play is unchanged. The watchdog lives in table.gd (it owns the ball
+## flow handles); GameFlow owns the state transition; the constants here are the CONTRACT.
+##
+## LAUNCH_REACHED_PLAY_Z: the playfield-local Z line (up-table is -Z) the ball CENTER must cross to
+## count as "reached play". WHY this value: the ball rests at BALL_START.z (HALF_LENGTH - 2.0 = 23)
+## and a successful launch carries it up the lane and over the arch into the field.
+##
+## QA BUG-031 HARDENING (2026-06-20): the line was the flipper pivot row (FLIPPER_PIVOT_Z = 20.0).
+## That was too close to the lane: a ball rolling down a SIDE channel (e.g. the field band between a
+## slingshot and the launch-lane divider) can TRANSIENTLY dip its center across z=20 while it is
+## really just draining down the side, never having reached play. The watchdog would then falsely
+## promote LAUNCHING -> BALL_IN_PLAY on that transient crossing; if the ball then rolled back into
+## the launch lane (z ~= 23) the plunger was dead (disarmed, watchdog stopped) and the original
+## soft-lock returned by a different path. FIX: move the reached-play line UP-TABLE of the slingshot
+## row (FLIPPER_PIVOT_Z - 3.5 = 16.5) so only a ball genuinely up in the field counts as "in play".
+## A ball that climbed the lane and came over the arch is at z far up-table of 16.5; a dribble or a
+## side-roll stays down-table of it. WHY this exact line: the slingshots sit at
+## FLIPPER_PIVOT_Z - 3.5 (SLINGSHOT_*_POS.z), so this line is the slingshot row - the down-table
+## edge of the open mid-field.
+## A side-draining ball can reach the slingshot Z but not cross UP-TABLE of it without being kicked
+## back into play (which is itself "reached play"); a transient dip toward the flippers cannot reach
+## this far up. The gap from the lane (23) to this line (16.5) is ~5 ball diameters, still a clean,
+## unambiguous split between "dribbled / draining" and "in play".
+const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z - 3.5
+## LAUNCH_SETTLE_TIME_S: how long after ball_launched we wait before judging a launch failed. WHY
+## 2.0 s: a full-power launch (LAUNCH_SPEED_MAX 90 u/s) clears the lane and crosses the reached-play
+## line in a fraction of a second; even a marginal launch that just barely clears does so well under
+## a second. A ball that has NOT crossed the line after 2.0 s has demonstrably failed to reach play
+## (it dribbled back or stalled). The window is generous enough that a slow-but-successful launch is
+## never falsely recovered, and short enough that a real soft-lock is broken almost immediately. The
+## watchdog re-checks each physics frame after the timer expires until the ball is recovered or
+## reaches play, so a ball that crawls up after the window is still handled (recovered if still in
+## the lane, left alone once it crosses the line).
+const LAUNCH_SETTLE_TIME_S: float = 2.0
 
 ## ================================================================================================
 ## SLICE "real pinball furniture" placement + feel constants (2026-06-19).
@@ -432,20 +496,30 @@ const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 ## guides, mirrored), so the widen gives BOTH sides a proper outlane+inlane (item #4: gutters both
 ## sides). Verified by test_furniture_layout + table_viz feed-path plot.
 const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
-## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix).
-## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): after the WIDEN the LAUNCH LANE
-## occupies the whole RIGHT edge (x in [LANE_INNER_X=10.5, HALF_WIDTH=16]). The symmetric guide at
-## +13.0 therefore landed INSIDE the launch lane, directly across the ball's spawn (BALL_START.x =
-## 13.25) and its entire up-lane launch path: the freshly-armed ball spawned WEDGED in that guide
-## wall and could not be launched at all (the producer's "no kick on the first stroke" - the impulse
-## fired but a wall pinned the ball). The launch lane already has its own inner divider
-## (LANE_INNER_X) and the right wall; it needs NO extra wall down its middle. The RIGHT inlane/
-## outlane guide belongs INBOARD of the lane, in the open field between the lane divider (10.5) and
-## the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2), exactly mirroring the LEFT guide's job
-## (split the side channel into an outlane feeding the drain and an inlane feeding the flipper) but
-## on the field side of the lane. 9.0 sits cleanly between 7.2 and 10.5 (a real right inlane/outlane
-## split) and is well clear of the ball's x=13.25 launch path, so the lane is a clean chute again.
-## The LEFT guide is unchanged (the left side has no launch lane, so its symmetric placement holds).
+## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix;
+## comment corrected for the SLICE "Playtest fixes 2" lane resize, QA BUG-029, 2026-06-20).
+## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): the LAUNCH LANE occupies the
+## RIGHT edge (x in [LANE_INNER_X, HALF_WIDTH]). A symmetric guide at +13.0 would land INSIDE the
+## launch lane, across the ball's spawn (BALL_START.x = 15.0) and its up-lane launch path, wedging
+## the freshly-armed ball so it could not launch (the producer's "no kick on the first stroke"). The
+## launch lane already has its own inner divider (LANE_INNER_X) and the right wall; it needs NO
+## extra wall down its middle. The RIGHT inlane/outlane guide belongs INBOARD of the lane, in the
+## open field between the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2) and the right slingshot
+## (SLINGSHOT_RIGHT_POS.x = 10.5): 9.0 sits cleanly between them, splitting that channel into an
+## INLANE (7.2..9.0, feeds back toward the flipper = save) and an OUTLANE (9.0..the slingshot, the
+## outer drain-risk channel), mirroring the LEFT guide's job on the field side of the lane.
+##
+## QA BUG-029 (2026-06-20) corrected the STALE part of the prior comment: it claimed the lane
+## divider was at 10.5, but the "Playtest fixes 2" lane resize moved LANE_INNER_X to 14.0. The
+## divider stays 9.0 (still the correct inlane/outlane split inboard of the slingshot) and stays
+## clear of the new x=15.0 launch path. The widened field band between the slingshot (10.5) and the
+## lane divider (14.0) is the right OUTLANE proper: a ball down it drains off the open bottom
+## (caught and SPENT by the OOB failsafe, OOB_DRAIN_Y - correct outlane "drain = risk", DESIGN "A
+## DRAIN YOU EARN, EITHER SIDE"), NOT a soft-lock. The transient-dip false-promotion that band could
+## feed is closed
+## independently by the BUG-031 reached-play-line hardening above (the line is now up-table of the
+## slingshot row, so a side-draining ball cannot falsely count as "in play"). The LEFT guide is
+## unchanged (no launch lane on the left, so its symmetric placement holds).
 const LANE_GUIDE_RIGHT_DIVIDER_X: float = 9.0
 ## The divider runs from just above the flipper pivot row down toward the drain, length below.
 ## QA BUG-024 FIX: the offset was 2.0, putting LANE_GUIDE_TOP_Z at 18.0. The slingshot KickerBody is
