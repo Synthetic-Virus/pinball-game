@@ -240,6 +240,84 @@ Tasks (pull from here - keep them small and finishable):
       multiball/art/audio/rollover scoring) and that the active-kick + no-tunnel claims are GREEN on
       the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
 
+## SLICE: Table reshape + playtest fixes (gray-box, physics-based) - gamedev-* team
+FIRST playtest-driven slice: the developer played the deployed homelab build and reported five
+concrete problems. Fix all five in ONE slice. NO new mechanics or element types - only shape, size,
+spacing, and table width change. Design intent confirmed in DESIGN.md ("Slice design intent: Table
+reshape + playtest fixes"). Cut list in DESIGN.md ("Cut from the Table reshape + playtest fixes
+slice"). Flow: game-designer (DONE - intent below) -> lead-programmer (HALF_WIDTH rescale + every
+dependent constant + table_viz re-validation) -> physics-programmer (plunger launch mechanism, capsule
+flipper collider, no-tunnel stress) -> gameplay-programmer (target/bumper resize+respace wiring) ->
+test-builder + qa-lead (structural/behavioral/stress, independent oracle) -> review board -> producer
+(scope/finish gate, GREEN CI on the pushed sha). The team's Setup phase creates the slice branch;
+build/QA agents COMMIT but do NOT push; Deliver verifies GREEN locally (fetch headless Godot, run GUT)
+then pushes ONE PR. Do NOT touch main.
+
+Tasks (pull from here - keep them small and finishable):
+- [ ] PHYSICS+GAMEPLAY: FIX THE LAUNCH (the #1 fix - the plunger does not fire). ROOT CAUSE: the
+      kinematic AnimatableBody3D relies on sync_to_physics to shove the ball (scripts/plunger.gd
+      _build_face / _advance_stroke), which in Godot Jolt often does NOT transfer momentum, so the ball
+      never moves. Replace with a working mechanism: apply an impulse to the ball on the plunger-ball
+      contact, OR drive the face with a reported/constant_linear_velocity (or move_and_collide) that
+      genuinely imparts velocity. PRESERVE the contract EXACTLY (signals power_changed/ball_launched;
+      methods arm/disarm/set_ball/is_armed; power 0..1; oscillating meter; power->launch-speed mapping
+      so the ball lands in ~LAUNCH_SPEED_MIN..MAX). Keep the plunger body visible and seated in the
+      lane behind the ball. Production launch must come from the contact/impulse, NOT a code velocity
+      set on the ball. Owner: gamedev-physics-programmer (mechanism) + gamedev-gameplay-programmer
+      (contract re-verify). Files: scripts/plunger.gd, scripts/ball.gd, scripts/config/table_config.gd.
+      Acceptance: tests/test_plunger_launch.gd - a release imparts REAL measured velocity FROM REST,
+      full strike out-throws a weak one (>=1.5x), resulting speed in ~LAUNCH_SPEED_MIN..MAX, no-ball is
+      a no-op, max strike never tunnels the face/pocket; test_plunger.gd contract tests stay green.
+- [ ] PHYSICS: CAPSULE FLIPPERS (real flipper shape). Replace the BoxMesh/box collider with a tapered
+      rounded "stadium" form (fatter at the pivot, smaller rounded tip) in BOTH the collision shape
+      (CapsuleShape3D or a convex hull MATCHING the mesh) AND the visible mesh. Material: black body +
+      white rubber top surface (2-tone gray-box only; no external art). PRESERVE the force/hinge/
+      return-spring drive, configure()/is_energized()/tip_speed()/force_energized(), BAT_MASS 0.40 /
+      BAT_BOUNCE 0.70, the ~50 ms snap, the cradle, and _apply_handedness (bat extends toward center
+      both sides). Owner: gamedev-physics-programmer. File: scripts/flipper.gd. Acceptance: a
+      structural test asserts the collider is a CAPSULE / convex hull (NOT BoxShape3D);
+      test_flipper_momentum.gd (full swing out-throws a tap, ~50 ms snap), test_flipper_rubber.gd
+      (rebound >= 35%), test_flipper_no_overlap.gd all stay GREEN; no tunneling.
+- [ ] LEAD: WIDER TABLE (world-scale rescale). TableConfig.HALF_WIDTH 12.0 -> 16.0 (HALF_LENGTH stays
+      25.0). RE-DERIVE every X-dependent constant with a WHY-comment: LANE_INNER_X / LANE_WIDTH,
+      FLIPPER_PIVOT_SPREAD (keep the inverted V with a ~1-ball-plus drain gap, not crossed),
+      DRAIN_WIDTH / DRAIN_CENTER_X, ARCH_RADIUS_X, LANE_GUIDE_DIVIDER_X, SLINGSHOT_LEFT/RIGHT_POS,
+      POP_BUMPER_POSITIONS X, STANDUP_BANK_POSITIONS X, plunger/lane-pocket lane math. Nothing inside a
+      wall, off the field, or crossing the centerline. Owner: gamedev-lead-programmer. Files:
+      scripts/config/table_config.gd, scripts/table_geometry.gd. Acceptance: test_world_scale.gd +
+      test_furniture_layout.gd updated and GREEN for the new width; flipper-overlap and drain-mouth
+      asserts pass; table_viz validate_layout passes on the new constants.
+- [ ] LEAD/QA: VERIFY BOTH GUTTERS after the widen (developer reports only a left gutter; both ALREADY
+      exist in table_geometry._build_lane_guides + test_furniture_layout, so this is likely a STALE
+      CACHED BUILD). Confirm LaneGuideLeft AND LaneGuideRight build on STATIC_OBSTACLES at the new
+      spacing and read as outlane/inlane gutters via table_viz; only fix the right one if it is
+      genuinely missing/weak. Owner: gamedev-lead-programmer + gamedev-qa-lead. File:
+      scripts/table_geometry.gd. Acceptance: test_furniture_layout.gd asserts both gutters present on
+      the rebuilt scene at the new width; table_viz feed-path plot shows both.
+- [ ] GAMEPLAY+PHYSICS: RESIZE + RESPACE TARGETS AND BUMPERS for the wider table ("too small, not
+      spaced well"). Bigger standup targets (target size / post radius up) and bigger pop bumpers
+      (POP_BUMPER_RADIUS up), with wider sensible spacing (STANDUP_BANK_POSITIONS, POP_BUMPER_POSITIONS)
+      that stays flipper-makeable. Owner: gamedev-gameplay-programmer (sizes/positions) +
+      gamedev-physics-programmer (no-tunnel on the bigger bodies). Files: scripts/config/table_config.gd,
+      scripts/table.gd. Acceptance: tests/test_shot_geometry.gd - standup bank inside the flipper-tip
+      sweep window and bumpers clear of walls/arch on the NEW constants; targets/bumpers kick + score on
+      contact (behavioral); no tunneling at >= 2x LAUNCH_SPEED_MAX.
+- [ ] LEAD/QA: EXTEND tools/table_viz.py to re-validate the NEW layout deterministically (CAD method):
+      flipper-tip reach to the resized targets/bumpers, lane feeds, drain mouth, both gutter feed paths.
+      Tool EXITS NON-ZERO if a shot is unmakeable or a kick aims at the drain. Owner:
+      gamedev-lead-programmer + gamedev-qa-lead. Acceptance: tool passes on the new constants and fails
+      a deliberately-broken one; tests/test_shot_geometry.gd is the GUT twin (CI source of truth).
+- [ ] TEST/QA: UPDATE + ADD the independent-oracle suite for the new width/shapes (test the game like a
+      web app). STRUCTURAL: flipper collider is a capsule/convex hull (not a box); both gutters on
+      correct layers at new spacing; furniture on correct layers at new positions; table width = new
+      HALF_WIDTH. BEHAVIORAL: plunger release imparts real measured velocity and launches; rubber
+      rebound >= 35%; targets/bumpers kick + score on contact. STRESS: no tunneling at >= ~2x
+      LAUNCH_SPEED_MAX on every interaction. Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance:
+      the updated suite runs GREEN on the homelab godot runner (the artifact, not a doc claim).
+- [ ] PRODUCER: scope/finish gate. Confirm scope held (five fixes only, no new element types/art) and
+      that the launch + capsule + width + gutter + resize claims are GREEN on the runner on the pushed
+      sha before any merge to main. Owner: gamedev-producer.
+
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.
