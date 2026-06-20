@@ -1570,3 +1570,259 @@ today's geometry; the code is now robust to the class of bug QA was guarding aga
 When there is no new code to test, QA does NOT idle. It (a) writes tests against agreed function
 signatures and contracts before the code exists, (b) hardens existing coverage and adds edge cases,
 and (c) audits DESIGN.md and the code for testability gaps. There is always test-debt to pull.
+
+---
+
+### BUG-033 [HIGH] test_soft_lock_integration.gd uses power 0.0 (30 u/s) which always reaches play - the test cannot exercise the failed-launch recovery path and will fail on 3 assertions
+
+Severity: HIGH - this is the integration-level coverage for the slice's headline fix (soft-lock
+recovery). The test is structurally sound but targets the wrong scenario: it fires
+plunger.test_strike_at_power(0.0) believing the ball "never reaches play", but the minimum stroke
+speed (PLUNGER_STROKE_SPEED_MIN = 30 u/s) transfers ~30 u/s to the ball via the contact impulse,
+and the critical velocity required to just cross LAUNCH_REACHED_PLAY_Z (z=16.5 from BALL_START
+z=23.0, distance = 6.5 units) is only 17.8 u/s. Since 30 u/s > 17.8 u/s, the ball crosses the
+reached-play line at t ~= 0.24 s (frame ~58 at 240 Hz) on EVERY well-executed minimum launch. The
+game transitions to BALL_IN_PLAY, not the failed-launch recovery path. After the 720-frame settle
+window, the ball has returned to the lane (gravity brings it back from mid-field to the pocket at
+z=24.5, contained laterally by the lane walls), state remains BALL_IN_PLAY, and the plunger is
+DISARMED. The test then asserts:
+  - plunger.is_armed() == True -> FAILS (BALL_IN_PLAY, plunger never re-armed)
+  - current_state == READY_TO_LAUNCH -> FAILS (still BALL_IN_PLAY)
+  - request_relaunch emitted -> FAILS (never fired)
+  - balls_changed not emitted -> PASSES (ball did not drain, still in play)
+  - game_over not emitted -> PASSES
+Three of five assertions are structurally wrong: they assume a failed launch when no failure occurred.
+
+The soft-lock recovery mechanism (LAUNCH_SETTLE_TIME_S watchdog) is only triggered when the ball
+NEVER crosses z=16.5 during the 2.0-second window. This requires either (a) the impulse failing
+entirely (is_touching() returns false at the moment of the stroke, so no velocity is transferred and
+the ball rolls down-table under gravity), or (b) a launch speed below 17.8 u/s (physically
+unreachable from PLUNGER_STROKE_SPEED_MIN = 30 u/s). The current test cannot produce case (a)
+because the ball starts in continuous contact with the face (the face is seated at PLUNGER_REST_POS
+which places it behind the ball at rest), so is_touching() IS true on stroke frame 1 and the impulse
+fires correctly.
+
+Additionally: the table_config.gd comment at line 244 is wrong. It reads
+"Power 0.0: a gentle dribble out of the lane." A 30 u/s launch carries the ball ~18.4 units
+up-table (stopping at z ~= 4.5, the pop-bumper zone), which is not a dribble. This comment
+propagates the false belief into the test file's own comment at line 47:
+"The ball never reaches play" (for power 0.0) which is demonstrably false.
+
+Suspected files/lines:
+- /home/virus/pinball-game/tests/test_soft_lock_integration.gd line 75:
+  plunger.test_strike_at_power(0.0) - wrong power for the failed-launch scenario
+- /home/virus/pinball-game/tests/test_soft_lock_integration.gd lines 46-49 (comment): claims
+  "The ball never reaches play" for power 0.0 - false
+- /home/virus/pinball-game/scripts/config/table_config.gd line 244 (comment): "Power 0.0: a gentle
+  dribble out of the lane" - false; 30 u/s reaches mid-field
+
+Math oracle:
+  PLUNGER_STROKE_SPEED_MIN = 30.0 u/s (transferred directly to ball via mass*stroke_speed/mass)
+  gravity_along_table = GRAVITY * sin(TILT_DEG) = 200 * sin(7 deg) = 24.37 u/s^2
+  stopping_distance = v^2 / (2*g) = 900 / 48.75 = 18.45 units up-table from BALL_START
+  ball stops at z = 23.0 - 18.45 = 4.55 (mid-field, NOT in the lane)
+  critical_v to reach z=16.5: sqrt(2 * 24.37 * 6.5) = 17.8 u/s
+  30.0 >> 17.8 -> ball ALWAYS crosses the reached-play line at power 0.0
+
+Repro steps:
+1. Run test_weak_launch_in_live_table_re_arms_without_spending_a_ball in CI.
+2. The ball (at ~30 u/s) crosses LAUNCH_REACHED_PLAY_Z (z=16.5) at t=0.24s -> BALL_IN_PLAY.
+3. Ball returns to lane (contained by pocket and walls at x=15), settles there.
+4. After 720 frames: state = BALL_IN_PLAY, plunger disarmed, no request_relaunch.
+5. Observe 3 failed assertions: is_armed, current_state, request_relaunch.
+
+Expected: the test fires a scenario that the watchdog can actually recover (ball never crosses
+z=16.5), asserts re-arm and READY_TO_LAUNCH correctly.
+
+Actual: the scenario always produces a real launch (ball reaches play), the recovery watchdog
+is never triggered, and the test assertions are wrong for the scenario that actually occurred.
+
+Fix direction:
+Option A (recommended): design a test setup where the impulse does NOT fire. This requires the ball
+to be NOT in contact with the face at stroke start. Modify the test to call game_flow.on_ball_launched()
+directly (bypassing plunger) to put the game in LAUNCHING state with the ball stationary in the lane,
+then wait the 2.0s watchdog. This is the genuine failed-launch scenario.
+Option B: expose a plunger.test_launch_without_impulse() hook that enters LAUNCHING but applies zero
+velocity, simulating a contact-fail stroke. Less invasive than test architecture change.
+Option C: move the reached-play line DOWN-TABLE (raise LAUNCH_REACHED_PLAY_Z toward BALL_START) so
+that a minimum-power launch does NOT cross it. REJECTED: this would break game correctness (the line
+would no longer detect a genuine launch).
+The comment at table_config.gd line 244 must also be corrected.
+
+Suggested GUT test to replace the flawed one:
+  In test_soft_lock_integration.gd: remove test_strike_at_power(0.0). Replace with a test that
+  calls game_flow.on_ball_launched() to enter LAUNCHING, then waits (LAUNCH_SETTLE_TIME_S + 1.0) *
+  240 frames with the ball stationary at BALL_START (never crossing z=16.5). Assert that after the
+  settle: plunger.is_armed()==True, current_state==READY_TO_LAUNCH, request_relaunch emitted,
+  balls_changed not emitted.
+
+---
+
+### BUG-034 [HIGH] Adjacent standup target detector volumes overlap by 0.67 units - a ball approaching between two targets triggers both body_entered signals in the same physics frame, scoring double
+
+Severity: HIGH - this is an exploitable score double-counting bug in normal gameplay. Every ball
+that approaches the target bank between two adjacent posts (T1-T2 or T2-T3) simultaneously enters
+both Area3D detector volumes, causing both scored.emit(points) signals to fire in the same physics
+frame. The player receives double the intended score per contact at the bank inter-post zone.
+
+Background: target.gd places a CylinderShape3D Area3D detector with radius POST_RADIUS +
+BALL_RADIUS = 2.0 + 0.6 = 2.6 around each post. Each target has an independent RETRIGGER_COOLDOWN_S
+= 0.20 s. The targets are adjacent and close enough that the detector shells overlap.
+
+Geometry oracle:
+  T1 = Vector3(-4.5, 0, -7.0), T2 = Vector3(0, 0, -7.5), T3 = Vector3(4.5, 0, -7.0)
+  T1-T2 separation = sqrt(4.5^2 + 0.5^2) = 4.528 units
+  T2-T3 separation = 4.528 units (symmetric)
+  Combined detector radii = 2.6 + 2.6 = 5.2 units
+  Overlap zone T1-T2: 5.2 - 4.528 = 0.672 units wide
+  Overlap zone T2-T3: 0.672 units wide
+  Ball center on perpendicular bisector of T1-T2 at distance 1.279 units from the midpoint:
+    distance to T1 = sqrt((4.528/2)^2 + 1.279^2) = 2.6 exactly (touching T1 detector boundary)
+    distance to T2 = 2.6 exactly (touching T2 detector boundary simultaneously)
+  This point is PHYSICALLY REACHABLE: it lies outside both solid post surfaces (gap = 4.528 - 4.0 = 0.528,
+  which excludes a 1.2-diameter ball from entering the channel but not from approaching it tangentially).
+  A ball approaching the bank from below in Z (from the flipper side) at an angle that tangentially
+  contacts the outer faces of adjacent posts passes through both detector volumes.
+
+Scoring result: scored.emit(100) fires from T1 AND scored.emit(100) fires from T2 on the same
+physics frame. Total: 200 points for one contact. Each cooldown starts independently. If the ball
+immediately clears both detectors and re-enters (e.g. a ricocheted path), both cooldowns reset
+and 200 more points are scored. With deliberate aiming at the inter-post zone this is farmable.
+
+Secondary concern: the solid Deflector posts (POST_RADIUS = 2.0) at adjacent positions create a
+pinch channel 0.528 units wide. A ball arriving at the inter-post zone from an angle is acted on by
+two contact normals simultaneously (from both StaticBody3D Deflector bodies), potentially producing
+a velocity spike or unpredictable bounce direction. This is the same class of seam defect as
+BUG-024 (slingshot/lane-guide overlap), applied to the target bank geometry.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd lines 470-474:
+  STANDUP_BANK_POSITIONS: T1=(-4.5,0,-7.0), T2=(0,0,-7.5), T3=(4.5,0,-7.0)
+- /home/virus/pinball-game/scripts/target.gd line 47: POST_RADIUS: float = 2.0
+- /home/virus/pinball-game/scripts/target.gd line 85: detector_shape.radius = POST_RADIUS + BALL_RADIUS
+- /home/virus/pinball-game/scripts/target.gd lines 155-174: _on_body_entered, _cooldown_until_ms check
+
+Root cause: the STANDUP_BANK_POSITIONS separation (4.528) is less than twice the detector radius
+(5.2). Each post's detector was sized independently (POST_RADIUS + BALL_RADIUS) without checking
+that adjacent detectors do not overlap. The scoring cooldown is per-target, not bank-wide, so it
+does not prevent simultaneous fires from adjacent targets.
+
+Repro steps:
+1. In test_target.gd (or a new test): instance two adjacent targets at T1=(-4.5,0,-7.0) and
+   T2=(0,0,-7.5). Connect both scored signals to a counter.
+2. Position a ball at the perpendicular bisector of T1-T2, 2.6 units from each center, in the
+   inter-post approach corridor (x ~= -2.25, z ~= -7.25, but ~1.28 units above the midpoint in Z).
+3. Apply a velocity directed toward the midpoint of T1-T2.
+4. Assert that the total scored signal count per physics pass through the zone is > 1.
+   Expected: 1 scored signal (one post). Actual: 2 scored signals (double-counting).
+
+Fix options:
+A (preferred): increase the separation between posts so combined detector radii do not overlap.
+  Minimum safe separation = 2 * DET_RADIUS + epsilon = 5.2 + 0.1 = 5.3 units.
+  Move T1 to (-5.0, 0, -7.0) and T3 to (5.0, 0, -7.0) and verify inside makeable window.
+  Or shrink POST_RADIUS to 1.7 (detector radius = 2.3, combined = 4.6 < 4.528 - wait, not enough).
+  Recompute: need 2*det_r < 4.528 -> det_r < 2.264 -> POST_RADIUS < 2.264 - 0.6 = 1.664.
+  Shrinking POST_RADIUS would make targets harder to hit; separation is the better lever.
+B: add a bank-wide cooldown guard in table.gd: when any target emits scored, suppress other target
+   scored signals for RETRIGGER_COOLDOWN_S. This prevents double-counting without changing geometry.
+   Does not fix the two-contact-normal physics seam.
+
+Suggested GUT test to lock the fix:
+  In test_target.gd: add test_adjacent_targets_do_not_double_score. Instance both T1 and T2,
+  connect scored signals to a counter, fire a ball aimed at the midpoint between them, and assert
+  counter == 1 (exactly one score) per pass. This test CURRENTLY FAILS (it would score 2), locking
+  the fix in place once the geometry is corrected.
+
+---
+
+### BUG-035 [MEDIUM] Active kicker velocity SET assigns exactly KICK_IMPULSE_SPEED (55 u/s) regardless of incoming speed - fast balls are slowed by bumpers/slingshots, violating the DESIGN "a fast ball stays fast" requirement
+
+Severity: MEDIUM - this is a design contract violation that degrades the feel of high-speed play.
+A ball launched at LAUNCH_SPEED_MAX (90 u/s) and immediately hitting a pop bumper or slingshot
+exits at 55 u/s (39% speed reduction). The player perceives a "dead" bumper that absorbs a fast
+ball rather than amplifying it. The DESIGN.md must-feel section states: "a fast ball stays fast,
+a crawl still pops legibly." The current implementation satisfies the second half (floor of 40 u/s)
+but explicitly violates the first half for any ball arriving above KICK_IMPULSE_SPEED.
+
+Root cause: active_kicker.gd _apply_kick() computes:
+  target_speed = clampf(KICK_IMPULSE_SPEED, KICK_MIN_OUTGOING_SPEED, KICK_MAX_OUTGOING_SPEED)
+               = clampf(55.0, 40.0, 120.0) = 55.0 (always, since 55 is always in [40, 120])
+  _ball.linear_velocity = dir * 55.0
+This is a CONSTANT speed assignment; the incoming ball speed is DISCARDED. A 90 u/s ball and a 5 u/s
+ball both leave at exactly 55 u/s. The clamp is a permanent no-op as written because the constant
+(55) is already inside its own bounds [40, 120]; the bounds serve no purpose at runtime.
+
+The target.gd design is different and correctly preserves momentum: it uses a StaticBody3D Deflector
+with DEFLECTOR_BOUNCE = 0.8, so the solver preserves 80% of incoming speed via restitution.
+Active kickers (pop bumpers, slingshots) intentionally override velocity, but should at least
+use the MAX of incoming speed and KICK_IMPULSE_SPEED rather than discarding incoming speed entirely.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/active_kicker.gd lines 157-167:
+  target_speed = clampf(KICK_IMPULSE_SPEED, KICK_MIN, KICK_MAX) = 55 (constant)
+  _ball.linear_velocity = dir * target_speed (overwrites ALL incoming speed with a constant)
+- /home/virus/pinball-game/scripts/config/table_config.gd line 361: KICK_IMPULSE_SPEED = 55.0
+- /home/virus/pinball-game/scripts/config/table_config.gd lines 362-365: KICK_MIN/MAX bounds (40/120)
+  that are never exercised at runtime because KICK_IMPULSE_SPEED is always between them
+
+Repro steps:
+1. In test_active_kicker.gd (or equivalent): position a pop bumper with a ball arriving at 90 u/s.
+2. Let the kick fire (_apply_kick executes, sets velocity to 55 u/s in kick direction).
+3. Read ball.linear_velocity.length() immediately after kick.
+4. Expected: >= 90 u/s (incoming speed preserved) or >= 55 u/s (floor only).
+5. Actual: exactly 55 u/s (incoming momentum discarded, ball slowed 39%).
+
+Fix direction:
+  Replace the constant assignment with a max of incoming speed and KICK_IMPULSE_SPEED, capped at
+  KICK_MAX_OUTGOING_SPEED:
+    var incoming_speed: float = _ball.linear_velocity.length()
+    var target_speed: float = clampf(
+        maxf(incoming_speed, KICK_IMPULSE_SPEED),
+        KICK_MIN_OUTGOING_SPEED,
+        KICK_MAX_OUTGOING_SPEED
+    )
+  This satisfies: fast balls stay fast (incoming >= 55 -> uses incoming), slow balls still pop
+  (incoming < 55 -> uses 55 floor), CCD-safe cap applies (clamped to MAX 120). The clamp now
+  has a real runtime purpose: it applies the cap when incoming speed exceeds 120.
+
+Suggested GUT test to lock the fix:
+  In test_pop_bumper.gd or test_slingshot.gd: add test_fast_ball_is_not_slowed_by_kick.
+  Fire a ball at 80 u/s into the kicker. Assert post-kick speed >= 80 * 0.9 (a 10% tolerance
+  for direction-component losses). Currently FAILS (post-kick speed = 55 u/s, 31% below floor).
+
+---
+
+### BUG-036 [LOW] PLUNGER_STROKE_SPEED_MIN comment is wrong - "a gentle dribble out of the lane" describes a ball that cannot reach play, but 30 u/s carries the ball 18 units up-table to mid-field
+
+Severity: LOW - comment-only defect, no runtime impact. The comment at table_config.gd line 244
+("Power 0.0: a gentle dribble out of the lane") implies that the minimum stroke speed produces a
+ball that barely exits the lane and rolls back. This description is factually wrong and has already
+propagated into test_soft_lock_integration.gd (where the integration test's comment repeats this
+false claim), driving BUG-033's test logic flaw.
+
+Math oracle:
+  v_min = PLUNGER_STROKE_SPEED_MIN = 30.0 u/s
+  stopping_distance = v_min^2 / (2 * GRAVITY * sin(TILT_DEG)) = 900 / (2 * 24.37) = 18.45 units
+  Ball stops at z = BALL_START.z - 18.45 = 23.0 - 18.45 = 4.55 (mid-field, pop-bumper zone)
+  Lane length = HALF_LENGTH - 2.0 = 3 units (from BALL_START.z to top of lane).
+  The ball travels 18.45 units, which is 6.15 times the lane length. It is not a dribble.
+
+The minimum strike is also above the critical velocity required to cross LAUNCH_REACHED_PLAY_Z:
+  v_critical = sqrt(2 * 24.37 * 6.5) = 17.8 u/s. PLUNGER_STROKE_SPEED_MIN (30) > v_critical (17.8).
+
+The correct description: "Power 0.0: the minimum launch speed, still reaches mid-field (~18 units
+up-table). Soft-lock recovery activates only when the impulse FAILS to transfer (is_touching false
+at stroke start), not at low power."
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd line 244 (comment on PLUNGER_STROKE_SPEED_MIN)
+- /home/virus/pinball-game/tests/test_soft_lock_integration.gd lines 47-49 (comment: "The ball never
+  reaches play" for power 0.0 - also wrong, see BUG-033)
+
+Fix: update the comment at table_config.gd line 244 to accurately describe what STROKE_SPEED_MIN
+produces. No code change required.
+
+Suggested GUT test to lock the fix:
+  Not applicable (comment-only). The behavioral truth is already asserted in test_soft_lock_recovery.gd
+  (the unit test that drives tick_launch_watch directly). A comment fix has no test consequence.
+
