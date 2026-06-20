@@ -234,13 +234,15 @@ func _build_detector_and_mesh() -> void:
 	col.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _detector_yaw()), Vector3.ZERO)
 	add_child(col)
 
-	# Gray-box mesh so the element is visible without art. A simple box bounding the detector is
-	# enough at gray-box stage; the subclass shape detail is not needed for a placeholder visual.
-	var mesh_instance := MeshInstance3D.new()
+	# Gray-box mesh so the element is visible without art. The MESH comes from _make_mesh() so a
+	# subclass can make the visible shape AGREE with its solid body (DESIGN: the slingshot mesh must be
+	# the same TRIANGLE as its collider, not a generic box). The base returns a simple box (fine for a
+	# round pop bumper at gray-box stage); slingshot.gd overrides it with a triangular prism mesh.
+	# WHY the mesh is on the kicker root (not the rotated KickerBody): the base draws it axis-aligned;
+	# a subclass whose mesh must follow the body yaw (the slingshot) bakes that yaw into _make_mesh or
+	# rotates the returned MeshInstance - see slingshot.gd. Kept overridable so body and mesh agree.
+	var mesh_instance: MeshInstance3D = _make_mesh()
 	mesh_instance.name = "KickerMesh"
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = Vector3(1.0, TableConfig.WALL_HEIGHT, 1.0)
-	mesh_instance.mesh = box_mesh
 	add_child(mesh_instance)
 
 
@@ -264,6 +266,19 @@ func _make_detector_shape() -> Shape3D:
 	shape.radius = 1.0 + TableConfig.BALL_RADIUS
 	shape.height = TableConfig.WALL_HEIGHT
 	return shape
+
+
+## SUBCLASS OVERRIDE: the gray-box VISIBLE mesh, so the visible element AGREES with its solid body.
+## The base returns a simple box MeshInstance3D (fine for a round pop bumper placeholder). The
+## slingshot overrides this to return a TRIANGULAR prism mesh matching its triangular collider,
+## yawed/mirrored per side (a slingshot must READ as a triangle, not a box). The returned
+## MeshInstance3D is added to the kicker root by _build_detector_and_mesh (it sets the name).
+func _make_mesh() -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = Vector3(1.0, TableConfig.WALL_HEIGHT, 1.0)
+	mesh_instance.mesh = box_mesh
+	return mesh_instance
 
 
 ## SUBCLASS OVERRIDE: yaw (radians, about local Y) to rotate the solid body so a flat slingshot face

@@ -71,6 +71,102 @@ func test_slingshot_has_solid_body_on_static_layer() -> void:
 		)
 
 
+func test_slingshot_body_is_triangular_not_a_box() -> void:
+	## SLICE "Playtest fixes 2", fix 3: the slingshot solid body must be a TRIANGLE (a convex hull),
+	## NOT a BoxShape3D. The developer reported the slings read as small boxes; the fix swaps the
+	## collider + mesh to a triangular prism. ORACLE: the REAL built KickerBody collision shape class.
+	await _setup_sling(false)
+	var body: Node = _sling.find_child("KickerBody", true, false)
+	assert_not_null(body, "slingshot must build a KickerBody")
+	if body == null:
+		return
+	var col: CollisionShape3D = null
+	for child in body.get_children():
+		if child is CollisionShape3D:
+			col = child as CollisionShape3D
+			break
+	assert_not_null(col, "the KickerBody must have a CollisionShape3D")
+	if col != null:
+		assert_false(
+			col.shape is BoxShape3D,
+			"the slingshot solid body must NOT be a BoxShape3D (a square); use a triangular hull"
+		)
+		assert_true(
+			col.shape is ConvexPolygonShape3D,
+			"the slingshot solid body must be a ConvexPolygonShape3D (triangular prism). got %s"
+			% [col.shape]
+		)
+
+
+func test_slingshot_mesh_is_triangular_not_a_box() -> void:
+	## The visible mesh must AGREE with the triangular collider (read as a triangle, not a box).
+	## ORACLE: the REAL KickerMesh mesh class.
+	await _setup_sling(false)
+	var mesh_instance: Node = _sling.find_child("KickerMesh", true, false)
+	assert_not_null(mesh_instance, "slingshot must build a visible KickerMesh")
+	if mesh_instance != null and mesh_instance is MeshInstance3D:
+		var mesh: Mesh = (mesh_instance as MeshInstance3D).mesh
+		assert_not_null(mesh, "the KickerMesh must have a mesh")
+		assert_false(
+			mesh is BoxMesh,
+			"the slingshot mesh must agree with the triangular collider (not a plain BoxMesh)"
+		)
+
+
+func test_left_and_right_slings_are_mirrored() -> void:
+	## A left-handed triangle above the LEFT flipper and a right-handed (mirrored) one above the RIGHT.
+	## ORACLE: the apex X offset sign flips between the two configured slings. We read the convex hull
+	## point clouds and compare the apex (the vertex furthest BACK on -Z in the local pre-yaw frame is
+	## the one whose X offset encodes handedness). Simpler robust check: the two hulls are not
+	## identical point sets (the mirror produced a different triangle), and each is a valid 3-point
+	## prism (6 extruded points).
+	await _setup_sling(false)
+	var left_body: Node = _sling.find_child("KickerBody", true, false)
+	var left_pts: PackedVector3Array = _hull_points(left_body)
+
+	# Build a right (mirrored) sling in the same world and compare.
+	var right: Area3D = SLINGSHOT_SCENE.instantiate() as Area3D
+	if right.has_method("configure"):
+		right.configure(true)
+	right.position = Vector3.ZERO
+	_world.add_child(right)
+	await wait_frames(2)
+	var right_pts: PackedVector3Array = _hull_points(right.find_child("KickerBody", true, false))
+
+	assert_eq(left_pts.size(), 6, "a triangular prism hull has 6 extruded points (3 x top/bottom)")
+	assert_eq(right_pts.size(), 6, "the mirrored prism hull also has 6 points")
+	assert_false(
+		_same_point_cloud(left_pts, right_pts),
+		"the left and right slingshots must be MIRRORED (different triangle footprints), not identical"
+	)
+
+
+## Read the convex hull point cloud of a KickerBody's CollisionShape3D, or an empty array.
+func _hull_points(body: Node) -> PackedVector3Array:
+	if body == null:
+		return PackedVector3Array()
+	for child in body.get_children():
+		if child is CollisionShape3D and (child as CollisionShape3D).shape is ConvexPolygonShape3D:
+			return ((child as CollisionShape3D).shape as ConvexPolygonShape3D).points
+	return PackedVector3Array()
+
+
+## True if two point clouds are the same set (order-independent, approximate). Used to prove the
+## mirror actually produced a different triangle.
+func _same_point_cloud(a: PackedVector3Array, b: PackedVector3Array) -> bool:
+	if a.size() != b.size():
+		return false
+	for pa: Vector3 in a:
+		var found: bool = false
+		for pb: Vector3 in b:
+			if pa.is_equal_approx(pb):
+				found = true
+				break
+		if not found:
+			return false
+	return true
+
+
 func test_slingshot_kick_directions_point_into_play() -> void:
 	## Geometry guard (no physics needed): the configured kick directions in TableConfig must point
 	## INTO play - positive up-table (-Z) component, and a toward-center X sign per side. This is the

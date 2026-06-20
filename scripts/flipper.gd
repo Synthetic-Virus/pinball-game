@@ -405,7 +405,14 @@ func _rebuild_bat_geometry(hand_sign: float) -> void:
 		hull.points = _extrude_outline_to_hull(outline, height)
 		_shape.shape = hull
 	if _mesh_instance != null:
-		_mesh_instance.mesh = _build_bat_mesh(outline, height)
+		# Pass hand_sign so the mesh builder can keep the cap windings correct for the mirrored bat.
+		# THE BUG (SLICE "Playtest fixes 2", fix 2): for hand_sign < 0 every outline X was negated
+		# above, which REVERSES the perimeter winding order. _build_bat_mesh winds the top cap (the
+		# WHITE rubber surface, surface 1) and the side walls assuming the +X (left, hand_sign +1)
+		# order, so on the RIGHT bat the top cap ends up wound the OTHER way and its normal faces DOWN
+		# (-Y) - it is backface-culled and the right flipper renders all black with no white rubber
+		# top (the developer's report). _build_bat_mesh must correct the winding for the mirrored side.
+		_mesh_instance.mesh = _build_bat_mesh(outline, height, hand_sign)
 
 
 ## Convert the 2D surface outline into the 3D point cloud for a ConvexPolygonShape3D: each outline
@@ -423,7 +430,24 @@ func _extrude_outline_to_hull(outline: PackedVector2Array, height: float) -> Pac
 ## Build the visible bat mesh from the SAME outline the collider uses (so mesh and collider AGREE).
 ## An ArrayMesh with two surfaces: surface 0 is the black BODY (sides + bottom cap); surface 1 is
 ## the white RUBBER TOP cap (the up-facing face) - the 2-tone gray-box look (DESIGN/ARCH 11.3).
-func _build_bat_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
+##
+## hand_sign (+1 left, -1 right): the outline was X-mirrored upstream for the right bat, which
+## REVERSES its perimeter winding order. The cap/side windings below assume the +X order, so
+## for the mirrored bat we must FLIP each triangle's winding to keep the normals facing the SAME way
+## (top cap up +Y, sides outward, bottom cap down -Y). Without this the right bat's WHITE rubber top
+## faces DOWN and is culled, so the right flipper renders all black (SLICE "Playtest fixes 2").
+##
+## TODO(physics-programmer): implement the winding correction. The agreed approach: when hand_sign <
+## 0, emit each triangle with its two non-apex vertices SWAPPED (reverse winding) for all 3 parts
+## (side quads, bottom cap, top cap), OR equivalently set the top/body materials' cull_mode to
+## DISABLED so the rubber top is visible from both faces. Prefer the winding fix (keeps correct
+## lighting normals). The structural test (tests/test_flipper_rubber_top.gd) asserts BOTH bats carry
+## the RUBBER_TOP_COLOR surface AND that the top cap faces +Y on the right bat as on the left.
+func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: float) -> ArrayMesh:
+	# WHY this flag exists: it is the one switch the winding correction keys off. Reference it so the
+	# scaffold compiles and gdlint does not flag an unused parameter; the physics-programmer wires the
+	# actual per-triangle winding swap (or cull-disable) against it where the triangles are emitted.
+	var flip_winding: bool = hand_sign < 0.0
 	var half_h: float = height * 0.5
 	var mesh := ArrayMesh.new()
 
@@ -440,17 +464,17 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
 		var a_bot := Vector3(a.x, -half_h, a.y)
 		var b_bot := Vector3(b.x, -half_h, b.y)
 		# Two triangles per side quad (wound so the normal faces outward).
-		st_body.add_vertex(a_top)
-		st_body.add_vertex(a_bot)
-		st_body.add_vertex(b_top)
-		st_body.add_vertex(b_top)
-		st_body.add_vertex(a_bot)
-		st_body.add_vertex(b_bot)
+		_emit_tri(st_body, a_top, a_bot, b_top, flip_winding)
+		_emit_tri(st_body, b_top, a_bot, b_bot, flip_winding)
 	# Bottom cap (fan from the first point), wound to face down (-Y).
 	for i in range(1, n - 1):
-		st_body.add_vertex(Vector3(outline[0].x, -half_h, outline[0].y))
-		st_body.add_vertex(Vector3(outline[i + 1].x, -half_h, outline[i + 1].y))
-		st_body.add_vertex(Vector3(outline[i].x, -half_h, outline[i].y))
+		_emit_tri(
+			st_body,
+			Vector3(outline[0].x, -half_h, outline[0].y),
+			Vector3(outline[i + 1].x, -half_h, outline[i + 1].y),
+			Vector3(outline[i].x, -half_h, outline[i].y),
+			flip_winding
+		)
 	st_body.generate_normals()
 	var body_mat := StandardMaterial3D.new()
 	body_mat.albedo_color = BODY_COLOR
@@ -461,9 +485,13 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
 	var st_top := SurfaceTool.new()
 	st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(1, n - 1):
-		st_top.add_vertex(Vector3(outline[0].x, half_h, outline[0].y))
-		st_top.add_vertex(Vector3(outline[i].x, half_h, outline[i].y))
-		st_top.add_vertex(Vector3(outline[i + 1].x, half_h, outline[i + 1].y))
+		_emit_tri(
+			st_top,
+			Vector3(outline[0].x, half_h, outline[0].y),
+			Vector3(outline[i].x, half_h, outline[i].y),
+			Vector3(outline[i + 1].x, half_h, outline[i + 1].y),
+			flip_winding
+		)
 	st_top.generate_normals()
 	var top_mat := StandardMaterial3D.new()
 	top_mat.albedo_color = RUBBER_TOP_COLOR
@@ -471,3 +499,18 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
 	st_top.commit(mesh)
 
 	return mesh
+
+
+## Emit one triangle to a SurfaceTool, flipping the winding (swapping v1/v2) when flip is true. This
+## is the single point the right-bat winding correction lives: an X-mirrored outline reverses the
+## perimeter order, so the mirrored bat must flip every triangle to keep its normals facing the same
+## way (top cap up, so the white rubber top is not culled). Keeps the fix in ONE readable helper
+## instead of scattering swapped vertex orders through the mesh builder.
+func _emit_tri(st: SurfaceTool, v0: Vector3, v1: Vector3, v2: Vector3, flip: bool) -> void:
+	st.add_vertex(v0)
+	if flip:
+		st.add_vertex(v2)
+		st.add_vertex(v1)
+	else:
+		st.add_vertex(v1)
+		st.add_vertex(v2)
