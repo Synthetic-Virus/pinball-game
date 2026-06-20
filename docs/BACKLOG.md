@@ -327,3 +327,92 @@ Tasks (pull from here):
            window), replacing the pending() stubs. DONE.
       DEFERRED to BACKLOG Next / QA_BACKLOG (do NOT block this resubmission): test_table_integration.gd,
       test_target_no_double_score.gd, test_flipper_no_overlap.gd, the BUG-009 bounce-tolerance relax.
+
+## Future slices (design-ahead, producer-gated)
+
+PRODUCER NOTE (2026-06-19): None of this is approved to build. Both in-flight slices ("core interactions physics-based", "real pinball furniture") are SEND_BACK / gate-blocked on CI delivery, and Gate 0 (the fun check on ONE gray-box ball) is NOT REACHED. The cut list in DESIGN.md explicitly defers ramps, a second board, lights, modes, art, and audio until after Gate 0. Nothing below unlocks until the two in-flight slices are GREEN on the runner and merged, and Gate 0 has a recorded PASS. This queue exists so the team can design ahead without re-litigating order later.
+
+The eleven proposals across the three lenses collapse to a much shorter list once the cut bias is applied. Several are explicitly deferred-by-design (second board, theme coat, mission seed, multiplier, ball-save, drop targets, rollover scoring). They are listed at the bottom as HELD, not queued.
+
+---
+
+### FS-0 (BLOCKER, not a feature): close the two in-flight slices and run Gate 0
+
+Not a future slice and not a new feature. The single highest-value next action is to get the in-flight physics + furniture work GREEN on the runner, merged, and put a real ball in front of a stranger-free fun check. Until FS-0 lands, every slice below is speculative.
+
+Kill/keep gate: this IS Gate 0. If one gray-box ball is not fun without art, audio, or a ramp, the project pivots or scraps here. That is a cheap, healthy outcome. No ramp gets built to "rescue" an unfun core loop.
+
+---
+
+### FS-1: One ramp (single board, returns to a flipper)
+
+The first NEW mechanic, and the developer's stated next interest. Consolidates the three proposals' overlapping ramp slices down to their common minimum: ONE physical inclined ramp on the EXISTING single board. Ball enters from a flipper-tip shot (table_viz-validated reachability), climbs under its own retained momentum against gravity 200 with CCD, and a return rail feeds it gently back to a flipper or inlane. One-way entry is geometry (a lip / steep angle), not a trigger. Flat score-on-entry, reusing the standup/target contact-score + cooldown pattern.
+
+HARD CUTS held out of this slice: no second board, no ball hand-off to another scene, no camera cut, no diverter/magnet, no ramp-complete mode, no lit arrows, no art, no audio. The smaller option when fun and scope conflict is "one ramp that returns to a flipper", never "a ramp network". The second-board transition (the most-cited "hook" in the market-lens proposal) is DEFERRED to FS-5; one ramp on one board must prove the physics first.
+
+Why this and not the hook first: the market lens is right that the ramp-to-second-board is the differentiator, but it is also the riskiest architecture (scene transition, camera hand-off, ball ownership) AND it is invisible/worthless if the underlying ramp physics tunnel or feel like a teleport. Proving one climbing ramp de-risks the entire multi-board north star at the smallest scope. Build the unknown, defer the architecture.
+
+Kill/keep gate: a full-power flip CLEARS the ramp and returns the ball to a flipper; a half-power shot MISSES and returns to play (measured ball position/velocity, independent oracle); zero tunneling at >= 2x LAUNCH_SPEED_MAX through floor/rails/lip. If a clean ramp shot does not feel like the ball fought gravity (i.e. it reads as a teleport or it cannot be missed), the multi-board vision is on hold and we reassess before any second-board work.
+
+---
+
+### FS-2: Spinner shot (free-spinning gate on a lane)
+
+Lowest-risk, highest-juice shot-variety win, and almost pure physics. ONE free-spinning blade on a horizontal axle across a lane the ball already travels fast (lead picks the lane in TableConfig). Ball imparts torque on pass-through; blade spins down under its own angular momentum and friction. Flat score per detected revolution (real angle crossing, not a ball-pass counter). Rewards a different skill than the ramp (a flat fast pass, not a climb), deepening the "where do I aim" decision at very low scope.
+
+HARD CUTS: no spinner-value progression, no lit spinner, no mode, no art, no audio.
+
+Kill/keep gate: a fast clean pass produces strictly MORE counted spins than a slow pass; the blade keeps spinning AFTER the ball has left and decays toward zero (real spin-down); each revolution scores exactly once; no tunneling / no jam at max speed. If it does not measurably reward speed, cut it.
+
+---
+
+### FS-3: Score legibility + drain clarity pass (juice, minimal)
+
+The market-lens "juice pass", re-scoped DOWN and re-positioned. The proposal placed this BEFORE ramps as a Gate 0 unlock; I reject that ordering. Gate 0 is owned by FS-0 on the EXISTING HUD and the SEND_BACK rulings already fold the necessary gray-box clarity items (re-issue the launch prompt, name the restart key, colorblind-safe meter, HUD font) INTO the in-flight slice. We do not block ramps on a juice pass.
+
+What survives here, AFTER ramps and spinner exist and there is more to feel: a small Tween-driven score-delta pop near the hit element, a distinct drain message, and a handful of placeholder AudioStreamPlayer pings (target, bumper/sling, drain). This is the FIRST sanctioned audio in the project and the first thing that makes the loop legible to a stranger for Gate 1.
+
+HARD CUTS: no art assets, no music, no theme, no screen-shake tuning rabbit-hole (a single capped Tween offset, returns to zero, or cut it). Placeholder audio only.
+
+Kill/keep gate (ties to Gate 1, the Stranger Gate): a person who is not the developer can tell, without narration, when they scored and when they drained. If they cannot, the feedback is wrong; iterate within this small scope, do not pile on more juice systems.
+
+---
+
+### FS-4: Drop-target bank (drop-and-reset, one bank)
+
+Introduces the first VISIBLE PLAYFIELD STATE and the first short-horizon micro-goal ("two down, one to go") without a mission system. Upgrades ONE existing standup bank to 3 drop targets that physically drop below the playfield when struck and pop back up when all three are down. Flat score per drop, trivial flat bonus on clear. Reuses the existing deflector + contact-score + cooldown family; the only new mechanic is the drop/reset motion.
+
+HARD CUTS: no bank-complete mode, no lit inserts, no multi-bank sequence, no art, no audio.
+
+Kill/keep gate: a hit drops a target and it STAYS down (a second ball measurably passes over it); clearing the third pops all three up and the bonus fires exactly once; max-speed contact never wedges a mid-drop target or traps/launches the ball. If the drop/reset cannot be made trap-free, cut it rather than ship a ball-eater.
+
+---
+
+### FS-5: Ramp hand-off to a second gray-box board (the hook, gated on FS-1)
+
+The differentiator from the market lens, deliberately placed LAST among the build-now candidates and gated on FS-1 proving ramp physics. A single ramp now EXITS to a second flat gray-box board (flat surface, two walls, two flippers, a return chute that feeds back to board one). Shared score, GLOBAL ball count (a drain on board two is a drain). Camera moves to board two on transit, back on return. No theme, no art, no scoring modes on board two.
+
+This is the earliest point a Steam page (Gate 3) can be justified: a 15-30 s gray-box clip of the ball leaving a ramp and arriving on a new board is the entire marketing pitch and the one thing the Steam indie catalog does not offer with original IP. Do NOT stand up a Steam page before this clip exists; wishlisting a gray-box single-board physics demo is a failed experiment.
+
+HARD CUTS: exactly ONE second board, ONE ramp hand-off. No third board, no theme, no missions, no per-board modes, no art beyond gray box, no audio beyond FS-3's pings.
+
+Kill/keep gate: the ball transits ramp-to-board-two with no visible teleport gap and no tunneling at any launch speed; a stranger watching the clip understands the hook without narration. This is the gateway to Gate 3 (do strangers wishlist it). If the transition is disorienting or the architecture (camera/ball ownership) proves fragile, STOP and reassess the entire multi-board north star before committing art.
+
+---
+
+### HELD (designed-ahead, explicitly NOT queued until the above clear their gates and the time math holds)
+
+These are real, coherent proposals. They are held to defend against scope creep and abandonment, consistent with the DESIGN.md cut list. Each is a feature that waits, not a half-built thing invited in:
+
+- Theme / art coat (flame-skull dressing) and ambient music: deferred to AFTER Gate 0 + Gate 1 pass and the table layout (post-FS-5) is stable. Art on a layout the ramp/second-board still reshapes is wasted work. This is Gate 2 territory.
+- Mission seed (one objective on board one): the third pillar. Held until the table looks like a real thing and a Steam page exists; a mission nobody can see yet is premature.
+- Score multiplier (one bank, 2x): held; thin scoring is sufficient to prove the loop. Adds state architecture only when a real reason (Gate 2 polish) demands it.
+- Ball-save window: a Gate 1 retention aid. Held; the gray-box clarity fixes already folded into the in-flight slice address first-ball confusion first. Revisit only if Gate 1 playtests show first-ball drains reading as unfair.
+- Rollover lane scoring (lit lanes): held; explicitly on the DESIGN.md cut list ("outlanes/inlanes with lights"). The unlit physical guides already exist.
+- Diverters, magnets, kickbacks, multiball, combos, multipliers, wizard mode, leaderboards, high-score persistence, achievements, a third+ board, additional tables: all held to v1+ per the existing cut list. One polished table before a second.
+
+Cut-line rule for the team: when any queued slice and a held item conflict on time, the held item loses. When fun and scope conflict inside a queued slice, the smaller option wins. Past hours spent are never an argument to keep going; only the next hours count.
+
+---
+
+Relevant files: /home/virus/pinball-game/docs/GATES.md (where these rulings and the dated gate outcomes belong), /home/virus/pinball-game/docs/DESIGN.md (cut list this queue enforces), /home/virus/pinball-game/docs/BACKLOG.md (the "Next" section to populate from FS-1 onward only after Gate 0 PASS is recorded).
