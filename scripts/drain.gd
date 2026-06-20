@@ -26,13 +26,15 @@ func _ready() -> void:
 	# renumber is one edit in physics_layers.gd, not a search across the codebase.
 	collision_mask = PhysicsLayers.BALLS
 
-	# Build and place a BoxShape3D that covers the full drain opening.
-	# Width spans the whole table so a ball rolling along either gutter is still caught.
-	# Depth gives enough vertical travel that even a slow-rolling ball triggers before it comes
-	# to rest at the edge. Height is generous so the trigger volume is not a razor-thin plane.
+	# Build and place a BoxShape3D that covers the OPEN CENTER drain opening only.
+	# Width spans the open center region (x in [-HALF_WIDTH, LANE_INNER_X]), NOT the launch lane on
+	# the +X side, so the drain volume cannot swallow a ball resting (or dribbled back) in the lane
+	# (QA B3). The launch lane is a chute, not a drain. Depth gives enough vertical travel that even a
+	# slow-rolling ball triggers before it comes to rest at the edge. Height is generous so the trigger
+	# volume is not a razor-thin plane.
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(
-		TableConfig.DRAIN_WIDTH,   # x: full table width
+		TableConfig.DRAIN_WIDTH,   # x: open center span (excludes the launch lane)
 		TableConfig.WALL_HEIGHT,   # y: tall enough to catch a ball regardless of bounce height
 		TableConfig.DRAIN_DEPTH    # z: deep enough for a slow or bouncing ball
 	)
@@ -42,9 +44,12 @@ func _ready() -> void:
 	add_child(col)
 
 	# Position the Area3D at the drain centre in local (playfield) space.
-	# DRAIN_Z is defined as HALF_LENGTH + 2.0 - just past the flipper pivots toward the bottom edge.
-	# X = 0 (centred), Y = 0 (on the playfield surface).
-	position = Vector3(0.0, 0.0, TableConfig.DRAIN_Z)
+	# DRAIN_Z is HALF_LENGTH - 1.0: below the flipper pivot row (FLIPPER_PIVOT_Z = 20) but INSIDE the
+	# open playfield bottom edge (HALF_LENGTH = 25), so a ball past the flippers drains before reaching
+	# the open bottom (no naive bottom wall can block it - QA BUG-004). X is the open-center midpoint
+	# DRAIN_CENTER_X (NOT 0), so the volume covers the center mouth and stops short of the launch lane
+	# (QA B3). Y = 0 (on the playfield surface).
+	position = Vector3(TableConfig.DRAIN_CENTER_X, 0.0, TableConfig.DRAIN_Z)
 
 	# Connect the body-entered signal. Using Callable so the connection is explicit and
 	# an IDE or GUT test can verify it exists.

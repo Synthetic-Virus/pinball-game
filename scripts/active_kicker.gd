@@ -223,6 +223,15 @@ func _build_detector_and_mesh() -> void:
 	# outgoing velocity", not as "no contact detected".
 	var col := CollisionShape3D.new()
 	col.shape = _make_detector_shape()
+	# Rotate the detector to match the solid body's yaw (QA BUG-018). For a round pop bumper the yaw is
+	# 0 (no effect). For a slingshot the SOLID body is a box rotated by _body_yaw so its face angles
+	# into play; if the detector stayed axis-aligned, the rotated body's corners could poke up to ~0.8
+	# units PAST the unrotated detector volume (larger than BALL_RADIUS), so a ball striking a corner
+	# of the angled face entered the solid body WITHOUT tripping body_entered - the active kick + score
+	# silently never fired (the dreaded "limp bounce" the active element exists to prevent). Rotating
+	# the detector by the same yaw keeps it concentric with and enclosing the solid body at every
+	# contact angle, so any corner contact also trips the detector.
+	col.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _detector_yaw()), Vector3.ZERO)
 	add_child(col)
 
 	# Gray-box mesh so the element is visible without art. A simple box bounding the detector is
@@ -261,3 +270,12 @@ func _make_detector_shape() -> Shape3D:
 ## angles into play. A pop bumper is round, so the base returns 0 (no rotation needed).
 func _body_yaw() -> float:
 	return 0.0
+
+
+## Yaw (radians, about local Y) applied to the DETECTOR shape so it tracks the solid body's
+## orientation (QA BUG-018). The base ties it to _body_yaw() so the detector always encloses the
+## body: a round pop bumper yields 0 (axis-aligned, unchanged); a rotated slingshot face yields its
+## body yaw so corner contacts still trip body_entered. A subclass with a deliberately rotation-
+## invariant detector (e.g. a cylinder) may override to 0; the default is the safe, enclosing one.
+func _detector_yaw() -> float:
+	return _body_yaw()

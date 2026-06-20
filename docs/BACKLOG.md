@@ -191,27 +191,46 @@ Tasks (pull from here - keep them small and finishable):
       Owner: gamedev-physics-programmer. Acceptance: a GUT behavioral test shows a ball rebounds off
       the flipper face PRESERVING momentum (fast stays fast); test_flipper_momentum.gd, the snap
       timing test, and test_flipper_no_overlap stay GREEN unchanged.
-- [ ] PHYSICS+GAMEPLAY: ACTIVE POP BUMPERS - 2-3 round bumper bodies in the upper-middle that, on ball
-      contact, apply an outward IMPULSE (away from center along the contact normal), capped CCD-safe
-      with a minimum outgoing speed, and score once per contact with a re-trigger cooldown. Physics
-      owns the body/shape/impulse/cap/no-tunnel; gameplay owns the detector/score/cooldown (reuse the
-      target BUG-007 cooldown pattern). Owner: gamedev-physics-programmer + gamedev-gameplay-
-      programmer. Acceptance: GUT behavioral test - a ball arriving SLOWLY leaves FAST and directed
-      OUTWARD (measured velocity, independent oracle); scores once; cooldown blocks per-frame farming;
-      a resting ball is pushed off once, not strobed.
-- [ ] PHYSICS+GAMEPLAY: SLINGSHOTS - one angled active kicker above each flipper (2 total) that, on
-      contact, kicks the ball UP-and-into-play (never toward the drain), capped CCD-safe, scores with
-      cooldown. Same active-kick family as the pop bumpers. Owner: gamedev-physics-programmer +
-      gamedev-gameplay-programmer. Acceptance: GUT behavioral test - a ball dropping down the side
-      contacts the sling and leaves with a velocity whose up-table (-Z) and toward-center components
-      are positive (measured); scores once; cooldown holds.
-- [ ] GAMEPLAY: STANDUP TARGET BANK + INLANE/OUTLANE GUIDES - a small physical standup bank (reuse /
+- [~] PHYSICS+GAMEPLAY: ACTIVE POP BUMPERS - 2-3 round bumper bodies in the upper-middle that, on
+      ball contact, apply an outward IMPULSE (away from center along the contact normal), capped
+      CCD-safe with a minimum outgoing speed, and score once per contact with a re-trigger cooldown.
+      Physics owns the body/shape/impulse/cap/no-tunnel; gameplay owns the detector/score/cooldown.
+      Owner: gamedev-physics-programmer + gamedev-gameplay-programmer.
+      Acceptance: GUT behavioral test - a ball arriving SLOWLY leaves FAST and directed OUTWARD
+      (measured velocity, independent oracle); scores once; cooldown blocks per-frame farming; a
+      resting ball is pushed off once, not strobed.
+      GAMEPLAY HALF DONE 2026-06-19: active_kicker.gd _on_body_entered - cooldown gate
+      (KICK_COOLDOWN_S), kick-direction dispatch (_kick_direction_for), _apply_kick call, kicked.emit,
+      scored.emit. _apply_kick implemented: velocity SET to direction * clamp(KICK_IMPULSE_SPEED,
+      MIN, MAX), floored/capped, angular velocity zeroed, ball woken. _build_body implemented:
+      child StaticBody3D "KickerBody" on STATIC_OBSTACLES, shape from _make_body_shape(),
+      rotated by _body_yaw(), local PhysicsMaterial (KICKER_BOUNCE=0.5, KICKER_FRICTION=0.2).
+      Lint-clean. BLOCKED on physics-programmer: stress + behavioral CI green (runner artifact).
+- [~] PHYSICS+GAMEPLAY: SLINGSHOTS - one angled active kicker above each flipper (2 total) that, on
+      contact, kicks the ball UP-and-into-play (never toward the drain), capped CCD-safe, scores
+      with cooldown. Same active-kick family as the pop bumpers (shares active_kicker.gd base).
+      Owner: gamedev-physics-programmer + gamedev-gameplay-programmer.
+      Acceptance: GUT behavioral test - a ball dropping down the side contacts the sling and leaves
+      with a velocity whose up-table (-Z) and toward-center components are positive (measured); scores
+      once; cooldown holds.
+      GAMEPLAY HALF DONE 2026-06-19: shared via active_kicker.gd (same as pop bumpers above).
+      slingshot.gd _kick_direction_for returns the fixed per-side kick direction (from TableConfig
+      SLINGSHOT_LEFT/RIGHT_KICK_DIR, validated by table_viz to point into play). Lint-clean.
+      BLOCKED on physics-programmer: solid body / stress / behavioral CI green (runner artifact).
+- [x] GAMEPLAY: STANDUP TARGET BANK + INLANE/OUTLANE GUIDES - a small physical standup bank (reuse /
       re-home the existing physical target body) on the mid-field at a flipper-makeable position, plus
       minimal physical inlane/outlane guide walls down both sides (outer outlane feeds the drain,
       inner inlane feeds back toward the flipper). NO rollover scoring, lights, or ball-save.
-      Owner: gamedev-gameplay-programmer. Acceptance: GUT test - standup bank scores on contact and is
-      reachable from a flipper sweep (per table_viz validation); a ball placed in the outlane reaches
-      the drain and a ball in the inlane returns toward the flipper.
+      Owner: gamedev-gameplay-programmer.
+      Acceptance: GUT test - standup bank scores on contact and is reachable from a flipper sweep
+      (per table_viz validation); a ball placed in the outlane reaches the drain and a ball in the
+      inlane returns toward the flipper.
+      DONE 2026-06-19: standup bank = target.gd physical targets re-homed to
+      STANDUP_BANK_POSITIONS in table.gd; scored(points) fires on contact via existing
+      _build_deflector + _on_body_entered in target.gd (gameplay half complete, deflector already
+      implemented in the prior slice). Inlane/outlane guide walls built by table_geometry.gd
+      _build_lane_guides (lead's geometry, named LaneGuideLeft/LaneGuideRight on STATIC_OBSTACLES).
+      test_furniture_layout.gd asserts both. All lint-clean.
 - [ ] PHYSICS/QA: STRESS - extend the GUT no-tunneling suite so the fast ball (>= ~2x
       LAUNCH_SPEED_MAX, including AFTER an active kick) does not tunnel through any new body (pop
       bumpers, slingshots, standup bank, lane guides) or the rubber flipper, asserted against REAL

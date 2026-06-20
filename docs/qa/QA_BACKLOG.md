@@ -638,12 +638,275 @@ callers (e.g. test helpers that may exercise it for other purposes).
 
 ---
 
+### BUG-018 [HIGH] Slingshot axis-aligned detector does not cover the rotated solid body corners - active kick silently skips corner contacts
+
+RESOLVED 2026-06-19 (lead polish): added a _detector_yaw() hook in active_kicker.gd (defaults to
+_body_yaw()) and rotated the detector CollisionShape3D by it, so the slingshot detector now rotates
+WITH the solid body and stays concentric. The slingshot detector box is also padded by one
+BALL_RADIUS on BOTH the thin AND the long axis so a corner contact trips body_entered before the ball
+reaches the solid. Regression test added: tests/test_slingshot.gd
+test_sling_corner_contact_still_kicks_and_scores (fires at the up-table corner, asserts scored once
+AND current_speed() >= KICK_MIN_OUTGOING_SPEED). Pop bumper is unaffected (round, _body_yaw 0).
+
+Severity: HIGH - a ball striking a slingshot at its up-table or down-table corners makes a physical
+contact with the KickerBody (STATIC_OBSTACLES, CCD applies) but the Area3D detector does NOT fire
+body_entered for that contact. The coded active kick is therefore not applied. The ball gets only
+the passive PhysicsMaterial bounce (0.5 restitution) instead of the coded KICK_IMPULSE_SPEED (55
+u/s) directed into play. This is exactly the "limp bounce" failure mode the active-kick design was
+built to avoid (REFERENCES.md prior art).
+
+Severity rationale: HIGH because the outlane scenario (a ball falling from above the slingshot
+and grazing its upper corner) is the EXACT USE CASE the slingshot exists to handle ("saved by the
+slings"). The corner gap is 0.82 units - larger than the BALL_RADIUS (0.6), so the ball center
+can be inside the KickerBody corner zone without the detector shell having fired.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/slingshot.gd lines 68-73 (_make_detector_shape)
+- /home/virus/pinball-game/scripts/active_kicker.gd lines 218-235 (_build_detector_and_mesh,
+  which adds the detector CollisionShape3D with no rotation applied)
+
+Root cause (geometry trace):
+1. Slingshot KickerBody is a BoxShape3D of size (SLINGSHOT_LENGTH=5.0, height, SLINGSHOT_THICKNESS=0.8).
+2. The body is ROTATED by _body_yaw() = atan2(kick_dir.x, -kick_dir.z) about Y.
+   For the left sling: yaw = atan2(0.6, 0.8) = 36.87 degrees.
+3. After rotation the solid body's corners in world-XZ extend to Z +/-1.82 (from the origin).
+4. The Area3D detector shape (_make_detector_shape) returns a BoxShape3D of size
+   (SLINGSHOT_LENGTH=5.0, height, SLINGSHOT_THICKNESS + BALL_RADIUS*2 = 0.8+1.2 = 2.0).
+5. The detector shape is added to the Area3D with NO rotation (active_kicker._build_detector_and_mesh
+   does not apply _body_yaw to the detector CollisionShape3D).
+6. The axis-aligned detector extends only Z +/-1.0, but the solid body corners are at Z +/-1.82.
+7. The corner overhang beyond the detector = 1.82 - 1.00 = 0.82 units, larger than BALL_RADIUS.
+8. A ball can physically contact the KickerBody corner WITHOUT having entered the detector volume.
+   body_entered never fires for that contact. _on_body_entered never runs. _apply_kick is not called.
+
+Repro:
+1. Launch the ball from a slingshot test scene. Position the ball at the sling center plus
+   the up-table corner offset: e.g. left sling at world origin, ball at (-2.24, 0, -1.82)
+   (the corner of the solid body), velocity pointing toward +X and +Z (into the corner).
+2. Observe: the ball bounces off the KickerBody (physical contact).
+3. Observe: ball.current_speed() after the bounce is NOT >= KICK_MIN_OUTGOING_SPEED (40 u/s)
+   unless the incoming speed was already high.
+4. watch_signals on the slingshot: scored signal count = 0 (kick never fired, so score never
+   emitted). This is zero even though a physical contact happened.
+
+Expected: any contact with the KickerBody solid surface fires the active kick and scores.
+Actual: corner contacts that miss the axis-aligned detector get passive bounce only, no kick, no score.
+
+Suggested fix: rotate the detector CollisionShape3D by the same _body_yaw() as the solid body
+so the detector and the solid body are co-oriented and the detector fully covers the solid surface.
+In _build_detector_and_mesh (or in the subclass's _make_detector_shape), apply the yaw to the
+CollisionShape3D node's rotation, not just the shape's size. Alternatively, expand the detector
+size so even axis-aligned it fully contains the rotated solid body's bounding box (detector Z
+half-size needs to be >= 1.82 + BALL_RADIUS = 2.42, i.e. detector Z size >= 4.84, not 2.0).
+
+Suggested GUT test to lock the fix:
+  In test_slingshot.gd, add a test that fires the ball at the UP-TABLE CORNER of the sling
+  (ball start at the +corner_z position, velocity pointing into the corner), waits APPROACH_FRAMES,
+  and asserts (a) scored signal fired at least once and (b) ball.current_speed() >=
+  KICK_MIN_OUTGOING_SPEED after the contact. This is the corner-miss repro, and it must pass.
+
+---
+
+### BUG-019 [MEDIUM] test_rubber_rebound_preserves_momentum fires at the END face of the bat, not the long face - explains the known 24.8% rebound vs the 35% floor
+
+RESOLVED 2026-06-19 (lead polish, also clears B1 / the red CI gate): fixed the TEST geometry in
+tests/test_flipper_rubber.gd _fire_at_face to fire HEAD-ON along the bat's long-face normal (computed
+from FLIPPER_REST_ANGLE), not straight +Z into the angled end. BAT_BOUNCE was NOT changed (raising it
+to paper over a glancing hit would have made a real glancing rebound a trampoline). The rebound-
+direction assert in test_ball_rebounds_off_resting_flipper_face now checks the dot with the face
+normal (geometry-correct for the angled bat) instead of a bare vz < 0. Head-on at BAT_BOUNCE 0.45
+retains ~45% > the 35% floor and < the 115% ceiling.
+
+Severity: MEDIUM (test quality + blocks CI green) - the known-failing test (Stream 1 "REMAINING RED")
+fires at the wrong surface. The 35% floor failure is not a physics-engine shortfall or a BAT_BOUNCE
+tuning problem: it is that the test geometry aims at the end face of the bat (a glancing angled
+contact) rather than the long rubber face. Even the correct BAT_BOUNCE=0.45 cannot produce a 35%
+rebound at a 61-degree glancing angle. Raising BAT_BOUNCE to compensate would over-correct the
+forward swing behavior. The test geometry needs to be fixed, not the physics tuning.
+
+Suspected files/lines:
+- /home/virus/pinball-game/tests/test_flipper_rubber.gd lines 71-77 (_fire_at_face)
+
+Root cause (geometry trace):
+1. _fire_at_face places the ball at (along_bat=3.5, 0, -face_offset=-3.3) and fires it at (0, 0, +50).
+2. The bat at REST_ANGLE = -0.55 rad (left flipper) lies along world direction (cos(-0.55), 0, sin(-0.55))
+   = (0.853, 0, 0.523). Its world Z range is from -0.597 to +4.256 (midpoint at z=1.83).
+3. Ball at z=-3.3 is OUTSIDE the bat's Z range (z=-3.3 < z_min=-0.597). The ball therefore
+   approaches from UP-TABLE of the bat and hits the END face (the -Z face in body local, now
+   pointing at world angle (0.523, 0, -0.853) in world space) rather than the LONG face.
+4. The contact angle between the ball velocity (0, 0, 1) and the end-face outward normal
+   (0.523, 0, -0.853) is: dot = -0.853. The incidence is 61 degrees off normal (a glancing hit).
+5. The effective restitution at a glancing contact is reduced (the normal velocity component is only
+   0.853 of the full speed); outgoing speed ~= 50 * 0.853 * 0.45 ~= 19.2 u/s = 38.4% of 50.
+   The solver measurement of 24.8% suggests even less energy is retained at this glance angle.
+6. The test comment says "we aim the ball at a point partway down the bat from the side (-Z) so it
+   strikes the long face". This is only correct if the bat were at angle 0 (pointing along +X).
+   At REST_ANGLE=-0.55, the bat is tilted ~31.5 degrees from +X toward +Z, so z=-3.3 is behind
+   (up-table of) the entire bat body.
+
+Expected behavior of the test: the ball hits the LONG face of the bat (the big rubber surface), gets
+a near-perpendicular rebound at ~45% of the incoming speed (>= 35% floor), and exits along -Z.
+
+Actual behavior: ball hits the END face at a glancing angle; outgoing speed ~24.8% (< 35% floor);
+the test_rubber_rebound_preserves_momentum assertion FAILS.
+
+Repro steps:
+1. Compute the bat midpoint in world space: 3.5*(cos(-0.55), 0, sin(-0.55)) = (2.986, 0, 1.831).
+2. The long face outward normal (up-table face of the bat, body-local -Z) in world:
+   (sin(0.55), 0, -cos(0.55)) = (0.523, 0, -0.853).
+3. Place ball at midpoint + face_normal * offset = (2.986+0.523*2.6, 0, 1.831-0.853*2.6)
+   = (4.35, 0, -0.39). Fire ball velocity = -face_normal * 50 = (-0.523*50, 0, 0.853*50)
+   = (-26.15, 0, 42.65) u/s. This hits the LONG face perpendicularly.
+4. The perpendicular hit at BAT_BOUNCE=0.45 yields ~22.5 u/s outgoing = 45% >= 35% floor. Passes.
+
+Suggested fix for _fire_at_face:
+  Compute the bat rest position geometry at runtime from FLIPPER_REST_ANGLE (do not hardcode
+  a z=-3.3 offset that assumes angle=0). Place the ball perpendicular to the long face:
+    var bat_dir := Vector3(cos(TableConfig.FLIPPER_REST_ANGLE), 0, sin(TableConfig.FLIPPER_REST_ANGLE))
+    var bat_face_normal := Vector3(sin(TableConfig.FLIPPER_REST_ANGLE), 0, -cos(TableConfig.FLIPPER_REST_ANGLE))
+    var bat_midpoint := bat_dir * (TableConfig.FLIPPER_LENGTH * 0.5)
+    var ball_start := bat_midpoint + bat_face_normal * (TableConfig.FLIPPER_WIDTH * 0.5 + TableConfig.BALL_RADIUS + 2.0)
+    _ball.position = ball_start
+    _ball.linear_velocity = -bat_face_normal * FIRE_SPEED
+  This always fires at the long face regardless of FLIPPER_REST_ANGLE.
+
+Note to physics-programmer: do NOT raise BAT_BOUNCE to fix this test. The current BAT_BOUNCE=0.45
+produces the correct rubber feel on the long face (45% rebound, well above 35% floor). Raising it
+to compensate for a glancing test geometry would over-energize the ball on normal forward swings.
+Fix the test geometry first; if a genuine tuning issue remains after that, adjust BAT_BOUNCE.
+
+---
+
+### BUG-020 [MEDIUM] Lane pocket -X face extends 0.4 units past LANE_INNER_X into the center drain region - can deflect draining balls at the boundary
+
+RESOLVED 2026-06-19 (lead polish): table_geometry.gd _build_lane_pocket now pads the seal slack on
+the +X (right-wall) side ONLY (width = (HALF_WIDTH - LANE_INNER_X) + t*0.5, center_x = LANE_INNER_X +
+width*0.5), so the -X face lands exactly at LANE_INNER_X (8.0) instead of 7.6. The lane divider at
+LANE_INNER_X already closes the -X corner, so no gap. test_lane_pocket_drain.gd
+test_lane_pocket_does_not_span_the_center_drain_region was tightened to assert -X face >= LANE_INNER_X
+(epsilon), holding the correct boundary instead of the old one-WALL_THICKNESS slack.
+
+Severity: MEDIUM - a ball that drains near the right side of the inverted-V gap (x in [7.6, 8.0])
+hits the pocket's -X face before entering the drain volume cleanly. The drain DOES fire eventually
+(the drain volume extends from z=21 to z=27 at full table width), but the ball bounces off the
+pocket corner first, producing an unexpected trajectory near the drain. Not a hard stuck-ball
+(the drain catches it), but the behavior is incorrect and could confuse playtesting.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/table_geometry.gd lines 161-178 (_build_lane_pocket)
+- /home/virus/pinball-game/scripts/config/table_config.gd line 109 (LANE_POCKET_FACE_Z = 24.5)
+
+Root cause (geometry trace):
+1. _build_lane_pocket computes:
+   width = (HALF_WIDTH - LANE_INNER_X) + WALL_THICKNESS = (12 - 8) + 0.8 = 4.8
+   center_x = (LANE_INNER_X + HALF_WIDTH) * 0.5 = 10.0
+   The pocket spans x from 10.0 - 2.4 = 7.6 to 10.0 + 2.4 = 12.4.
+2. LANE_INNER_X = 8.0 is the defined boundary between the launch lane (+X of 8) and the
+   center drain region (-X of 8). The pocket's -X face at x=7.6 is 0.4 units LEFT of this
+   boundary -- it protrudes into the center drain region.
+3. The BACKLOG notes the pocket -X face cleared a minimum of 7.2 units (a lower structural guard),
+   but the DESIGN-INTENT boundary is LANE_INNER_X = 8.0. The gap between 8.0 and 7.6 is 0.4 units.
+4. A ball draining at x=7.7 (just left of the lane boundary) traveling toward z=24.5 hits the
+   pocket -X face. The pocket deflects it before it reaches the drain plane cleanly.
+5. The drain volume (z: 21 to 27, x: -12 to +12) will still catch the ball, but the unexpected
+   bounce at the pocket corner makes the drain feel non-deterministic in this zone.
+
+Expected: the pocket -X face is flush with or right of LANE_INNER_X (x >= 8.0) so no pocket
+geometry intrudes into the drain path.
+
+Actual: pocket -X face at x=7.6, 0.4 units past LANE_INNER_X into the drain.
+
+Suggested fix: increase center_x or reduce width so the -X face aligns exactly with LANE_INNER_X:
+  Option A (preferred): width = (HALF_WIDTH - LANE_INNER_X) only (no extra WALL_THICKNESS on the -X
+  side): width = 4.0. center_x = (LANE_INNER_X + HALF_WIDTH)/2 = 10.0. Pocket spans 10-2.0=8.0 to
+  10+2.0=12.0. The -X face is exactly at LANE_INNER_X=8.0. The pocket still seals against the right
+  wall (HALF_WIDTH=12) and the lane divider (divider center at x=8, inner edge at x=7.6, so there
+  may be a 0.4-unit corner gap - verify separately).
+  Option B: keep width=4.8 but shift center_x right by 0.4: center_x = 10.4. Pocket spans 8.0 to
+  12.8. Right side slightly past the wall (which is fine if the wall boxes overlap the pocket).
+
+Suggested GUT test to lock the fix:
+  Assert in test_lane_pocket_drain.gd that the pocket's -X face position x >= LANE_INNER_X
+  (derived from the StaticBody3D position and box size). This complements the existing structural
+  assertion and makes the boundary constraint machine-checked.
+
+---
+
+### BUG-021 [LOW] Active kicker kick direction uses playfield-local constants as world-space velocity - introduces a ~0.097-world-unit Y error from table tilt
+
+DEFERRED 2026-06-19 (lead polish, with the filer's own recommendation): the filing says "No immediate
+action required; documented as precision debt. Flag for re-evaluation if TILT_DEG is raised above 10
+degrees." TILT_DEG is 7; the missing world-Y component is ~5.4 u/s at 55 u/s, not player-perceptible,
+and the kick still lands clearly into play. Holding it as precision debt avoids a playfield-local ->
+world transform on a hot path for a sub-perceptual gain. Re-open if TILT_DEG exceeds 10.
+
+Severity: LOW - the slingshot kick direction (and by extension the pop bumper's Y=0 clamp) are
+computed or applied assuming the playfield coordinate frame is the world frame. At a 7-degree table
+tilt the error is small (~5 u/s of unwanted Y-component at 55 u/s nominal kick speed) and does not
+flip the kick direction, but it means the ball receives a slight wrong-direction nudge rather than
+a precisely in-plane kick. At the current tilt the effect is not player-perceptible. If tilt is
+increased later, the error grows proportionally.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/active_kicker.gd lines 166-168 (_apply_kick)
+  _ball.linear_velocity = dir * target_speed
+  where dir is the result of _kick_direction_for, which for slingshots is the PLAYFIELD-LOCAL
+  constant SLINGSHOT_LEFT/RIGHT_KICK_DIR (Y=0 in local space, not world space).
+- /home/virus/pinball-game/scripts/pop_bumper.gd lines 46-51 (_kick_direction_for)
+  to_ball.y = 0.0 zeroes the WORLD-Y component, but the correct in-plane constraint should
+  zero the PLAYFIELD-LOCAL Y (the surface normal direction in world space).
+
+Root cause:
+The playfield is rotated TILT_DEG=7 degrees about world X. A direction vector that has Y=0 in
+playfield-local space has a small nonzero Y in world space. When SLINGSHOT_LEFT_KICK_DIR=(0.6,0,-0.8)
+(playfield-local) is applied directly as a world-space linear_velocity, the world-Y component is
+world_y = -lz * sin(tilt) = 0.8 * sin(7 deg) = 0.097 per unit of speed, or ~5.4 u/s at 55 u/s.
+This is missing: the ball is kicked slightly less upward than physically correct.
+For the pop bumper, to_ball.y = 0.0 zeros the world Y, which means the kick direction is constrained
+to the world horizontal plane rather than the playfield surface. At 7 degrees this is a small error.
+
+Tests do not catch this: behavioral tests zero ball gravity_scale, so the ball keeps whatever
+velocity it was given and the small Y component is not visible in the position oracle.
+
+Impact: LOW at current TILT_DEG=7. No player-visible effect. Documents a precision debt.
+
+Suggested GUT test (future hardening):
+  When running behavioral kick tests with the Playfield node at the correct tilt, assert that the
+  ball's linear_velocity remains on (or very close to) the playfield surface plane after the kick
+  (i.e., the ball does not fly above WALL_HEIGHT after a kick). This catches a large Y-error but
+  is tolerant of the small 7-degree approximation error.
+
+---
+
+### BUG-022 [BLOCKING->RESOLVED] Drain trigger volume spanned the full table width and overlapped the launch-lane resting-ball position (review item B3 / N1 / N2)
+
+RESOLVED 2026-06-19 (lead polish): the drain was DRAIN_WIDTH = HALF_WIDTH*2 (full table) centered at
+x=0, so its volume covered the launch lane and the resting ball at BALL_START (x=10). Correct behavior
+depended entirely on a GameFlow state guard (drain only while BALL_IN_PLAY) - fragile defense-in-depth
+masking wrong geometry, against DESIGN's "open CENTER drain between/below the flippers". Fix: sized the
+drain to the OPEN CENTER region only. table_config.gd: DRAIN_WIDTH = HALF_WIDTH + LANE_INNER_X (= 20,
+spanning x in [-12, 8]) and a new DRAIN_CENTER_X = (LANE_INNER_X - HALF_WIDTH)/2 (= -2). drain.gd now
+positions the Area3D at DRAIN_CENTER_X, not x=0, and the stale comment (N2: "DRAIN_Z = HALF_LENGTH +
+2.0") was corrected to the real value (HALF_LENGTH - 1.0). The launch lane (x in [8, 12]) is now
+OUTSIDE the drain volume by geometry; the center (x=0) is still inside (the center-drains test holds).
+
+N1 coverage (the assertion that would have surfaced B3): added
+tests/test_lane_pocket_drain.gd test_lane_resting_ball_does_not_drain - seats the real Ball at
+BALL_START, watches the REAL Drain.ball_drained signal for the full settle, and asserts ZERO
+emissions (independent oracle, not a flag), plus a sanity check that the ball stayed in the lane.
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
 - SLICE core-interactions-physics: after BUG-012/013/015 fixes land, re-run the FULL GUT suite on
   the runner (not just the slice files) and confirm the pre-slice gates stay green: test_ball_tunneling.gd,
   test_flipper_momentum.gd, test_plunger.gd contract (the five tests that still pass), test_game_flow.gd,
   test_world_scale.gd. The slice touched shared physics config (table_config.gd) so a flipper/world-scale
   regression is possible.
+- SLICE real-pinball-furniture: after BUG-018 (detector coverage) and BUG-019 (rubber rebound test
+  geometry) fixes land, re-run the FULL slice test suite and confirm: test_pop_bumper.gd,
+  test_slingshot.gd, test_active_kicker_no_tunneling.gd, test_flipper_rubber.gd,
+  test_furniture_layout.gd, test_shot_geometry.gd all green on the runner. BUG-019 fix must not
+  change BAT_BOUNCE; verify test_flipper_momentum.gd stays green (the swing-vs-tap ratio is the
+  regression canary for any BAT_BOUNCE or drive-force change).
 
 ## How QA stays unblocked (the independence rule in practice)
 When there is no new code to test, QA does NOT idle. It (a) writes tests against agreed function

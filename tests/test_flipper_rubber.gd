@@ -64,15 +64,38 @@ func before_each() -> void:
 	await wait_frames(2)
 
 
-## Fire the ball at the flipper bat face. The bat at rest extends from the pivot (origin) toward
-## center along +X (left flipper), lying flat on the surface. We aim the ball at a point partway
-## down
-## the bat from the side (-Z) so it strikes the long face and rebounds back along +Z.
+## Fire the ball at the flipper bat face HEAD-ON (along the face normal), so we measure the PURE
+## surface restitution the rubber sleeve provides, not a glancing contact.
+##
+## WHY HEAD-ON, NOT STRAIGHT +Z (QA BUG-019 / B1 root cause): the bat at rest is held at
+## FLIPPER_REST_ANGLE (-0.55 rad), so it lies at an ANGLE on the surface, not along +Z. Firing the
+## ball straight +Z therefore struck the bat at ~31 deg off-normal, a glancing blow: the normal
+## component (which the bounce acts on) was only cos(31 deg) ~= 0.85 of the speed, while the
+## tangential component was gripped/bled by friction. At BAT_BOUNCE=0.45 that glancing geometry
+## cannot retain 35% of the incoming speed - which is exactly why the old test measured 24.8% and
+## failed, NOT because the rubber material is too dead. The fix is the TEST geometry, not the
+## material: aim the ball ALONG the bat's face normal so the contact is head-on and the measurement
+## is of the surface restitution the test docstring claims to measure. (Do NOT raise BAT_BOUNCE to
+## paper over a glancing-hit test - that would make a real glancing rebound a trampoline.)
+##
+## The bat extends from the pivot (origin) along the bat direction; its long FACE normal is
+## perpendicular to that direction, on the surface plane. We place the ball off the mid-bat point
+## along the +face-normal side and fire it back DOWN the normal into the face; it rebounds out along
+## the same normal.
 func _fire_at_face() -> void:
-	var along_bat: float = TableConfig.FLIPPER_LENGTH * 0.5
-	var face_offset: float = TableConfig.FLIPPER_WIDTH * 0.5 + TableConfig.BALL_RADIUS + 2.0
-	_ball.position = Vector3(along_bat, 0.0, -face_offset)
-	_ball.linear_velocity = Vector3(0.0, 0.0, FIRE_SPEED)  # toward the face (+Z)
+	var rest: float = TableConfig.FLIPPER_REST_ANGLE
+	# Bat direction (pivot -> tip) on the surface plane: the left flipper extends toward +X, rotated
+	# by the rest angle about the surface normal (+Y).
+	var bat_dir := Vector3(cos(rest), 0.0, sin(rest))
+	# The long-face normal is the bat direction rotated +90 deg about +Y (perpendicular, on-plane).
+	var face_normal := Vector3(sin(rest), 0.0, -cos(rest))
+	# Aim at the mid-bat point so we hit the long face, not an end cap.
+	var bat_mid: Vector3 = bat_dir * (TableConfig.FLIPPER_LENGTH * 0.5)
+	# Stand the ball off the face by half the bat width + the ball radius + a small approach gap.
+	var standoff: float = TableConfig.FLIPPER_WIDTH * 0.5 + TableConfig.BALL_RADIUS + 2.0
+	_ball.position = bat_mid + face_normal * standoff
+	# Fire straight DOWN the normal into the face (head-on); it rebounds back out along +face_normal.
+	_ball.linear_velocity = -face_normal * FIRE_SPEED
 	_ball.angular_velocity = Vector3.ZERO
 	_ball.sleeping = false
 
@@ -96,14 +119,19 @@ func test_flipper_face_has_rubber_material() -> void:
 
 
 func test_ball_rebounds_off_resting_flipper_face() -> void:
-	## A ball fired at the resting bat face must bounce back (-z), proving a real surface contact, not
-	## a pass-through. ORACLE: _ball.linear_velocity.z after contact.
+	## A ball fired HEAD-ON at the resting bat face must bounce back OUT along the face normal, proving
+	## a real surface contact, not a pass-through. We fired the ball IN along -face_normal, so a true
+	## rebound has a POSITIVE component along +face_normal. ORACLE: the dot of the ball's measured
+	## velocity with the face normal (geometry-correct for the angled bat, not a bare +/-z check).
+	var rest: float = TableConfig.FLIPPER_REST_ANGLE
+	var face_normal := Vector3(sin(rest), 0.0, -cos(rest))
 	_fire_at_face()
 	await wait_physics_frames(APPROACH_FRAMES)
-	assert_lt(
-		_ball.linear_velocity.z, 0.0,
-		"ball must rebound off the resting flipper face (-z), not pass through. vz=%f"
-		% _ball.linear_velocity.z
+	var rebound_along_normal: float = _ball.linear_velocity.dot(face_normal)
+	assert_gt(
+		rebound_along_normal, 0.0,
+		"ball must rebound OUT along the face normal, not pass through. v.n=%f"
+		% rebound_along_normal
 	)
 
 

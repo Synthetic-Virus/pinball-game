@@ -138,3 +138,43 @@ func test_sling_scores_once_per_contact() -> void:
 	_drop_into_sling()
 	await wait_physics_frames(APPROACH_FRAMES)
 	assert_signal_emit_count(_sling, "scored", 1, "slingshot must score exactly once per kick")
+
+
+func test_sling_corner_contact_still_kicks_and_scores() -> void:
+	## REGRESSION for QA BUG-018: the slingshot solid body is a BoxShape3D rotated by _body_yaw, so
+	## its corners poke past an AXIS-ALIGNED detector. A ball striking near a CORNER of the angled face
+	## used to enter the solid body WITHOUT tripping body_entered, so the active kick + score silently
+	## never fired and the ball only got the passive material bounce (the "limp bounce" the active
+	## element exists to prevent). Now the detector is rotated to match the body and padded on the long
+	## axis, so a corner contact must ALSO trip body_entered. We fire the ball at the up-table END of
+	## the angled face and assert the kick fired (scored once AND the ball left at the kick floor).
+	## ORACLE: the REAL scored signal count AND the REAL ball's measured speed.
+	await _setup_sling(false)
+	watch_signals(_sling)
+
+	# Compute a point just off the up-table corner of the LEFT slingshot's angled face. The face long
+	# axis is X rotated by the body yaw; the up-table corner is at +half-length along that axis. We
+	# place the ball a little outside the face there and fire it into the face.
+	var yaw: float = _sling._body_yaw()
+	var along := Vector3(cos(yaw), 0.0, sin(yaw))   # the face long axis (rotated X) on the plane.
+	var face_normal := Vector3(sin(yaw), 0.0, -cos(yaw))  # the face normal (rotated -Z) on the plane.
+	var corner: Vector3 = along * (TableConfig.SLINGSHOT_LENGTH * 0.5)
+	var standoff: float = TableConfig.SLINGSHOT_THICKNESS * 0.5 + TableConfig.BALL_RADIUS + 1.5
+	_ball.position = corner + face_normal * standoff
+	_ball.linear_velocity = -face_normal * SLOW_FIRE_SPEED  # fire into the corner of the face.
+	_ball.angular_velocity = Vector3.ZERO
+	_ball.sleeping = false
+	await wait_physics_frames(APPROACH_FRAMES)
+
+	assert_signal_emit_count(
+		_sling, "scored", 1,
+		"a corner contact on the angled slingshot face must still score (QA BUG-018)"
+	)
+	assert_gt(
+		_ball.current_speed(),
+		TableConfig.KICK_MIN_OUTGOING_SPEED,
+		(
+			"a corner contact must still get the ACTIVE kick (>= KICK_MIN_OUTGOING_SPEED), not a "
+			+ "limp passive bounce (QA BUG-018). speed=%f"
+		) % _ball.current_speed()
+	)

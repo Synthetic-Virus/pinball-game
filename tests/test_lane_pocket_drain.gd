@@ -21,6 +21,8 @@ const SETTLE_FRAMES: int = 180
 const DRAIN_TRAVEL_FRAMES: int = 240
 
 const BALL_SCENE: PackedScene = preload("res://scenes/elements/Ball.tscn")
+## The drain script, loaded once at class scope (gdlint forbids duplicated preloads in a file).
+const DRAIN_SCRIPT: GDScript = preload("res://scripts/drain.gd")
 
 var _world: Node3D = null
 var _playfield: Node3D = null
@@ -112,18 +114,20 @@ func test_lane_pocket_does_not_span_the_center_drain_region() -> void:
 	var half_box_x: float = box.size.x * 0.5
 	var left_face_x: float = body_center_x - half_box_x
 
-	# The -X face must NOT reach into the center drain region. We allow one WALL_THICKNESS of
-	# seal slack on the lane-divider side (so the pocket can butt up against the divider without
-	# exposing a corner gap), but it must never cross LANE_INNER_X minus that slack.
-	var minimum_left_x: float = TableConfig.LANE_INNER_X - TableConfig.WALL_THICKNESS
+	# The -X face must NOT reach into the center drain region AT ALL. The pocket pads only the +X
+	# (right-wall) side now (QA BUG-020), so the -X face must land at or to the right of LANE_INNER_X.
+	# A small epsilon absorbs float rounding. The previous tolerance allowed one WALL_THICKNESS of
+	# slack on this side, which let the -X face protrude 0.4 units into the drain region and clip a
+	# draining ball at the mouth (BUG-020); we now hold the tighter, correct boundary.
+	var epsilon: float = 0.01
 	assert_gte(
 		left_face_x,
-		minimum_left_x,
+		TableConfig.LANE_INNER_X - epsilon,
 		(
-			"LanePocket -X face (x=%.3f) must not cross into the center drain region "
-			+ "(LANE_INNER_X=%.3f, allowed minimum=%.3f). "
-			+ "A full-width bottom wall would block the center drain (DESIGN constraint)."
-		) % [left_face_x, TableConfig.LANE_INNER_X, minimum_left_x]
+			"LanePocket -X face (x=%.3f) must not cross LANE_INNER_X (%.3f) into the center drain "
+			+ "region (QA BUG-020: pad the right-wall side only). A full-width or -X-padded wall "
+			+ "blocks/clips the center drain (DESIGN constraint)."
+		) % [left_face_x, TableConfig.LANE_INNER_X]
 	)
 
 
@@ -172,7 +176,7 @@ func test_center_ball_still_reaches_the_drain() -> void:
 	## This test FAILS if someone "fixes" the lane fall by adding a full-width bottom wall: that wall
 	## would block the center and break the core "open center drain" mechanic (DESIGN.md constraint).
 	## ORACLE: the real Drain.ball_drained signal fires (watch_signals), not a position guess.
-	var drain: Area3D = (preload("res://scripts/drain.gd") as GDScript).new()
+	var drain: Area3D = DRAIN_SCRIPT.new()
 	drain.name = "TestDrain"
 	_playfield.add_child(drain)
 	drain.set_ball(_ball)
@@ -190,4 +194,45 @@ func test_center_ball_still_reaches_the_drain() -> void:
 		drain,
 		"ball_drained",
 		"a center-X ball must reach the drain: the lane pocket must not seal the center drain"
+	)
+
+
+# ---- BEHAVIORAL 3: a ball RESTING in the launch lane must NOT drain (geometry, not a guard) ------
+
+func test_lane_resting_ball_does_not_drain() -> void:
+	## REGRESSION for QA B3: the drain volume must NOT overlap the launch-lane resting position. A ball
+	## at BALL_START (x=10, in the lane) settling against the pocket must NEVER enter the drain. The
+	## old full-width drain swallowed the lane and relied entirely on a GameFlow state guard to avoid a
+	## spurious drain; this test proves the GEOMETRY itself keeps the lane ball out of the drain, so a
+	## dribble launch that rolls the ball back to rest in the lane while BALL_IN_PLAY cannot drain it.
+	##
+	## INDEPENDENT ORACLE: the REAL Drain.ball_drained signal, watched for the whole settle. Zero
+	## emissions is the pass - not a position guess, not a self-reported flag.
+	var drain: Area3D = DRAIN_SCRIPT.new()
+	drain.name = "TestDrainLane"
+	_playfield.add_child(drain)
+	drain.set_ball(_ball)
+	watch_signals(drain)
+
+	# Seat the ball where the plunger holds it before launch, then let it settle against the pocket.
+	_ball.reset_to_start()
+	await wait_physics_frames(SETTLE_FRAMES)
+
+	# The drain must not have fired even once: the lane is a resting chute, not a drain.
+	assert_signal_emit_count(
+		drain,
+		"ball_drained",
+		0,
+		(
+			"a ball resting at BALL_START in the launch lane must NOT enter the drain volume "
+			+ "(QA B3: the drain must span only the open center, not the lane)"
+		)
+	)
+
+	# Sanity: confirm the ball actually stayed in the lane during the watch (so a 0-count is because
+	# the geometry excludes the lane, not because the ball left the volume some other way).
+	assert_gt(
+		_ball.position.x,
+		TableConfig.LANE_INNER_X - TableConfig.BALL_RADIUS,
+		"ball should still be in the lane during the no-drain check: x=%f" % _ball.position.x
 	)
