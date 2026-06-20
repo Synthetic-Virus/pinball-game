@@ -489,6 +489,15 @@ physically cannot clear the lane (primary cause (a): the floor is too low). Phys
 (b) impulse under-delivery and (c) rattle/friction in the snug 2.0-unit lane.
 
 Tasks (pull from here - keep them small and finishable):
+- [ ] LEAD: ARCHITECT + SCAFFOLD. ARCHITECTURE.md section 13 records the slice contract: the geometry
+      diagnosis, the measure-first protocol, the file-ownership split (DISJOINT so physics/test-builder
+      work in parallel), the shared-physics audit (NO new layer/mask; lane walls have NO PhysicsMaterial
+      today so a low-friction lane wall is a clean physics-owned option), and the test matrix. Two NEW
+      test skeletons scaffolded (gdlint clean, lines <= 100, stable typed signatures + helpers so the
+      coders fill bodies without conflict): tests/test_launch_diagnostic.gd (the MIN/MID/MAX measurement
+      rig, physics fills the asserts) and tests/test_launch_clears_lane.gd (the behavioral lane-clear
+      oracle, test-builder fills the asserts). Owner: gamedev-lead-programmer.
+      DONE 2026-06-20.
 - [ ] PHYSICS: DIAGNOSE BY MEASUREMENT. Headless, on the REAL tilted Playfield + REAL TableGeometry
       (build exactly like tests/test_plunger_launch.gd: rotated TILT_DEG about X, TableGeometry.build,
       shipping Plunger.tscn + Ball.tscn), fire test_strike_at_power at MIN, MID, and MAX and MEASURE:
@@ -496,9 +505,10 @@ Tasks (pull from here - keep them small and finishable):
       (most up-table) the ball reaches before rolling back. Determine which is true: (a) floor too low
       (the ~45 u/s climb requirement vs LAUNCH_SPEED_MIN 30), (b) the impulse under-delivers (full
       power < LAUNCH_SPEED_MAX at the ball), (c) the snug 2.0-unit lane bleeds energy to rattle +
-      BALL_FRICTION 0.4. Owner: gamedev-physics-programmer. Files: a measurement script/test under
-      tests/ (may be a temporary diagnostic that reports numbers). Acceptance: the measured speeds and
-      apexes at MIN/MID/MAX are REPORTED in the deliverable, and the cause(s) named from the numbers.
+      BALL_FRICTION 0.4. Owner: gamedev-physics-programmer. Files: tests/test_launch_diagnostic.gd
+      (SCAFFOLDED by lead - fill the two measurement asserts; stable helpers _measure_delivered_speed /
+      _measure_apex already built). Acceptance: the measured speeds and apexes at MIN/MID/MAX are
+      REPORTED in the deliverable, and the cause(s) named from the numbers.
 - [ ] PHYSICS+LEAD: FIX THE MEASURED CAUSE(S). Raise LAUNCH_SPEED_MIN (and PLUNGER_STROKE_SPEED_MIN
       feeding it) so EVEN A MINIMUM plunge clears the lane into play with margin over ~45 u/s plus the
       measured rattle/friction loss - the WHOLE meter must be useful, no dead bottom half. Keep
@@ -518,10 +528,11 @@ Tasks (pull from here - keep them small and finishable):
       up-table PAST the lane exit / arch into the play area (ball center crosses up-table of
       LAUNCH_REACHED_PLAY_Z / the lane-divider top), then settles in the OPEN playfield, NOT back in
       the lane. Use the ball's MEASURED position as the oracle (position cannot lie). Owner:
-      gamedev-test-builder + gamedev-qa-lead. Files: tests/test_plunger_launch.gd (extend) or a new
-      tests/test_launch_clears_lane.gd. Acceptance: the lane-clear test FAILS against the current
-      too-low floor and PASSES after the fix (intended red-to-green); test_plunger_launch.gd +
-      test_plunger_lane_size.gd stay GREEN.
+      gamedev-test-builder + gamedev-qa-lead. Files: tests/test_launch_clears_lane.gd (SCAFFOLDED by
+      lead - stable rig + helper _launch_and_track + three pending() asserts spelled out; fill the
+      asserts). Acceptance: the lane-clear test FAILS against the current too-low floor and PASSES
+      after the fix (intended red-to-green); test_plunger_launch.gd + test_plunger_lane_size.gd stay
+      GREEN.
 - [ ] PHYSICS/QA: NO-TUNNEL RE-CONFIRM AT THE NEW MAX. If LAUNCH_SPEED_MAX is raised, update every
       no-tunnel stress test to fire at >= 2x the NEW max and confirm zero tunneling through the plunger
       face, lane pocket, walls, arch, targets, pop bumpers, slingshots, lane guides, and flippers,

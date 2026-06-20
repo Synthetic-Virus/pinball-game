@@ -839,3 +839,143 @@ Test-builder + qa-lead:
   test_plunger_lane_size) + the test_slingshot triangle structural UPDATE + the VERIFY re-runs +
   the width-dependent UPDATES (test_world_scale / test_furniture_layout / test_table_integration for
   LANE_WIDTH 2.0 / BALL_START.x 15.0). addons/gut already vendored.
+
+## 13. SLICE: Fix the launch (gray-box, physics-based, 2026-06-20)
+
+Owner: gamedev-lead-programmer (this section + the test scaffolds + the file-ownership split).
+This slice fixes a CONFIRMED playability bug on main: the ball climbs partway up the launch chute,
+stalls, and rolls back, so play cannot start across the power meter. It is a CORRECTNESS slice:
+launch SPEED tuning + a new behavioral lane-clear TEST (+ a friction/small-widen tweak ONLY IF the
+measurement proves rattle is a real cause). NO new element types, no rescale, no re-home, no flipper/
+meter/watchdog re-tune. The plunger contract and impulse-on-contact launch are UNCHANGED. Design
+intent: DESIGN.md "Slice design intent: Fix the launch"; backlog: BACKLOG.md "SLICE: Fix the launch".
+
+### 13.1 The bug, in the geometry (designer's read; physics MEASURES it before fixing)
+The numbers fall out of the LOCKED TableConfig geometry, not a guess:
+- The ball rests at BALL_START.z = HALF_LENGTH - 2.0 = 23.0. The arch curves over at
+  ARCH_CENTER_Z = -HALF_LENGTH + 6.0 = -19.0. The up-table climb from rest to the arch is ~42 units.
+- The down-slope deceleration on the 7-degree tilt is GRAVITY * sin(TILT_DEG) = 200 * sin(7) =
+  ~24.4 u/s^2.
+- Clearing 42 units from rest therefore needs ~sqrt(2 * 24.4 * 42) = ~45.3 u/s AT THE BALL, BEFORE
+  any loss to wall rattle or friction.
+- But LAUNCH_SPEED_MIN = 30 and PLUNGER_STROKE_SPEED_MIN = 30: the ENTIRE LOWER HALF of the meter
+  delivers a ball that physically cannot reach the arch. It climbs, stalls, rolls back. The bottom of
+  the meter is a DEAD ZONE. This is primary cause (a): the speed FLOOR is below what the lane needs.
+
+### 13.2 Diagnose by measurement FIRST (physics-programmer, do NOT guess)
+Headless, on the REAL tilted Playfield with the REAL TableGeometry (build EXACTLY as
+tests/test_plunger_launch.gd does: a Playfield Node3D rotated TILT_DEG about X, TableGeometry.build,
+the shipping Plunger.tscn + Ball.tscn, plunger.set_ball(ball), ball.reset_to_start). Fire
+test_strike_at_power at MIN (0.0), MID (0.5), MAX (1.0) and MEASURE, per power level:
+  (a) the ball's current_speed() just after the strike resolves (sample the PEAK over the first
+      ~12 frames, like test_full_strike_peak_speed_stays_under_double_energy_ceiling), and
+  (b) the APEX: the LOWEST z (most up-table, -Z) the ball center reaches before it rolls back
+      (track min(ball.position.z) each frame over ~2-3 s, before any down-roll).
+Then NAME which cause(s) are true from the numbers:
+  (a) FLOOR TOO LOW: delivered speed at MIN < the ~45.3 u/s climb requirement, and/or apex at MIN/MID
+      stalls down-table of LAUNCH_REACHED_PLAY_Z (= FLIPPER_PIVOT_Z - 3.5 = 16.5) without clearing.
+  (b) IMPULSE UNDER-DELIVERS: delivered speed at MAX < LAUNCH_SPEED_MAX (90). The impulse sizes the
+      ball to _stroke_speed (PLUNGER_STROKE_SPEED_MAX = 78, not 90), so even a perfect transfer tops
+      out at ~78; confirm whether the real transfer lands there or lower.
+  (c) RATTLE/FRICTION STALL: the apex at MID is well short of what (a)'s ballistic math predicts from
+      the measured delivered speed (energy was bled to BALL_FRICTION 0.4 + wall contacts in the snug
+      2.0-unit lane), i.e. delivered speed looks adequate but the ball still does not clear.
+REPORT the six numbers (speed + apex at MIN/MID/MAX) in the deliverable. The fix is sized FROM them.
+
+### 13.3 The fix - tuning, sized to the geometry (physics-programmer + lead)
+Fix the MEASURED cause(s). The expected primary fix is RAISING THE FLOOR; the secondaries are
+conditional on the measurement.
+- RAISE LAUNCH_SPEED_MIN and PLUNGER_STROKE_SPEED_MIN so EVEN A MIN plunge clears the lane into play
+  with margin. The floor must exceed ~45.3 u/s (the ballistic climb requirement) PLUS the measured
+  rattle/friction loss PLUS a sensible safety margin. A reasonable target (physics confirms from the
+  measurement) is a floor around 55-65 u/s so a MIN plunge clears the arch and crosses
+  LAUNCH_REACHED_PLAY_Z well before LAUNCH_SETTLE_TIME_S (2.0 s). WHY-comment the chosen number with
+  the measured delivered-speed-vs-apex that justifies it.
+- KEEP LAUNCH_SPEED_MAX a satisfying hard plunge CLEARLY stronger than the new min. Preserve the
+  weak-vs-strong spread the test_plunger_launch >= 1.5x feel floor checks: if the new floor is ~60 and
+  MAX stays 90 the spread is 1.5x at the FEEL targets, but the DELIVERED ratio must still pass; raise
+  LAUNCH_SPEED_MAX (and PLUNGER_STROKE_SPEED_MAX) if needed so the delivered full/min ratio stays
+  >= 1.5x with the raised floor. If MAX rises, see 13.5 (no-tunnel re-confirm at 2x the NEW max).
+- The mapping power->speed STILL lives off TableConfig.LAUNCH_SPEED_MIN/MAX (PLUNGER_STROKE_SPEED_*
+  feed it). The impulse sizing in plunger.gd._try_apply_launch_impulse targets _stroke_speed; if the
+  measurement shows the delivered speed lands BELOW _stroke_speed (cause b), the physics-programmer
+  may correct the impulse sizing so the delivered ball speed lands in LAUNCH_SPEED_MIN..MAX - this is
+  an internal sizing fix behind the unchanged contract, NOT a mechanism change.
+- IF AND ONLY IF the measurement proves rattle/friction is a real contributor (cause c): the preferred
+  fixes, in order, are (1) lower BALL_FRICTION slightly, or (2) add a LOW-FRICTION PhysicsMaterial to
+  the lane walls (the lane divider + right wall - they have NO material today; _make_box_body sets
+  none, so they inherit the default), or (3) a SMALL lane widen (LANE_INNER_X nudged down a little,
+  keeping LANE_WIDTH a snug ball-width chute). NEVER a return to a bulky box. Keep the plunger face
+  square to the ball (PLUNGER_FACE_WIDTH = LANE_WIDTH - 0.6 auto-follows any widen; test_plunger_lane_
+  size.gd must stay green). If the floor-raise alone clears the whole meter, do NOT touch geometry.
+
+### 13.4 Shared-physics impact (lead audit)
+- NO new physics layer, NO mask change. This slice edits SCALAR tuning constants and (conditionally)
+  a friction value / a local PhysicsMaterial on existing lane bodies. No body changes layer/mask, so
+  the flipper/ball/furniture interop is untouched and those tests cannot regress from a routing edit.
+- IF the lane-friction option is taken: the lane-wall PhysicsMaterial is LOCAL to those two bodies
+  (not the shared _gray_material, which is visual-only). It must NOT change the perimeter walls' feel
+  for the rest of the table (only the lane divider + right wall). Lowering BALL_FRICTION instead is
+  global to the ball; physics confirms it does not regress flipper cradle/rubber tests if chosen.
+- IF LAUNCH_SPEED_MAX rises: it is the reference speed for EVERY no-tunnel stress test (they fire at
+  >= 2x it). Raising it RAISES the stress bar automatically where tests read the constant live; verify
+  each stress test reads TableConfig.LAUNCH_SPEED_MAX (not a hardcoded literal) so the bar tracks.
+
+### 13.5 No-tunnel re-confirm at the new max (physics + qa)
+The North-Star gate. The ball stays continuous_cd at 240 Hz. The no-tunnel stress tests must fire at
+>= 2x the (possibly raised) LAUNCH_SPEED_MAX and show ZERO tunneling, against REAL instanced bodies
+measuring real position. Files that fire at 2x LAUNCH_SPEED_MAX and must stay green at the NEW max:
+test_ball_tunneling.gd (flat wall, the headline gate), test_flipper_no_tunneling.gd, test_plunger_
+launch.gd (face + pocket), test_target_no_tunneling.gd, test_active_kicker_no_tunneling.gd. Confirm
+each reads LAUNCH_SPEED_MAX live; if MAX did not change, they hold unchanged.
+
+### 13.6 File-ownership map (DISJOINT so coders work in parallel without conflict)
+
+PHYSICS-PROGRAMMER (the measurement + the measured fix):
+- tests/test_launch_diagnostic.gd  NEW. The measurement harness (scaffolded by lead, FILLED by
+  physics): builds the real tilted lane, fires MIN/MID/MAX, gd-prints + asserts the measured
+  delivered speed and apex. May stay as a permanent diagnostic (it asserts the floor clears).
+- scripts/config/table_config.gd  the SPEED constants ONLY: LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX,
+  PLUNGER_STROKE_SPEED_MIN, PLUNGER_STROKE_SPEED_MAX (and BALL_FRICTION only IF cause c is measured).
+  WHY-comment every changed number with the measured value behind it. (Shared file; physics edits ONLY
+  these scalars; the lead reviews. The lane-geometry block is the lead's if a widen is needed.)
+- scripts/plunger.gd  ONLY IF cause (b) is measured: correct the impulse sizing in
+  _try_apply_launch_impulse so delivered speed lands in range. Contract unchanged.
+- scripts/ball.gd  ONLY IF lowering BALL_FRICTION needs a material tweak (reads BALL_FRICTION from
+  config; likely no edit).
+- scripts/table_geometry.gd  ONLY IF cause (c) needs a low-friction lane-wall material on the lane
+  divider + right wall, OR a small widen build change. Likely untouched if the floor-raise suffices.
+- Owns: test_launch_diagnostic.gd asserts; the no-tunnel re-confirm at the new max (13.5).
+
+LEAD-PROGRAMMER (geometry constants IF a widen is needed; this doc; the test scaffolds):
+- scripts/config/table_config.gd  the LANE geometry block (LANE_INNER_X / LANE_WIDTH and dependents)
+  ONLY IF a small widen is the measured fix; re-derive every X-dependent dependent with a WHY-comment.
+  Otherwise no lead edit to config.
+- docs/ARCHITECTURE.md (this section), docs/BACKLOG.md, docs/DESIGN.md (designer owns intent).
+
+GAMEPLAY-PROGRAMMER (contract re-verify only - no mechanism edit this slice):
+- scripts/plunger.gd  re-verify the public contract is unchanged byte-for-byte after any tuning
+  (signals power_changed/ball_launched; methods arm/disarm/set_ball/is_armed; power 0..1; the
+  oscillating meter; launch from contact-impulse, never a code velocity set). NO code edit expected.
+- Owns: confirming test_plunger.gd contract tests stay green.
+
+TEST-BUILDER + QA-LEAD (the test gap - the reason it shipped):
+- tests/test_launch_clears_lane.gd  NEW. The BEHAVIORAL lane-clear ORACLE (scaffolded by lead with
+  pending() asserts spelled out; FILLED by test-builder). On the real tilted lane, a MIN-power launch
+  (and a low/mid power) drives the ball's apex up-table PAST LAUNCH_REACHED_PLAY_Z into the open
+  playfield, then settles in play (NOT back in the lane). Independent oracle: ball.position. Written
+  to FAIL against today's floor and PASS after the fix (intended red-to-green).
+- tests/test_plunger_launch.gd, tests/test_plunger_lane_size.gd  KEEP GREEN (no regression).
+- The no-tunnel stress UPDATES at the new max (with physics, 13.5) if MAX rises.
+
+### 13.7 Test matrix (independent oracle: ball.position / current_speed, never a counter)
+
+| File | Class | Proves | Owner |
+|------|-------|--------|-------|
+| test_launch_diagnostic.gd | DIAGNOSTIC | delivered speed + apex at MIN/MID/MAX measured; the floor clears the lane | physics + test-builder |
+| test_launch_clears_lane.gd | BEHAVIORAL | a MIN (and low/mid) launch apex crosses LAUNCH_REACHED_PLAY_Z into play, settles in the open field not the lane | test-builder + qa |
+| test_plunger_launch.gd | BEHAVIORAL+STRESS | KEEP GREEN: strike from rest, full >= 1.5x weak, in-range, no-ball no-op, no tunnel of face/pocket; re-fire at 2x NEW max | physics + test-builder |
+| test_plunger_lane_size.gd | STRUCTURAL | KEEP GREEN: lane + face stay a snug ball-width chute (re-verify if a small widen lands) | test-builder |
+| test_ball_tunneling.gd | STRESS | KEEP GREEN at 2x the NEW max: flat-wall headline gate, zero tunnel, CCD on | physics + qa |
+| test_flipper_no_tunneling.gd / test_target_no_tunneling.gd / test_active_kicker_no_tunneling.gd | STRESS | KEEP GREEN at 2x the NEW max through every body | physics + qa |
+| test_plunger.gd | CONTRACT | KEEP GREEN: meter + power->stroke mapping monotonic, contract intact | gameplay + test-builder |
