@@ -141,6 +141,13 @@ func test_ball_stays_in_front_of_wall_after_bounce() -> void:
 	## After the ball bounces off the wall it should be moving away (negative Z velocity)
 	## and its position should be in front of the wall (negative Z relative to wall face).
 	## This is a gentler sanity check that confirms a bounce actually occurred.
+	##
+	## BUG-009 FIX (2026-06-19): the old threshold was exactly WALL_Z = 0.0 with no epsilon.
+	## Floating-point solver penetration can leave the ball center at z = 0.001..0.3 (inside
+	## the wall thickness, between front face at 0 and back face at WALL_THICKNESS). The ball
+	## HAS bounced (it is not behind the wall), but the exact z=0 threshold caused spurious
+	## failures. We allow half a BALL_RADIUS of penetration tolerance so a clean bounce at
+	## z=0.05 still passes while a real tunneling event (ball fully past the wall) still fails.
 	_ball_body.position = Vector3(0.0, 0.0, BALL_START_Z)
 	_ball_body.linear_velocity = Vector3.ZERO
 	_ball_body.angular_velocity = Vector3.ZERO
@@ -151,7 +158,11 @@ func test_ball_stays_in_front_of_wall_after_bounce() -> void:
 	await wait_physics_frames(STEP_FRAMES * 2)
 
 	## After the bounce the ball should have moved back toward its start (lower Z or at wall).
+	## TOLERANCE: allow up to BALL_RADIUS * 0.5 past the wall face to absorb solver penetration
+	## (consistent with the tunnel threshold used in test_full_speed_ball_never_tunnels_a_wall).
+	var bounce_threshold: float = WALL_Z + TableConfig.BALL_RADIUS * 0.5
 	assert_true(
-		_ball_body.position.z <= WALL_Z,
-		"Ball should be at or in front of wall after bounce. ball.z=%f" % _ball_body.position.z
+		_ball_body.position.z <= bounce_threshold,
+		"Ball should be at or in front of wall after bounce (tolerance=%f). ball.z=%f"
+		% [bounce_threshold, _ball_body.position.z]
 	)

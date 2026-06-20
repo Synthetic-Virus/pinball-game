@@ -3,19 +3,19 @@ extends GutTest
 ## Owner: test-builder + qa-lead. Slice: make-the-core-interactions-physics-based.
 ##
 ## WHY THIS EXISTS (QA BUG-014): the slice's two BLOCKING bugs - the missing lane pocket (BUG-012)
-## and the double-offset plunger (BUG-013) - sailed through CI because EVERY other slice test bypasses
-## table.gd. The unit tests build their own playfield and (for the plunger) seat the Plunger node at
-## Vector3.ZERO themselves, so they honored a contract table.gd violated and never exercised table.gd's
-## actual wiring. This file closes that gap: it instances the REAL res://scenes/Table.tscn and asserts
-## on the REAL built tree, so a regression in table.gd's element placement is caught here, not in a
-## browser playtest.
+## and the double-offset plunger (BUG-013) - sailed through CI because EVERY other slice test
+## bypasses table.gd. The unit tests build their own playfield and (for the plunger) seat the
+## Plunger node at Vector3.ZERO themselves, so they honored a contract table.gd violated and never
+## exercised table.gd's wiring. This file closes that gap: it instances the REAL Table.tscn scene
+## and asserts on the REAL built tree, so a regression in table.gd's element placement is caught
+## here, not in a browser playtest.
 ##
 ## INDEPENDENT-ORACLE RULE: every assertion reads a REAL built node's measured transform or the REAL
 ## ball's measured position after settling, never a self-reported flag.
 ##
 ## NOTE on RED-before-fix: this file is written to LOCK the two blockers closed. Against the pre-fix
-## code it FAILS (no LanePocket node; the plunger face lands off the table); against the fixed code it
-## PASSES. That is the correct relationship between a regression test and the bug it guards.
+## code it FAILS (no LanePocket node; the plunger face lands off the table); against the fixed
+## code it PASSES. That is the correct relationship between a regression test and the bug it guards.
 
 const TableScene: PackedScene = preload("res://scenes/Table.tscn")
 
@@ -46,7 +46,7 @@ func _find_named(node_name: String, root: Node = null) -> Node:
 
 
 ## The tilted Playfield node every element is parented under. Used to convert a built node's GLOBAL
-## transform back into playfield-LOCAL space, which is the coordinate space TableConfig is written in.
+## transform back into playfield-LOCAL space, the coordinate space TableConfig is written in.
 func _playfield() -> Node3D:
 	return _find_named("Playfield") as Node3D
 
@@ -166,4 +166,45 @@ func test_real_ball_rests_in_the_lane_after_settling() -> void:
 		ball.position.y,
 		-TableConfig.BALL_RADIUS,
 		"ball fell through the surface: y=%.3f" % ball.position.y
+	)
+
+
+# ---- BUG-023: a ball in the flipper catch zone must NOT drain -----------------------------
+
+func test_ball_in_flipper_catch_zone_does_not_drain() -> void:
+	## QA BUG-023: the drain trigger volume must not swallow a ball sitting in the flipper catch zone
+	## (the area just up-table of the bats, where a player cradles or is about to flip). The old drain
+	## box (z [21.0, 27.0]) overlapped the bats (down-table reach ~23.66), so a ball at the cradle
+	## drained while in play - a core-loop break. We place the REAL ball at the catch zone and watch
+	## the REAL Drain's ball_drained signal: it must NEVER fire.
+	## ORACLE: the real Drain Area3D's emitted signal (the contact physically happens or it does not),
+	## watched, not a self-reported flag.
+	var ball: RigidBody3D = _find_named("Ball") as RigidBody3D
+	var drain: Area3D = _find_named("Drain") as Area3D
+	assert_not_null(ball, "the built Table must contain the Ball")
+	assert_not_null(drain, "the built Table must contain the Drain")
+	if ball == null or drain == null:
+		return
+
+	watch_signals(drain)
+
+	# Seat the ball in the catch zone: a ball-radius UP-TABLE of the bat's furthest down-table reach
+	# (FLIPPER_BAT_MAX_Z), at the left flipper's pivot X, on the playfield surface. This is squarely
+	# where a cradled/about-to-flip ball lives; the drain must not reach this far up-table.
+	var catch_z: float = TableConfig.FLIPPER_BAT_MAX_Z - TableConfig.BALL_RADIUS
+	ball.reset_to(Vector3(
+		-TableConfig.FLIPPER_PIVOT_SPREAD,
+		TableConfig.BALL_RADIUS + 0.2,
+		catch_z
+	))
+
+	# Let physics settle the ball at the catch position and give the drain Area3D ample frames to
+	# (wrongly) report it. Strong gravity pulls it down-table toward the flippers, exactly the path
+	# the bug fired on; the flipper bat (built at this pivot) supports it.
+	await wait_physics_frames(SETTLE_FRAMES)
+
+	assert_signal_not_emitted(
+		drain,
+		"ball_drained",
+		"a ball in the flipper catch zone (z=%.2f) must NOT drain (QA BUG-023)" % catch_z
 	)

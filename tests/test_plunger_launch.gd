@@ -227,6 +227,39 @@ func test_launched_ball_speed_lands_in_design_range() -> void:
 	)
 
 
+# ---- BEHAVIORAL: the launch energy is single-sourced (no double-count) - QA BUG-025 -----
+
+func test_full_strike_peak_speed_stays_under_double_energy_ceiling() -> void:
+	## QA BUG-025: the launch momentum must come from ONE source - the explicit impulse - not the
+	## impulse PLUS a sync_to_physics contact transfer stacked on top of it (which would roughly
+	## DOUBLE the speed: at full power ~2x PLUNGER_STROKE_SPEED_MAX = ~156 u/s, above every per-
+	## mechanism cap). A post-settle position oracle (the tests above) does not bound the PEAK speed
+	## at the launch instant, so we sample the ball's speed every frame for the first few frames after
+	## the strike and assert the PEAK stays under a tight ceiling. A correct single-impulse launch
+	## peaks near PLUNGER_STROKE_SPEED_MAX (78); a double-count would blow past the ceiling.
+	## ORACLE: ball.current_speed() sampled at peak, measured, not self-reported.
+	await _seat_and_settle()
+	_plunger.test_strike_at_power(1.0)
+
+	var peak_speed: float = 0.0
+	# Sample the first 12 frames (0.05 s): long enough to capture the launch impulse peak, short
+	# enough that the ball is still in the straight lane (no arch bounce can inflate the reading).
+	for _i in range(12):
+		await wait_physics_frames(1)
+		peak_speed = maxf(peak_speed, _ball.current_speed())
+
+	# Ceiling: LAUNCH_SPEED_MAX (90) * 1.1 = 99. A correct launch peaks ~78; a double-energy spike
+	# (~156) is far above this. The 10% headroom absorbs the slight restitution bounce off the steel
+	# ball without admitting a 2x stack.
+	var ceiling: float = TableConfig.LAUNCH_SPEED_MAX * 1.1
+	assert_lt(
+		peak_speed,
+		ceiling,
+		"full-strike peak speed %f exceeded the double-energy ceiling %f (sync_to_physics + impulse "
+		% [peak_speed, ceiling] + "stacked? BUG-025)"
+	)
+
+
 # ---- STRESS: a max-power strike never tunnels the face or the lane pocket ---------------
 
 func test_max_strike_does_not_tunnel_ball_behind_plunger_or_pocket() -> void:

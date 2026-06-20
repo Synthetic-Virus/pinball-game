@@ -61,6 +61,14 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
       Written: tests/test_game_flow.gd (test_drain_decrements_balls_and_requests_new_ball,
       test_game_over_at_zero_balls, test_no_new_ball_request_at_game_over). FAILS until
       gameplay-programmer fills on_ball_drained(). Correct pre-impl state.
+- [ ] TEST DEBT (locks BUG-023): drain trigger volume must not overlap the flipper-bat catch zone.
+      TWO assertions: (1) a CONFIG/structural assert DRAIN_Z - DRAIN_DEPTH/2 > max flipper-bat z
+      (the drain's up-table edge clears the bat sweep) - the cheap machine-check the existing
+      center-only assert is missing; (2) a BEHAVIORAL integration test that seats the REAL Ball
+      cradled on a REAL flipper (left, then right) held energized, watches Drain.ball_drained for
+      the full settle, asserts ZERO emissions (independent oracle). Goes in test_world_scale.gd +
+      test_table_integration.gd. Write it RED now (the current geometry overlaps), green after fix.
+      Owner: gamedev-test-builder + gamedev-qa-lead.
 
 ## Stream 2 - Bug repros (found defects, reproduced and logged)
 
@@ -895,7 +903,362 @@ tests/test_lane_pocket_drain.gd test_lane_resting_ball_does_not_drain - seats th
 BALL_START, watches the REAL Drain.ball_drained signal for the full settle, and asserts ZERO
 emissions (independent oracle, not a flag), plus a sanity check that the ball stayed in the lane.
 
+---
+
+### BUG-023 [BLOCKING] Drain trigger volume overlaps the entire flipper-bat catch zone - a ball falling to the flippers drains before it can be flipped
+
+Severity: BLOCKING - this breaks the core loop at Gate 0 (DESIGN: "the player catches the ball and
+chooses a shot"). A ball arriving at the flippers crosses the drain trigger's up-table edge (z=21)
+at the flipper PIVOT row, so drain.body_entered fires while the ball is still ~2.66 units up-table
+of the flipper faces. It is spent as a drain in BALL_IN_PLAY (the exact state on_ball_drained acts
+in - the GameFlow guard does NOT mask this), so the player loses a ball they were about to flip.
+Same defect CLASS as BUG-022 (drain geometry overlapping a legitimate ball position), now on the
+flipper cradle instead of the launch lane. The BUG-022 fix narrowed the drain in X but never
+reconciled the drain's Z extent with the flipper-bat Z span.
+
+Slice: Table reshape + playtest fixes. Found by QA review 2026-06-19 (geometry oracle).
+
+LEAD FIX LANDED 2026-06-19 (polish pass): added FLIPPER_BAT_MAX_Z (23.66, QA's pessimistic oracle)
+and DRAIN_BAT_CLEARANCE (0.6) to TableConfig; shrank DRAIN_DEPTH 6.0 -> 1.6 and re-derived DRAIN_Z =
+FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH/2 = 25.06, so the drain volume's up-table edge
+sits at 24.26 - cleanly below the bats (23.66) and above the open bottom mouth. drain.gd comment
+updated. Two config asserts added to tests/test_world_scale.gd (up-table edge > FLIPPER_BAT_MAX_Z;
+center not far past the open bottom) and one cradle integration test added to
+tests/test_table_integration.gd (real Ball seated in the flipper catch zone, real Drain watched,
+ZERO ball_drained emissions). table_viz.py DRAIN_Z now tracks the config formula. Awaiting CI green.
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd:108 DRAIN_Z = HALF_LENGTH - 1.0 (= 24)
+- /home/virus/pinball-game/scripts/config/table_config.gd:121 DRAIN_DEPTH = 6.0
+- /home/virus/pinball-game/scripts/config/table_config.gd:92-93 FLIPPER_PIVOT_SPREAD 7.2 /
+  FLIPPER_PIVOT_Z = HALF_LENGTH - 5.0 (= 20)
+- /home/virus/pinball-game/scripts/drain.gd:35-52 (box sized DRAIN_WIDTH x WALL_HEIGHT x DRAIN_DEPTH,
+  centered at DRAIN_CENTER_X, DRAIN_Z)
+
+Evidence (geometry oracle, derived from the committed constants):
+1. Drain trigger box: x in [-16.0, 10.5], z in [DRAIN_Z - DRAIN_DEPTH/2, DRAIN_Z + DRAIN_DEPTH/2]
+   = [21.0, 27.0], y centered 0 with height WALL_HEIGHT 2.4 -> y in [-1.2, 1.2].
+2. Flipper bats at rest (both sides, symmetric): the bat sweeps from the pivot (x=+/-7.2, z=20.0)
+   to the tip (x=+/-1.23, z=23.66). The ENTIRE bat lies at z 21.46..23.66, fully inside the drain
+   z-band [21, 27], and at x inside the drain x-band [-16, 10.5].
+3. A ball falling down-table toward the flippers reaches z=21 (the drain's up-table edge) BEFORE it
+   reaches the bat faces (z 20..23.66). So body_entered fires as the ball passes the pivot row, ~2.66
+   units before it could land on a bat.
+4. The ball center over a cradling bat sits at y ~= 1.2 (bat-top 0.6 + ball radius 0.6), at the very
+   top edge of the drain y-band - on the tilted plane this is borderline, so the EXACT runtime trigger
+   point needs a real integration test to pin (see the test-debt item), but the volume overlap is
+   unambiguous and the design intent (drain is the gap BELOW/BETWEEN the flippers, not over them) is
+   violated by geometry.
+
+Why CI did not catch it: tests/test_world_scale.gd test_drain_position_is_past_flippers asserts only
+DRAIN_Z > FLIPPER_PIVOT_Z (24 > 20, passes). It checks the drain CENTER against the pivot, never the
+drain VOLUME's up-table edge against the flipper-bat catch zone. The trigger is the volume, not the
+center. This is the testability gap.
+
+Suggested fix (lead/physics): push the drain's up-table edge BELOW the flipper-tip z. Options:
+  (a) raise DRAIN_Z and/or shrink DRAIN_DEPTH so DRAIN_Z - DRAIN_DEPTH/2 > max flipper-bat z (>23.66),
+      e.g. DRAIN_DEPTH 2.0 with DRAIN_Z 25.0 -> edge at 24.0 (just below the tips) - but verify the
+      ball still drains before the open bottom edge (HALF_LENGTH 25);
+  (b) place the drain trigger purely BELOW the surface in the center gap (a catch box under the open
+      mouth) rather than a tall on-plane box that the flipper bats poke into.
+  Whatever the choice, the drain's up-table edge must clear the flipper-bat catch zone, and a ball
+  dribbling through the open mouth must still drain.
+
+Suggested GUT test to lock the fix (independent oracle): seat the REAL Ball cradled on a REAL left
+(then right) flipper held energized, watch Drain.ball_drained for the full settle, assert ZERO
+emissions; plus a config assert DRAIN_Z - DRAIN_DEPTH/2 > (max flipper-bat z) so the boundary is
+machine-checked the way BUG-022's was.
+
+---
+
+### BUG-024 [HIGH] Left and right slingshot KickerBody (StaticBody3D) geometrically overlaps the LaneGuide wall (StaticBody3D) at the outlane corner
+
+Severity: HIGH - the overlap is in the primary outlane ball-path: every ball heading for the left
+or right outlane passes through the X[-12.74, -12.60] x Z[18.0, 18.32] junction on the left side
+(symmetric on the right). Two StaticBody3D bodies do not collide with each other, but their
+overlapping surfaces create a concave geometry pocket that can produce unpredictable collision
+normals when the ball's contact manifold straddles both bodies simultaneously. In the worst case
+the solver returns conflicting normals and the ball is ejected at an unpredicted angle or
+momentarily has no valid contact face to resolve against, causing a velocity spike (speed
+explosion) or a brief clip. This is exactly the kind of static-body seam that CCD does NOT guard
+against (CCD prevents tunneling through a moving face, not velocity explosions from dual-body
+contact ambiguity).
+
+Found by QA geometry oracle 2026-06-19.
+
+Repro steps (geometry-based, no playtest required):
+1. Open scripts/slingshot.gd and scripts/table_geometry.gd.
+2. Compute left slingshot KickerBody world extents:
+   - Center: (-10.5, 0, 16.5), yaw = atan2(0.6, 0.8) = 36.87 deg
+   - Box local half-extents: (SLINGSHOT_LENGTH/2, WALL_HEIGHT/2, SLINGSHOT_THICKNESS/2) = (2.5, 1.2, 0.4)
+   - Rotated world X range: [-12.74, -8.26], world Z range: [14.68, 18.32]
+3. Compute LaneGuideLeft world extents:
+   - Center X: -LANE_GUIDE_DIVIDER_X = -13.0
+   - Box half-width in X: WALL_THICKNESS/2 = 0.4 -> X range: [-13.4, -12.6]
+   - Z range: [LANE_GUIDE_TOP_Z, LANE_GUIDE_BOTTOM_Z] = [18.0, 23.0]
+4. Intersection: X overlap [-12.74, -12.60] (0.14 units), Z overlap [18.0, 18.32] (0.32 units).
+   Both bodies are on STATIC_OBSTACLES. The overlap is real geometry interpenetration.
+5. Right slingshot / LaneGuideRight is symmetric: X[12.60, 12.74] x Z[18.0, 18.32].
+
+Expected: the slingshot KickerBody outer corner and the lane guide wall do not share any volume.
+The gap between them should be at least BALL_RADIUS (0.6 units) to prevent the ball from having
+simultaneous contact with both bodies at the seam.
+
+Actual: 0.14 unit X x 0.32 unit Z overlap. The ball (radius 0.6) is larger than either overlap
+dimension individually, so it cannot physically sit entirely within the overlap zone. However a
+ball traveling along the outer wall CAN touch both bodies simultaneously at the seam (it has
+radius > overlap dimension, so both contact normals are active at once). The solver receives two
+overlapping StaticBody3D contact normals in a concave-like pocket and must reconcile them. The
+Jolt solver may clip velocity, spike it, or produce a micro-stutter depending on the exact
+contact manifold resolution order. This is a non-deterministic failure mode: it may not reproduce
+every frame, which is what makes it high-severity (silent in testing, visible in play).
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd
+  SLINGSHOT_LEFT_POS, SLINGSHOT_RIGHT_POS, SLINGSHOT_LENGTH, SLINGSHOT_THICKNESS (lines ~130-135)
+  LANE_GUIDE_DIVIDER_X = HALF_WIDTH - 3.0 = 13.0 (line ~140)
+  LANE_GUIDE_TOP_Z = 18.0 (line ~141)
+- /home/virus/pinball-game/scripts/slingshot.gd: _build_body() places KickerBody at _pos + yaw
+- /home/virus/pinball-game/scripts/table_geometry.gd: _build_lane_guides() places LaneGuide walls
+
+Root cause:
+The lane guide Z range starts at LANE_GUIDE_TOP_Z = 18.0. The slingshot outer corner (the
+corner of the rotated box at the up-table end of the outer side) lands at Z = 18.32, 0.32 units
+BELOW the lane guide top. The two bodies share the Z band [18.0, 18.32]. The fix is to either:
+  (a) raise LANE_GUIDE_TOP_Z to at least 18.35 (clear of the sling corner),
+  (b) shorten SLINGSHOT_LENGTH by ~0.5 so the outer corner no longer reaches Z=18, or
+  (c) shift the sling center slightly down-table (larger Z) by 0.5 units to pull the outer corner
+      away from the guide.
+Option (a) is the least-intrusive single-constant change and does not alter shot geometry.
+
+Suggested GUT test to lock the fix:
+  In test_furniture_layout.gd or a new test_static_body_clearance.gd, for each pair
+  (KickerBody world AABB, LaneGuide world AABB), assert the AABB intersection volume is zero
+  (or less than an epsilon like 0.01). This is a pure geometry assertion that can be computed
+  from the committed TableConfig constants without running physics.
+
+LEAD FIX LANDED 2026-06-19 (polish pass): took option (a) - raised LANE_GUIDE_TOP_Z from
+FLIPPER_PIVOT_Z - 2.0 (18.0) to FLIPPER_PIVOT_Z - 1.0 (19.0), clearing the sling outer corner
+(18.32) by 0.68 (> BALL_RADIUS 0.6), more headroom than the suggested 18.35. Does not change shot
+geometry. Added test_slingshot_and_lane_guide_do_not_overlap to tests/test_furniture_layout.gd: it
+computes each body's world AABB from the LIVE instanced scene (global transform x box size over all
+8 rotated corners) and asserts the slingshot-vs-guide intersection volume is < 0.001 on both sides.
+table_viz.py LANE_GUIDE_TOP_Z now mirrors the new config formula. Awaiting CI green.
+
+---
+
+### BUG-025 [MEDIUM] Plunger face has sync_to_physics = true AND an explicit apply_central_impulse active simultaneously - ball can receive double the intended launch energy if Jolt executes both transfers
+
+Severity: MEDIUM - the design intent of the physical-launch slice was that the impulse would be
+the RELIABLE fallback for the unreliable sync_to_physics contact transfer (DESIGN.md and plunger.gd
+comments both say sync_to_physics "can be unreliable in Jolt"). The current code leaves
+sync_to_physics ON and adds the impulse ON TOP of it. In the common case (Jolt correctly resolves
+the sync_to_physics contact transfer), the ball receives both the contact impulse from the solver
+AND the explicit apply_central_impulse in _try_apply_launch_impulse(), giving approximately 2x the
+intended speed. At full power (PLUNGER_STROKE_SPEED_MAX = 78 u/s) the resulting ball speed could
+reach ~156 u/s, which is above KICK_MAX_OUTGOING_SPEED (120 u/s) and may exceed the CCD-safe
+validated envelope (the no-tunneling stress test runs at 2 * LAUNCH_SPEED_MAX = 180 u/s, so 156
+is inside the test band, but it is above every intended per-mechanism cap). In the uncommon case
+(Jolt sync_to_physics does NOT transfer momentum, the stated reason the impulse was added), only
+the impulse fires and the launch is correct.
+
+This is a latent behavior-under-physics-engine-version defect: the Jolt build variant or settings
+that determine whether AnimatableBody3D velocity bleeds into RigidBody3D contact may change across
+Godot upgrades. Today's behavior may differ from CI's Godot version's behavior.
+
+Found by QA code inspection 2026-06-19.
+
+Repro steps:
+1. Open /home/virus/pinball-game/scripts/plunger.gd.
+2. Line 118: _face.sync_to_physics = true  (sync is ON; face reports velocity to solver).
+3. Lines 341-347: _try_apply_launch_impulse() applies apply_central_impulse(up_table_world * ball.mass
+   * _stroke_speed) when is_touching() is true.
+4. On the first physics frame of the forward stroke (_stroke_state = FORWARD):
+   - The face has NOT yet moved this frame, so sync_to_physics velocity from the previous frame is 0.
+     The solver adds 0 contact energy. The impulse fires (is_touching is true, face didn't move yet).
+   - On subsequent forward frames (_impulse_applied = true blocks re-fire), sync_to_physics CAN
+     transfer energy to the ball if the ball is still in contact with the moving face.
+5. The net result depends on whether the ball separates from the face after the first-frame impulse.
+   If face speed (78 u/s) == impulse-imparted speed (78 u/s), they move at equal speed: the ball
+   rides the face and continues receiving sync_to_physics energy every frame until it separates.
+   The double-energy case is most likely at high stroke speeds with a heavy ball.
+
+Expected: the ball's outgoing speed equals PLUNGER_STROKE_SPEED_MAX * power_fraction (0 to 78 u/s),
+which the test suite asserts (LAUNCH_SPEED_MIN..LAUNCH_SPEED_MAX).
+
+Actual: the ball may reach approximately 2x PLUNGER_STROKE_SPEED_MAX under Jolt when
+sync_to_physics contact transfer is active, an excess that the existing test suite may not detect
+if the test's SETTLE_FRAMES of 120 bring the ball to a peak-then-slow trajectory rather than a
+peak speed snapshot. The tunneling test covers up to 180 u/s (2x LAUNCH_SPEED_MAX = 2*90) but does
+not distinguish a plunger-caused speed spike from an intentional stress-test input.
+
+Suspected file/line:
+- /home/virus/pinball-game/scripts/plunger.gd line 118: _face.sync_to_physics = true
+- /home/virus/pinball-game/scripts/plunger.gd lines 341-347: _try_apply_launch_impulse()
+
+Root cause:
+The physical-launch slice added the impulse as a "reliable alternative" to sync_to_physics without
+turning sync_to_physics off. The correct fix is one of:
+  (a) Disable sync_to_physics on the face (_face.sync_to_physics = false) and rely solely on the
+      impulse mechanism (the stated design intent per the architecture note). The face still blocks
+      the ball physically via its collision shape; it just doesn't report velocity to the solver.
+  (b) Remove the explicit apply_central_impulse and accept sync_to_physics as-is (reverts the
+      physical-launch fix rationale, not recommended).
+  (c) Guard _try_apply_launch_impulse with a Jolt sync check and only fire if the solver did NOT
+      transfer energy (impossible to query directly; option (a) is simpler and safer).
+Option (a) is preferred: sync_to_physics = false, impulse only.
+
+Suggested GUT test to lock the fix:
+  In test_plunger_launch.gd, add a peak-speed oracle: immediately after ball_launched emits,
+  read ball.current_speed() within 2 frames (before damping) and assert it is < LAUNCH_SPEED_MAX
+  * 1.1 (a 10% tolerance for physics step alignment). This catches a 2x energy spike (156 u/s >>
+  99 u/s cap) without being sensitive to normal launch variance. The existing test asserts
+  LAUNCH_SPEED_MIN..LAUNCH_SPEED_MAX on a post-settle position oracle, which does not directly
+  bound peak speed at the moment of launch.
+
+LEAD FIX LANDED 2026-06-19 (polish pass): took option (a) - set _face.sync_to_physics = false in
+scripts/plunger.gd._build_face so the launch momentum comes SOLELY from the explicit impulse (one
+mechanism, no double-count). The face is still a SOLID moving barrier (its collision shape blocks
+the ball and backs up the ball's CCD against backward tunneling); it just no longer reports velocity
+to the solver. Added test_full_strike_peak_speed_stays_under_double_energy_ceiling to
+tests/test_plunger_launch.gd: it fires a full-power strike and samples ball.current_speed() each of
+the first 12 frames (in the straight lane, before any arch bounce), asserting the PEAK stays under
+LAUNCH_SPEED_MAX * 1.1 = 99 (a correct single-impulse launch peaks ~78; a 2x stack would hit ~156).
+Awaiting CI green.
+
+---
+
+### BUG-026 [BLOCKING] Table-reshape slice is RED on the runner - the #1 fix (the launch) does not fire in CI
+
+Severity: BLOCKING - the slice's headline fix (make the plunger actually launch the ball) is proven
+FALSE by the runner. CI on the pushed sha is the source of truth and it is FAILURE.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20 against the runner artifact
+(NOT a doc claim): PR #10, CI run 27858434688, status FAILURE. Totals: 143 tests, 137 passing,
+6 FAILING, 942 asserts. The producer gate requires GREEN CI on the pushed sha; this is provably red.
+
+The 6 failing tests, all read off the runner log (independent oracle):
+1. test_plunger_launch.gd::test_strike_imparts_velocity_to_ball - ball speed 0.00006 (rest), not > 1.0.
+2. test_plunger_launch.gd::test_full_power_outthrows_weak_strike - full 0.000002 NOT > weak 0.00004.
+3. test_plunger_launch.gd::test_launched_ball_speed_lands_in_design_range - got 0.000016, need >= 30.
+4. test_plunger_launch.gd::test_max_strike_does_not_tunnel... - ball ends z=24.08 > start 23.0 (it
+   drifted DOWN-table to the pocket, was never thrown up-table; the strike did nothing 20x).
+5. test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain - a real ball at the
+   cradle (z=23.06) STILL drains (BUG-023 not actually fixed at runtime - see BUG-028).
+6. test_target_no_tunneling.gd::test_tunneling_check_matches_flat_wall_test_threshold - stale
+   POST_RADIUS (see BUG-027).
+
+ROOT CAUSE of the launch failures (the four plunger_launch reds), traced from geometry + the impulse
+gate in scripts/plunger.gd._try_apply_launch_impulse (line 335: only fires if _ball.is_touching(_face)):
+- BALL_START.z = HALF_LENGTH - 2.0 = 23.0; the ball is parked there, then under the 7-deg tilt it
+  rolls DOWN-table (+Z) and settles against the lane pocket (LANE_POCKET_FACE_Z = 24.5), measured at
+  z ~= 24.08 after SETTLE_FRAMES.
+- PLUNGER_REST_POS.z = BALL_START.z + BALL_RADIUS + PLUNGER_FACE_THICKNESS*0.5 = 23.0 + 0.6 + 0.4 =
+  24.0. The face is seated at 24.0, which is now UP-table of the settled ball at 24.08.
+- So at the moment of the strike the ball is resting against the POCKET, not against the FACE. The
+  face at 24.0 is on the wrong side of the ball; is_touching(_face) is FALSE; the impulse never fires;
+  the ball never moves. The whole impulse-on-contact mechanism is geometrically defeated by the ball
+  settling past the face.
+The design is sound (impulse gated on a real contact, independent-oracle correct) but the SEATING is
+wrong: the ball must come to rest CONTACTING the face (between the face and the pocket, touching the
+face), or the strike must not require a pre-existing contact (the forward stroke must catch up to and
+strike the drifting ball). Either way, today the launch is dead in CI exactly as the developer
+reported in the deployed build - the fix did not fix it.
+
+Fix direction (physics-programmer): make the resting ball physically touch the plunger face. Options:
+(a) seat the face just up-table of BALL_START so the ball, drifting down-table, rests AGAINST the
+    face (face down-table of the ball, ball trapped between face and... no - the ball drifts toward
+    the pocket, so the face must be DOWN-table of the ball's rest, i.e. between the ball and the
+    pocket, and the ball rests on it). Re-derive PLUNGER_REST_POS.z and/or BALL_START.z so the
+    settled ball is in continuous contact with the face (assert it: ball.is_touching(face) is TRUE
+    after SETTLE_FRAMES, a new structural-behavioral test).
+(b) drop the is_touching pre-gate and instead apply the impulse on the first frame the forward stroke
+    REGISTERS a fresh contact with the ball (drive the face into the ball even if it starts a hair
+    apart), so a ball resting anywhere ahead of the face is struck when the stroke reaches it.
+Add a test that asserts the settled ball touches the face (lock the seating), not only that a strike
+imparts speed (which masks WHY it failed).
+
+---
+
+### BUG-027 [HIGH] test_target_no_tunneling.gd POST_RADIUS is stale (1.5) after the resize to 2.0 - the resized-target stress gate is wrong AND red
+
+Severity: HIGH - this is the slice-item-5 stress gate ("no tunneling on the BIGGER target at >= 2x
+LAUNCH_SPEED_MAX"). The resize raised target.gd POST_RADIUS 1.5 -> 2.0, but this stress test still
+hardcodes 1.5, so it both FAILS CI and tests the wrong geometry.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20.
+
+Files:
+- /home/virus/pinball-game/scripts/target.gd:47  const POST_RADIUS: float = 2.0  (the resize)
+- /home/virus/pinball-game/tests/test_target_no_tunneling.gd:28  const POST_RADIUS: float = 1.5 (STALE)
+
+Evidence:
+1. git log 990644c..HEAD on tests/test_target_no_tunneling.gd is EMPTY: the slice resized the post
+   but NEVER updated this stress test. test_target_physical.gd WAS updated to 2.0 (line 33); this one
+   was missed.
+2. CI run 27858434688: test_tunneling_check_matches_flat_wall_test_threshold FAILS:
+   "[2.0] expected to equal [1.5]: test constant POST_RADIUS (1.500) does not match the actual
+   deflector radius (2.000)." The test's own maintenance guard caught it.
+3. The stress LOOP also uses the stale 1.5: tunnel_threshold = 1.5 + BALL_RADIUS*0.5 = 1.8, but the
+   real far face is at 2.0, so the loop's pass band is mis-calibrated for the body it fires at. The
+   gate that is supposed to prove the BIGGER post does not tunnel is not actually measuring the bigger
+   post correctly. Even when the consistency assert is fixed, the loop threshold must move to 2.0.
+
+Fix: set POST_RADIUS = 2.0 in test_target_no_tunneling.gd (matching target.gd and
+test_target_physical.gd). Better: read the radius from the live Deflector shape in before_each so the
+constant cannot drift again (the file already reads it in the consistency test - reuse that). Re-run
+the 100-iteration loop at 2x LAUNCH_SPEED_MAX against the 2.0 post and confirm green.
+
+---
+
+### BUG-028 [HIGH] BUG-023 "fix" satisfied the config arithmetic but the real ball still drains in the cradle
+
+Severity: HIGH - the BUG-023 fix (commit 73f8fc7) tuned DRAIN_Z/DRAIN_DEPTH so the CONFIG assert
+passes, but the BEHAVIORAL integration test still FAILS: a real ball seated at the cradle drains.
+The config oracle is a false comfort; the behavioral oracle is the truth and it is red.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20.
+
+Files:
+- /home/virus/pinball-game/scripts/config/table_config.gd (DRAIN_Z, DRAIN_DEPTH, FLIPPER_BAT_MAX_Z)
+- /home/virus/pinball-game/scripts/drain.gd (the drain Area3D volume)
+- /home/virus/pinball-game/tests/test_world_scale.gd::test_drain_up_table_edge_clears_the_flipper_bat_catch_zone (config assert - PASSES)
+- /home/virus/pinball-game/tests/test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain (behavioral - FAILS)
+
+Evidence (CI run 27858434688):
+1. test_drain_up_table_edge_clears_the_flipper_bat_catch_zone shows '*' (PASS): the arithmetic guard
+   DRAIN_Z - DRAIN_DEPTH/2 > FLIPPER_BAT_MAX_Z (23.66) is satisfied.
+2. test_ball_in_flipper_catch_zone_does_not_drain FAILS: "Expected Drain to NOT emit ball_drained:
+   a ball in the flipper catch zone (z=23.06) must NOT drain (QA BUG-023)" at line 206.
+3. So a REAL ball placed where a player cradles it (z=23.06, below the asserted clearance edge) still
+   enters the drain volume and fires ball_drained. The config math says the edge clears the bat MAX_Z
+   (23.66) but the ball at 23.06 is UP-table of that and STILL drains - meaning either the drain
+   volume in drain.gd is larger/positioned differently than the constants imply, or FLIPPER_BAT_MAX_Z
+   (23.66) under-states the real catch zone, or the ball settles into the volume from above.
+4. This is exactly why the QA backlog mandated TWO oracles for BUG-023 (a config assert AND a
+   behavioral integration test). The config assert alone would have shipped this as "fixed".
+
+Fix direction (lead/physics): make the BEHAVIORAL test green, not just the config assert. Either move
+the drain volume further down-table (raise DRAIN_Z and/or shrink DRAIN_DEPTH so the actual Area3D
+up-table edge sits below the real ball-rest at the cradle), or correct FLIPPER_BAT_MAX_Z to the true
+down-table extent of a cradled ball. Verify with the behavioral test, then re-confirm the center
+still drains (test_lane_pocket_drain center-X reaches the drain).
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
+- SLICE Table reshape: THE RUNNER IS RED. The slice HAS now been through CI (PR #10, run
+  27858434688 on the pushed sha) and it FAILED: 6 failing tests (see BUG-026/027/028). The producer
+  gate (GREEN CI on the pushed sha) CANNOT pass on this sha. Blockers to clear before re-review:
+  (1) BUG-026 - the launch does not fire (4 plunger_launch reds; the ball settles past the face so
+      is_touching is false and no impulse fires). This is the slice's #1 reason to exist; it is dead.
+  (2) BUG-028 - BUG-023 is NOT actually fixed at runtime (cradle still drains) despite the config
+      assert passing.
+  (3) BUG-027 - the resized-target stress gate has a stale POST_RADIUS (1.5 vs 2.0) and is red.
+  After fixes: re-confirm test_world_scale drain asserts AND test_table_integration cradle behavior,
+  test_lane_pocket_drain (center still drains, lane does not), test_plunger_launch (all behavioral +
+  stress green with a REAL launch), test_target_no_tunneling at the 2.0 post, and a full headless GUT
+  run GREEN ON THE RUNNER. Re-derive green from the runner artifact, never from a BACKLOG note.
 - SLICE core-interactions-physics: after BUG-012/013/015 fixes land, re-run the FULL GUT suite on
   the runner (not just the slice files) and confirm the pre-slice gates stay green: test_ball_tunneling.gd,
   test_flipper_momentum.gd, test_plunger.gd contract (the five tests that still pass), test_game_flow.gd,

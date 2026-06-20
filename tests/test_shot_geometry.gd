@@ -1,17 +1,31 @@
 extends GutTest
 ## Test matrix entry: CAD SHOT GEOMETRY (shots are geometrically MAKEABLE; kicks point INTO play).
 ## Owner: lead-programmer + qa-lead. Slice: "real pinball furniture".
+## Updated: slice "Table reshape + playtest fixes" (2026-06-19) - HALF_WIDTH 16 canary added.
+## All wall-clearance / makeable-window checks already use TableConfig expressions, so they
+## auto-follow the widen without literal changes. The canary below is the regression guard that
+## catches an accidental revert of the table_config.gd widen.
 ##
 ## WHY THIS EXISTS: DESIGN must-feel #5 "shots are geometrically makeable, validated not eyeballed",
 ## in the spirit of Mission Pinball's "use CAD to test/plan shots" (REFERENCES.md). The layout is
 ## validated DETERMINISTICALLY from the TableConfig constants, NOT by looking at the rendered PNG.
-## tools/table_viz.py PLOTS the same checks for the human; this GUT test ASSERTS them so CI fails if
-## a
-## bumper/sling kick aims at the drain or the standup bank sits outside flipper reach.
+## tools/table_viz.py PLOTS the same checks for the human; this GUT test ASSERTS them so CI fails
+## if a bumper/sling kick aims at the drain or the standup bank sits outside flipper reach.
 ##
-## These are pure geometry asserts on the contract constants (no physics bodies needed), so they are
-## fast and unambiguous. They are the independent oracle for "the layout is correct by
-## construction".
+## These are pure geometry asserts on the contract constants (no physics bodies needed); they are
+## fast and unambiguous. Independent oracle for "the layout is correct by construction".
+
+## WIDEN CANARY: catches a revert of the widen before any geometry check can rely on the new scale.
+func test_geometry_is_on_widened_table() -> void:
+	## The shot-geometry checks below use HALF_WIDTH/LANE_INNER_X expressions throughout.
+	## This canary asserts the concrete value so a stale revert to HALF_WIDTH=12 fails immediately
+	## rather than silently changing every clearance threshold.
+	assert_eq(
+		TableConfig.HALF_WIDTH, 16.0,
+		"geometry checks are calibrated for HALF_WIDTH=16; got %f (was the widen reverted?)"
+		% TableConfig.HALF_WIDTH
+	)
+
 
 ## The MAKEABLE WINDOW for a flipped ball, expressed as an up-table Z range. A ball leaving the
 ## flipper tip travels up-table under the launch impulse; a "makeable" standup target sits in the

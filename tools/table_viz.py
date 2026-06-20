@@ -49,8 +49,11 @@ FLIP_W = num("FLIPPER_WIDTH")
 FLIP_SPREAD = num("FLIPPER_PIVOT_SPREAD")
 FLIP_PIVOT_Z = HALF_L - 5.0
 REST = num("FLIPPER_REST_ANGLE")  # radians, magnitude used per-side
-DRAIN_Z = HALF_L - 1.0
 DRAIN_DEPTH = num("DRAIN_DEPTH")
+# DRAIN_Z is defined in TableConfig as FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH/2 so the
+# drain volume's up-table edge clears the flipper bat catch zone (QA BUG-023). Mirror that formula
+# here (the constants are bare literals the parser can read) rather than the old stale HALF_L - 1.0.
+DRAIN_Z = num("FLIPPER_BAT_MAX_Z") + num("DRAIN_BAT_CLEARANCE") + DRAIN_DEPTH / 2.0
 BALL_R = num("BALL_RADIUS")
 TILT = math.radians(num("TILT_DEG"))
 FLIP_UP = num("FLIPPER_UP_ANGLE")  # radians, magnitude per side
@@ -93,7 +96,9 @@ SLING_R_KICK = vec3_const("SLINGSHOT_RIGHT_KICK_DIR")
 # LANE_GUIDE_DIVIDER_X is defined as `HALF_WIDTH - 3.0` (an expression, not a bare literal), so we
 # mirror that formula here rather than parse a number. Same for the top/bottom Z below.
 LANE_GUIDE_X = HALF_W - 3.0
-LANE_GUIDE_TOP_Z = FLIP_PIVOT_Z - 2.0
+# LANE_GUIDE_TOP_Z raised from FLIP_PIVOT_Z - 2.0 to FLIP_PIVOT_Z - 1.0 so the guide divider clears
+# the slingshot KickerBody outer corner (QA BUG-024). Mirror the new config formula.
+LANE_GUIDE_TOP_Z = FLIP_PIVOT_Z - 1.0
 LANE_GUIDE_BOTTOM_Z = HALF_L - 2.0
 KICK_MIN = num("KICK_MIN_OUTGOING_SPEED")
 KICK_MAX = num("KICK_MAX_OUTGOING_SPEED")
@@ -103,10 +108,11 @@ bs = re.search(r"BALL_START:\s*Vector3\s*=\s*Vector3\(([^)]+)\)", CFG)
 _ns = {"BALL_RADIUS": BALL_R, "HALF_LENGTH": HALF_L, "HALF_WIDTH": HALF_W}
 BALL_START = [eval(p, {"__builtins__": {}}, _ns) for p in bs.group(1).split(",")]
 
-# Target positions from table.gd.
-targets = []
-for m in re.finditer(r"Vector3\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)", TABLE.split("TARGET_POSITIONS")[1].split("]")[0]):
-    targets.append((float(m.group(1)), float(m.group(3))))  # (x, z)
+# The legacy scattered TARGET_POSITIONS const was removed from table.gd (the 3 targets are now the
+# STANDUP_BANK_POSITIONS bank, parsed above). Keep an empty list so the legacy overlay loop below is
+# a no-op; the bank is drawn from STANDUP_BANK. (Parsing TARGET_POSITIONS here used to crash the tool
+# because the const no longer exists - SLICE "Table reshape" fix.)
+targets: list = []
 
 # Camera tunables from table.gd _build_presentation.
 def vec3(name: str, text: str):

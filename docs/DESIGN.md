@@ -280,6 +280,124 @@ this intent and validates them with table_viz:
   main). CI on the homelab godot runner is the source of truth for "green"; the producer must see
   GREEN CI on the pushed sha (the artifact, not a doc claim) before PASS.
 
+## Slice design intent: "Table reshape + playtest fixes" (gray-box, 2026-06-19)
+This slice is the FIRST one driven by real developer playtest feedback on the deployed homelab build,
+not by a feature plan. The developer played the current table and reported five concrete problems.
+This slice fixes all five in one pass. It adds NO new mechanics or element TYPES: it makes the launch
+actually work, gives the flippers their real shape, widens the table and re-spaces what is already
+there. Everything stays physics-based. The designer confirms the intent below. The physics-programmer
+owns launch correctness, the capsule collider, and the no-tunneling stress gate; the lead owns the
+world-scale rescale (HALF_WIDTH) and every dependent constant; the test-builder/QA own the independent-
+oracle suite. References: docs/REFERENCES.md (CAD shot-planning), docs/pinhead-tech-notes.md.
+
+### Why this slice matters (the core-loop stakes)
+At Gate 0 the question is "does one ball make the player want the next ball". Right now the answer is
+NO for a control reason, not a fun reason: the LAUNCH DOES NOT FIRE. A player who cannot get the ball
+into play never reaches the loop. That is the #1 fix; everything else is making the table the player
+DOES reach read and play like pinball (real flipper shape, a wider field with breathing room, gutters
+on both sides so a drain feels earned, targets/bumpers big enough to aim at). A clean launch is "the
+first small win of every ball" (core loop step 1); this slice is what makes that win real.
+
+### Player-facing goal (what the player should be able to do and feel)
+- LAUNCH FOR REAL. Hold to charge the oscillating meter, release, and the ball LEAVES THE LANE every
+  time. Release power maps to launch strength (weak dribbles, full clears the arch). The launch is the
+  reliable first beat of every ball; a dead plunger is a broken game.
+- FEEL THE FLIPPER SHAPE. The flippers look and collide like real flippers (fat at the pivot, tapering
+  to a rounded tip), so where on the bat the ball hits matters (tip shots vs base shots read
+  differently) and the bat reads instantly as a flipper, not a plank.
+- A TABLE WITH ROOM. The wider field gives the ball space to travel and the furniture room to breathe,
+  so shots are legible and the lower field is not cramped.
+- A DRAIN YOU EARN, EITHER SIDE. Both side gutters/outlanes read clearly as drain risks; losing the
+  ball down either side feels like the player's miss, never an invisible quirk.
+- TARGETS AND BUMPERS WORTH AIMING AT. The standup bank and the pop-bumper cluster are big enough and
+  spaced well enough on the wider table that a timed flip can actually pick them out and hit them.
+
+### Must-feel qualities (the bar the engineers hit, gray boxes only)
+1. THE PLUNGER ACTUALLY LAUNCHES, MONOTONICALLY. From a ball at rest in the lane, a release imparts
+   REAL velocity (more meter => faster ball, every time) and the resulting ball speed lands in
+   ~LAUNCH_SPEED_MIN..MAX so a weak launch dribbles and a full one clears the arch. A release with no
+   ball is a no-op. This is judged by the ball's MEASURED velocity, never by a fired-signal counter.
+2. THE FLIPPER IS A FLIPPER SHAPE, NO REGRESSION IN FEEL. The bat is a tapered rounded "stadium"
+   form (fatter at the pivot, smaller rounded tip) in BOTH the mesh and the collider. The existing
+   force/hinge/return-spring drive, the ~50 ms snap, the cradle, and "a full swing out-throws a tap"
+   all stay true, and the rubber rebound keeps >= 35% of incoming speed. Changing the shape must not
+   change the feel.
+3. THE WIDER TABLE STAYS IN PROPORTION. After widening, the inverted-V drain mouth is still a sane
+   ~1-ball-plus gap (not crossed, not a chasm), the lane reads as a lane, the arch still spans the
+   width and turns the ball over, and no furniture sits in a wall or off the field. Widening is a
+   RESCALE, not a stretch-one-number-and-hope.
+4. BOTH GUTTERS READ AS GUTTERS. Down EACH side, an outer outlane (feeds the drain = risk) and an
+   inner inlane (feeds back toward the flipper = save) are present and legible after the widen. A
+   player can see both sides are live.
+5. TARGETS/BUMPERS ARE BIGGER, BETTER SPACED, AND STILL MAKEABLE. The 3 standup targets and the 3 pop
+   bumpers are re-sized up and re-spaced for the wider field, and a flipper-tip sweep can still REACH
+   the standup bank and feed the bumper cluster (validated deterministically by table_viz, not
+   eyeballed).
+6. NOTHING TUNNELS, EVER. At the top ball speed the table produces (a full launch, a full flip, a
+   stacked kick - so >= ~2x LAUNCH_SPEED_MAX) the ball never passes through the plunger face, the
+   capsule flipper, a target, a pop bumper, a slingshot, a lane guide, a wall, or the arch. Hard gate
+   on the ball's REAL measured position/velocity, proven by GUT against real instanced bodies.
+
+### Design constraints the engineers must honor (do NOT re-litigate)
+- SCOPE: FIX, DO NOT ADD. Exactly the five reported fixes. NO new element types, ramps, modes,
+  multiball, multipliers, rollover scoring, art, or audio. Same element COUNTS (3 targets, 3 pop
+  bumpers, 2 slingshots, 2 lane-guide gutters, 2 flippers, 1 plunger) - only their shape, size,
+  spacing, and the table width change.
+- PRESERVE THE PLUNGER CONTRACT EXACTLY. Signals power_changed(power)/ball_launched; methods
+  arm/disarm/set_ball/is_armed; power stays 0..1; the oscillating meter and its power->launch-speed
+  mapping (PLUNGER_STROKE_SPEED_MIN..MAX -> LAUNCH_SPEED_MIN..MAX) are unchanged in CONTRACT. The
+  fix is INTERNAL: replace the unreliable sync_to_physics momentum transfer with a mechanism that
+  genuinely imparts velocity on the plunger-ball contact (an impulse on contact, a constant_linear_
+  velocity / reported velocity on the kinematic face, or move_and_collide), at the physics-
+  programmer's discretion. The plunger body stays visible and seated in the lane behind the ball.
+  Production launch must still come FROM the contact/impulse, not from a code velocity set on the ball
+  (test_plunger_launch.gd asserts this).
+- PRESERVE THE FLIPPER CONTRACT AND DRIVE. configure()/is_energized()/tip_speed()/force_energized()
+  unchanged. Keep BAT_MASS 0.40 / BAT_BOUNCE 0.70 (the rubber-rebound >= 35% retention) and the
+  force/hinge/return-spring drive. The new collider is a CapsuleShape3D or a convex hull that MATCHES
+  the visible tapered mesh (collider and mesh agree); both keep one end at the pivot and taper to the
+  tip, on the SAME handedness logic (_apply_handedness must still seat the bat toward center for both
+  sides). Material: black body + white rubber top surface (a 2-tone gray-box material only; the
+  kenney.nl CC0 art pass is LATER and must NOT block this slice).
+- WIDEN IS A WORLD-SCALE RESCALE. TableConfig.HALF_WIDTH 12.0 -> 16.0 (~33% wider). HALF_LENGTH stays
+  25.0 (widen only). The lead RE-DERIVES every X-dependent constant so proportions hold: LANE_INNER_X
+  / LANE_WIDTH, FLIPPER_PIVOT_SPREAD (keep the inverted V with a ~1-ball-plus drain gap, NOT crossed),
+  DRAIN_WIDTH / DRAIN_CENTER_X, ARCH_RADIUS_X (spans the new width), LANE_GUIDE_DIVIDER_X, the
+  slingshot/pop-bumper/standup X positions, and the lane-pocket/plunger lane math. WHY-comments on
+  every changed constant. Nothing may end up inside a wall, off the field, or crossing the centerline.
+- GUTTERS ON BOTH SIDES (VERIFY FIRST, THEN FIX). table_geometry._build_lane_guides already builds
+  LaneGuideLeft AND LaneGuideRight and test_furniture_layout asserts both, so the developer's
+  "only a left gutter" report is most likely a STALE CACHED BUILD. VERIFY both exist and read as
+  gutters after the widen; only if the right one is genuinely missing/weak, fix it. Do not invent a
+  new gutter system if the existing symmetric one is correct - confirm with table_viz + the layout
+  test on the rebuilt scene.
+- RESIZE/RESPACE, KEEP IT MAKEABLE. Bigger standup targets (raise the post/target size) and bigger
+  pop bumpers (POP_BUMPER_RADIUS up) and wider, sensible spacing across the new field
+  (STANDUP_BANK_POSITIONS, POP_BUMPER_POSITIONS). The standup bank MUST stay inside the flipper-tip
+  sweep window and the bumpers must stay clear of walls/arch - asserted by tools/table_viz.py +
+  tests/test_shot_geometry.gd, never by eyeballing the PNG.
+- VALIDATE SHOTS DETERMINISTICALLY (CAD discipline, Mission Pinball method). Use/extend
+  tools/table_viz.py to re-validate the NEW layout: flipper-tip reach to the resized targets/bumpers,
+  the lane feeds, the drain mouth, both gutter feed paths. The tool must EXIT NON-ZERO if a shot is
+  unmakeable or a kick aims at the drain on the new constants. The GUT twin (test_shot_geometry.gd)
+  is the CI source of truth.
+- INDEPENDENT-ORACLE TESTS (three classes, all required, "test the game like a web app").
+  STRUCTURAL: the flipper collider is a CAPSULE / convex hull (NOT a BoxShape3D); both gutters exist
+  on the correct layers at the new spacing; furniture is on the correct layers at the new positions;
+  the table width equals the new HALF_WIDTH. BEHAVIORAL: a plunger release imparts REAL measured
+  velocity to the ball and launches it (monotonic, in-range, no-ball is a no-op); rubber rebound
+  >= 35%; targets and bumpers kick AND score on contact. STRESS: no tunneling at >= ~2x
+  LAUNCH_SPEED_MAX on EVERY interaction. Update the existing furniture/layout/world-scale tests for
+  the new width. Real instanced bodies, measured position/velocity, never a self-reported counter.
+- PHYSICS NORTH-STAR: ball continuous_cd at 240 Hz; zero tunneling anywhere. The capsule flipper and
+  the widened/rescaled bodies must all hold the no-tunnel gate.
+- House style: typed GDScript, snake_case, document the WHY, no emojis, no em-dash characters; lines
+  <= 100 chars; gdlint clean.
+- DELIVERY: the team's Setup phase creates the slice branch. Build/QA agents COMMIT but do NOT push.
+  Deliver verifies GREEN locally (fetch headless Godot 4.x, run GUT) BEFORE pushing, then opens ONE
+  PR and confirms GREEN on the homelab runner. Do NOT touch main. The producer requires green CI on
+  the pushed sha to PASS; the human merges.
+
 ## Out of scope for v1 (the cut list - keep honest)
 v1 direction (producer + designer): ONE polished table before any others; defer extra worlds.
 
@@ -311,3 +429,19 @@ Why hold the line: the whole point of "representative" is to prove the FURNITURE
 kicks, rubber rebound, makeable shots) on a basic layout before committing art/scope to a full board.
 A complete commercial board with limp bumpers would be a worse outcome than three bumpers that truly
 fire the ball away. One great table first.
+
+### Cut from the "Table reshape + playtest fixes" slice (2026-06-19) - defended:
+The developer chose ONE big slice of FIVE concrete fixes. It is a fix/reshape pass, not a feature
+pass. Explicitly held OUT (creep that the five reported items could pull in):
+- NEW element types or counts: no new bumpers/targets/ramps/spinners/kickbacks/magnets. Same counts;
+  only shape/size/spacing/width change.
+- The kenney.nl CC0 ART pass: the developer pointed at it for LATER. This slice is gray-box materials
+  only (2-tone black-body/white-rubber flipper). Do NOT block on or pull in external art now.
+- HALF_LENGTH change / making the table longer: this is a WIDEN only (HALF_WIDTH 12 -> 16).
+- Re-tuning the launch FEEL numbers (speed range, meter sweep) or the flipper drive: the launch fix is
+  a MECHANISM swap behind the same contract/feel targets; the flipper change is a SHAPE swap behind the
+  same drive. Do not re-litigate the tuned constants while fixing the mechanism/shape.
+- Rollover scoring, lights, ball-save, modes, multiball - still deferred (v1 cut list stands).
+Why hold the line: the player cannot even launch the ball today. The win is making the EXISTING table
+launch, read, and play correctly - not adding more to a table that does not yet start. One great
+table first.

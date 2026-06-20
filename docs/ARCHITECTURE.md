@@ -460,3 +460,196 @@ SPLIT NOTE for active_kicker.gd (one file, two roles, kept DISJOINT by function)
 _on_body_entered + the cooldown + scored.emit (already written); physics owns _build_body + _apply_kick
 (the two clearly-marked TODOs). They are different functions; land the physics half on the same slice
 branch after confirming the gameplay half. Lead arbitrates if they collide.
+
+## 11. SLICE: Table reshape + playtest fixes (gray-box, 2026-06-19)
+
+FIRST playtest-driven slice: the developer played the deployed homelab build and reported FIVE
+concrete problems. This slice fixes all five in one pass. It adds NO new mechanics or element TYPES;
+it only changes shape, size, spacing, and the table WIDTH. Design intent: DESIGN.md "Slice design
+intent: Table reshape + playtest fixes". As before, the physics-programmer and gameplay-programmer
+fill DISJOINT files against the stable signatures here. Nothing re-litigates the scene structure
+(section 2), the four physics layers (section 3), or the input map (section 4) - all UNCHANGED.
+
+### 11.1 What stays the same (do not touch)
+- SCENE STRUCTURE (section 2): UNCHANGED. Same node tree, same element scenes, same wiring in
+  table.gd. The five fixes are shape/size/spacing/width changes WITHIN that tree, plus an internal
+  mechanism swap in the plunger and a shape swap in the flipper.
+- PHYSICS LAYERS + MASKS (section 3): UNCHANGED. NO new layer, NO mask edit. The capsule flipper
+  stays a RigidBody3D on KINEMATIC_OBSTACLES (exactly the box flipper's layer); the plunger face
+  stays an AnimatableBody3D on KINEMATIC_OBSTACLES; the widened walls/furniture stay STATIC_OBSTACLES
+  / Area3D detectors. So the flipper/ball tests CANNOT regress from a layer/mask change (there is
+  none). This is the shared-physics audit result for this slice: the only shared surface touched is
+  the world-scale CONTRACT (TableConfig X-constants), which is the lead's single edit.
+- INPUT MAP (section 4): UNCHANGED. No new actions; same left_flipper/right_flipper/launch/nudge.
+- THE PLUNGER PUBLIC CONTRACT: UNCHANGED byte-for-byte (power_changed/ball_launched; arm/disarm/
+  set_ball/is_armed; power 0..1; the oscillating meter + the power->stroke-speed mapping). The launch
+  FIX is INTERNAL: swap the unreliable sync_to_physics momentum transfer for one that genuinely
+  imparts velocity on the plunger-ball CONTACT. test_strike_at_power / face_position / is_stroking /
+  stroke_speed test hooks STAY.
+- THE FLIPPER PUBLIC CONTRACT + DRIVE: UNCHANGED. configure()/is_energized()/tip_speed()/
+  force_energized() stay; BAT_MASS 0.40 / BAT_BOUNCE 0.70 stay (the rubber-rebound >= 35% gate); the
+  force/hinge/return-spring drive, the ~50 ms snap, the cradle, and _apply_handedness stay. Only the
+  bat SHAPE (mesh AND collider) changes from a box to a tapered rounded stadium.
+- TARGET / ACTIVE-KICKER PUBLIC CONTRACTS: UNCHANGED. Only sizes/positions (TableConfig + the target
+  POST size) change.
+
+### 11.2 Fix 1 - LAUNCH (internal mechanism swap, plunger.gd) - PHYSICS
+ROOT CAUSE (code review): the plunger is a kinematic AnimatableBody3D that relies on
+sync_to_physics to shove the ball during its FORWARD stroke (plunger.gd _build_face sets
+sync_to_physics = true; _advance_stroke moves the face by setting .position). In Godot's built-in
+Jolt this transform-derived velocity often does NOT transfer to the resting ball, so the ball never
+moves - the deployed plunger is dead.
+FIX (physics-programmer's discretion, behind the EXACT contract): replace the unreliable transfer
+with a mechanism that genuinely imparts velocity ON THE CONTACT. Acceptable options (pick one,
+document the WHY):
+  (a) drive the kinematic face with a reported/constant_linear_velocity each forward frame
+      (AnimatableBody3D + set the body's reported linear velocity), so Jolt sees a moving body with
+      real velocity at the contact; OR
+  (b) move_and_collide the face and, on the reported collision with the ball, apply the contact
+      impulse the face's motion implies; OR
+  (c) detect the plunger-ball contact and apply_central_impulse to the ball sized from the stroke
+      speed (an impulse-on-contact - still a CONTACT event, not a free velocity set).
+HARD CONSTRAINTS the launch test (test_plunger_launch.gd) asserts and the physics-programmer honors:
+  - Production launch comes FROM the contact/impulse, NOT from a code velocity set on the ball
+    (ball.launch() stays demoted/unused in production - QA BUG-017).
+  - From rest, more meter => faster ball (monotonic); full strike >= 1.5x a weak one; resulting
+    ball speed lands ~LAUNCH_SPEED_MIN..MAX (the existing mapping/tuning is NOT re-litigated).
+  - A release with NO ball present is a no-op.
+  - A max strike never tunnels the face or the lane pocket (ball CCD + the cap stay safe).
+  - The plunger body stays VISIBLE and seated behind the ball at PLUNGER_REST_POS (now x=13.25 after
+    the widen - this auto-follows since PLUNGER_REST_POS.x is (LANE_INNER_X+HALF_WIDTH)*0.5).
+FILES: scripts/plunger.gd (internal mechanism), scripts/ball.gd (only if the chosen mechanism needs
+a material/CCD/contact-report touch), scripts/config/table_config.gd is LEAD-frozen after the widen
+(physics reads, does not edit).
+
+### 11.3 Fix 2 - CAPSULE FLIPPER (shape swap, flipper.gd) - PHYSICS
+Replace the BoxMesh/BoxShape3D bat with a tapered rounded "stadium" form (fatter at the pivot,
+smaller rounded tip) in BOTH the visible mesh AND the collision shape, with the collider and mesh
+AGREEING. Implementation at the physics-programmer's discretion within these constraints:
+  - COLLIDER: a CapsuleShape3D (laid along the bat's long X axis) OR a ConvexPolygonShape3D hull that
+    matches the visible tapered mesh. It must NOT be a BoxShape3D (the structural test asserts this).
+    A CapsuleShape3D is the simplest "stadium": rounded ends, constant radius - acceptable as the
+    gray-box shape. A taper (fat pivot -> thin tip) is the design intent; a convex hull or a
+    capsule-plus-taper-scale both satisfy it. Keep ONE end at the pivot and taper toward the tip, on
+    the SAME _apply_handedness logic (the bat must still extend toward center for both sides - the
+    offset sign in _apply_handedness must follow the new shape's long axis exactly as it does the box
+    half-length today).
+  - MESH: a matching capsule/tapered mesh (CapsuleMesh or a built mesh) so the collider and the
+    visible bat agree - "where on the bat the ball hits matters".
+  - MATERIAL: a 2-tone gray-box look - BLACK body + WHITE rubber TOP surface. Gray-box materials
+    only (StandardMaterial3D albedo); the kenney.nl CC0 art pass is LATER and must NOT block this
+    slice. The white "rubber top" is a visual cue for the rubber surface; the rubber FEEL stays
+    BAT_BOUNCE 0.70 (unchanged).
+  - PRESERVE: BAT_MASS 0.40, BAT_BOUNCE 0.70, the drive, the snap, the cradle, the hinge limits, and
+    every test hook. tip_speed() still reads |omega about the hinge axis| * FLIPPER_LENGTH (the lever
+    arm is the pivot-to-tip distance, unchanged by the shape).
+  - NO TUNNELING at >= 2x LAUNCH_SPEED_MAX (the bat keeps continuous_cd = true).
+FILE: scripts/flipper.gd ONLY.
+
+### 11.4 Fix 3 - WIDER TABLE (world-scale rescale, table_config.gd) - LEAD (DONE in this scaffold)
+HALF_WIDTH 12 -> 16 (~33% wider); HALF_LENGTH stays 25 (widen only). The lead RE-DERIVED every
+X-dependent constant with a WHY-comment. Summary of the rescale (the code in table_config.gd is the
+source of truth):
+  - HALF_WIDTH 12 -> 16. ARCH_RADIUS_X = HALF_WIDTH auto-follows (spans the new width). DRAIN_WIDTH /
+    DRAIN_CENTER_X are HALF_WIDTH/LANE_INNER_X expressions, auto-follow. The perimeter/surface in
+    table_geometry.gd are all HALF_WIDTH expressions, auto-follow.
+  - LANE_INNER_X 8 -> 10.5 (lane width 4 -> 5.5, kept proportional). LANE_WIDTH, PLUNGER_FACE_WIDTH
+    (LANE_WIDTH-0.6), PLUNGER_REST_POS.x ((LANE_INNER_X+HALF_WIDTH)*0.5 = 13.25), lane-pocket width
+    all auto-follow. BALL_START.x re-derived to the lane center 13.25 (was a stale literal 10.0).
+  - FLIPPER_PIVOT_SPREAD 7.0 -> 7.2: the drain mouth is held at ~2.46 units (~2 ball diameters, NOT
+    a chasm) by NOT scaling the gap with the width; the pivots move out just enough to deliver that
+    mouth while nudging the flippers outward on the wider field. Verified: gap = 2*7.2 - 11.94 = 2.46.
+  - LANE_GUIDE_DIVIDER_X = HALF_WIDTH - 3.0 (auto to 13.0): holds the OUTLANE at ~3.0 units while the
+    INLANE widens to ~5.8 with the table (both gutters per side; fix 4).
+  - Furniture X (the hardcoded arrays): POP_BUMPER_POSITIONS +/-4.5 -> +/-6.0; SLINGSHOT_*_POS
+    +/-8.5 -> +/-10.5 (outboard of the new pivots); STANDUP_BANK_POSITIONS +/-3.0 -> +/-4.5.
+  - RESIZE (fix 5): POP_BUMPER_RADIUS 1.6 -> 2.0.
+Re-validated DETERMINISTICALLY by tools/table_viz.py validate_layout() (PASSES on the new constants;
+FAILS on a deliberately-broken one - verified) and by test_world_scale.gd / test_furniture_layout.gd
+/ test_shot_geometry.gd (the GUT source of truth; the test-builder updates the width-dependent
+asserts). Nothing ends in a wall, off-field, or across the centerline.
+FILES: scripts/config/table_config.gd (DONE), scripts/table_geometry.gd (already all-expressions, no
+literal X to change - verified).
+
+### 11.5 Fix 4 - GUTTERS BOTH SIDES (verify, table_geometry.gd) - LEAD/QA
+table_geometry._build_lane_guides ALREADY builds LaneGuideLeft AND LaneGuideRight symmetrically
+(a for-loop over sign [-1, 1]) on STATIC_OBSTACLES, and test_furniture_layout asserts both. The
+developer's "only a left gutter" is almost certainly a STALE CACHED BUILD. After the widen both
+guides auto-follow LANE_GUIDE_DIVIDER_X (= 13.0). DELIVERABLE: VERIFY both build and read as
+outlane/inlane gutters on the rebuilt scene (test_furniture_layout green + table_viz feed-path plot
+shows both); only fix the right one if it is genuinely missing/weak. No new gutter system.
+FILE: scripts/table_geometry.gd (verify; edit only if a real defect is found).
+
+### 11.6 Fix 5 - RESIZE + RESPACE TARGETS AND BUMPERS - GAMEPLAY + PHYSICS
+The TableConfig half is DONE (POP_BUMPER_RADIUS 2.0; +/-6.0 bumpers; +/-4.5 standup bank). The
+remaining half:
+  - GAMEPLAY: raise the standup target POST size in scripts/target.gd (POST_RADIUS up, e.g. 1.5 ->
+    ~2.0, and keep the detector shell = POST_RADIUS + BALL_RADIUS). Bigger target reads as
+    aim-able; keep it inside the makeable window (test_shot_geometry). table.gd already re-homes the
+    targets to STANDUP_BANK_POSITIONS (no table.gd edit needed).
+  - PHYSICS: confirm the bigger pop bumper / target bodies still hold the no-tunnel gate at >= 2x
+    LAUNCH_SPEED_MAX (a bigger static body is EASIER not to tunnel, but assert it).
+FILES: scripts/target.gd (gameplay: POST_RADIUS), scripts/config/table_config.gd (LEAD-frozen;
+already resized), scripts/table.gd (no edit - reads the constants).
+
+### 11.7 Test matrix for this slice (extends sections 7 / 9.6 / 10.5; CI is the source of truth)
+
+| File | Class | Proves | Owner |
+|------|-------|--------|-------|
+| test_flipper_shape.gd (NEW) | structural | the flipper collider is a CapsuleShape3D or ConvexPolygonShape3D, NOT a BoxShape3D; the mesh is a matching non-box mesh; bat carries the rubber PhysicsMaterial (bounce 0.70) | physics + test-builder |
+| test_plunger_launch.gd (UPDATE) | behavioral+stress | from rest a release imparts REAL measured velocity (no ball.launch()); monotonic (full >= 1.5x weak); speed ~LAUNCH_SPEED_MIN..MAX; no-ball is a no-op; max strike never tunnels the face/pocket. Re-confirm against the NEW launch mechanism + the widened lane (x=13.25). | physics + test-builder |
+| test_plunger.gd (VERIFY) | contract | the unchanged plunger contract + stroke_speed mapping stay green | gameplay |
+| test_flipper_momentum.gd (VERIFY) | regression | full swing out-throws a tap; ~50 ms snap - green after the shape swap (drive unchanged) | physics |
+| test_flipper_rubber.gd (VERIFY) | regression | rubber rebound >= 35% off the resting face - green with the capsule shape (the _face_normal helper reads the LIVE bat basis, so it tracks the new shape's long axis) | physics |
+| test_world_scale.gd (UPDATE) | structural | the scale asserts pass at HALF_WIDTH 16: BALL_START in the new lane; flipper gap > 0; the existing internal-consistency checks | test-builder |
+| test_furniture_layout.gd (UPDATE/VERIFY) | structural integration | the REAL Table.tscn instances bumpers/slings/standup-bank on the right layers at the NEW positions; BOTH LaneGuideLeft AND LaneGuideRight present on STATIC_OBSTACLES (fix 4) | test-builder + qa |
+| test_shot_geometry.gd (VERIFY/UPDATE) | geometry | standup bank inside the makeable window and bumpers clear of walls on the NEW constants; sling kicks never aim at the drain; kick bounds in the CCD-safe band | lead + qa |
+| test_pop_bumper.gd / test_slingshot.gd (VERIFY) | behavioral | kick + score on contact still hold at the new sizes/positions | physics + gameplay |
+| test_active_kicker_no_tunneling.gd (VERIFY) | stress | no tunneling through the bigger bumper/sling bodies at >= 2x LAUNCH_SPEED_MAX | physics + qa |
+| test_ball_tunneling.gd (VERIFY) | regression | the flat-wall headline gate stays green at the new width | physics |
+| test_scene_structure.gd / test_table_integration.gd (VERIFY) | render/integration | the real scene still builds + frames at the new width (the framer is HALF_WIDTH-driven, auto-follows) | test-builder |
+
+INDEPENDENT-ORACLE RULE (hard, unchanged): every physics assertion reads the BALL's measured
+position or current_speed()/linear_velocity, never a self-reported counter. A green suite that asserts
+only node existence (no measured launch velocity / no measured rebound / no measured non-box shape)
+is a FAIL ("test the game like a web app": structural AND behavioral AND stress).
+
+### 11.8 File ownership for THIS slice (DISJOINT - no two coders edit the same lines)
+Read-only CONTRACT files (lead-owned; FROZEN after this scaffold):
+- scripts/config/table_config.gd  the WIDEN rescale (DONE: HALF_WIDTH 16 + every X-derivation +
+  the furniture resize/respace). No further edits; physics/gameplay READ it. Frozen.
+- scripts/config/physics_layers.gd  NO CHANGE (frozen).
+
+Lead-programmer (architecture + the rescale + static geometry verify + the CAD tool + this doc):
+- scripts/config/table_config.gd  the widen (DONE).
+- scripts/table_geometry.gd  VERIFY both gutters build at the new width (all-expression geometry,
+  no literal X to change - confirmed; edit only if a real defect surfaces).
+- tools/table_viz.py  fixed the stale TARGET_POSITIONS parse + re-validated the new layout (DONE).
+- scripts/table.gd  NO edit expected (it reads the constants; the framer is HALF_WIDTH-driven).
+- docs/ARCHITECTURE.md (this section), docs/BACKLOG.md slice tasks.
+
+Physics-programmer (the launch mechanism + the capsule shape + every no-tunnel guarantee):
+- scripts/plunger.gd  INTERNAL: swap the launch mechanism (11.2) behind the unchanged contract.
+- scripts/flipper.gd  the capsule/convex SHAPE swap + the 2-tone material (11.3). Drive unchanged.
+- scripts/ball.gd  ONLY if the chosen launch mechanism needs a contact-report/material/CCD touch.
+- scripts/target.gd  ONLY the no-tunnel re-confirm on the bigger post (the POST_RADIUS bump is
+  gameplay's, below - keep the two halves disjoint by function as in 9.7).
+- Owns: test_flipper_shape.gd physics asserts, test_plunger_launch.gd, the flipper + tunneling
+  regression re-runs.
+
+Gameplay-programmer (sizes/positions behind the unchanged contracts):
+- scripts/target.gd  raise POST_RADIUS (and keep the detector shell = POST_RADIUS + BALL_RADIUS)
+  for the bigger standup target (11.6). PUBLIC contract unchanged.
+- scripts/plunger.gd  re-verify the public contract after the physics mechanism swap (do NOT touch
+  the mechanism). game_flow.gd, hud.gd, drain.gd, active_kicker.gd UNCHANGED.
+- Owns: test_plunger.gd verify, the behavioral score asserts in test_pop_bumper/test_slingshot.
+
+  SPLIT NOTE for target.gd (one file, two roles, kept DISJOINT by function): gameplay owns the
+  POST_RADIUS / detector / _on_body_entered half; physics owns _build_deflector + the no-trap/no-
+  tunnel guarantee. Land the gameplay POST_RADIUS bump first, then the physics no-tunnel re-confirm,
+  on the same slice branch in sequence. Lead arbitrates if they collide.
+
+Test-builder + qa-lead:
+- tests/*.gd  the ONE new file (test_flipper_shape.gd) + the width/furniture UPDATES + the VERIFY
+  re-runs. Update the width-dependent asserts in test_world_scale / test_furniture_layout /
+  test_shot_geometry for HALF_WIDTH 16. addons/gut already vendored.

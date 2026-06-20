@@ -44,11 +44,12 @@ func _ready() -> void:
 	add_child(col)
 
 	# Position the Area3D at the drain centre in local (playfield) space.
-	# DRAIN_Z is HALF_LENGTH - 1.0: below the flipper pivot row (FLIPPER_PIVOT_Z = 20) but INSIDE the
-	# open playfield bottom edge (HALF_LENGTH = 25), so a ball past the flippers drains before reaching
-	# the open bottom (no naive bottom wall can block it - QA BUG-004). X is the open-center midpoint
-	# DRAIN_CENTER_X (NOT 0), so the volume covers the center mouth and stops short of the launch lane
-	# (QA B3). Y = 0 (on the playfield surface).
+	# DRAIN_Z is placed (TableConfig) so the volume's UP-TABLE edge clears the flipper bat catch zone
+	# (FLIPPER_BAT_MAX_Z) - the drain is the gap BELOW the flippers, not over them, so it cannot
+	# swallow a ball the player is about to cradle/flip (QA BUG-023) - while a ball that gets past the
+	# flippers still drains before reaching the open bottom (no naive bottom wall can block it - QA
+	# BUG-004). X is the open-center midpoint DRAIN_CENTER_X (NOT 0), so the volume covers the center
+	# mouth and stops short of the launch lane (QA B3). Y = 0 (on the playfield surface).
 	position = Vector3(TableConfig.DRAIN_CENTER_X, 0.0, TableConfig.DRAIN_Z)
 
 	# Connect the body-entered signal. Using Callable so the connection is explicit and

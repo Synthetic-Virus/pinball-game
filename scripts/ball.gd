@@ -18,7 +18,7 @@ extends RigidBody3D
 ## NOT a launch path any more (QA BUG-017): launch(direction, speed) below is RETAINED only as a
 ## low-level velocity helper for diagnostics/future tooling. After the physics-based-interactions
 ## slice, NO production code calls it: the ball is launched by the PHYSICAL plunger strike (the
-## AnimatableBody3D face in scripts/plunger.gd colliding with the resting ball), never by setting the
+## AnimatableBody3D face in scripts/plunger.gd striking the resting ball), never by setting the
 ## ball's velocity in code. Do NOT re-wire the plunger to call this; that would reintroduce the fake
 ## non-physics launch the slice deliberately removed.
 
@@ -31,7 +31,7 @@ const LINEAR_DAMP: float = 0.05
 ## enough that it still rolls. Pinballs scrub spin against the playfield felt; this approximates it.
 const ANGULAR_DAMP: float = 0.6
 
-## A cradled ball must be allowed to fall asleep so it sits still in a flipper cradle without jitter,
+## A cradled ball must be allowed to fall asleep so it sits still in a flipper cradle (no jitter),
 ## but Jolt's sleep threshold (project.godot jolt_3d/sleep/velocity_threshold) is already very low,
 ## so sleeping never swallows a real movement. We force the ball AWAKE on every reset/launch so a
 ## new or relaunched ball never starts asleep (a stuck-asleep ball at launch would be a dead ball).
@@ -50,6 +50,15 @@ func _ready() -> void:
 	# --- Collision routing (named layers, never raw bits). ----------------------------------------
 	collision_layer = PhysicsLayers.BALLS
 	collision_mask = PhysicsLayers.BALL_COLLISION_MASK
+
+	# --- Contact reporting (needed by the physical plunger's impulse-on-contact launch). ----------
+	# The plunger (scripts/plunger.gd) confirms its face is actually TOUCHING the ball before it
+	# applies the launch impulse, so a release with no seated ball is a no-op (ARCHITECTURE.md 11.2).
+	# That confirmation reads this body's reported contacts (is_touching() below), so we must enable
+	# the contact monitor and reserve a few contact slots. WHY a small number: a ball realistically
+	# touches at most a couple of bodies at once (a wall + the face); 8 is ample headroom and cheap.
+	contact_monitor = true
+	max_contacts_reported = 8
 
 	# --- Mass and damping from the world-scale contract. ------------------------------------------
 	mass = TableConfig.BALL_MASS
@@ -116,8 +125,8 @@ func reset_to(pos: Vector3) -> void:
 	sleeping = false
 
 
-## Low-level helper: set a velocity along a unit direction at a given speed. NOT called by production
-## code after the physics-based-interactions slice (the physical plunger strike launches the ball by
+## Low-level helper: set a velocity along a unit direction at a given speed. NOT called by
+## production code after the physics-interactions slice (the physical plunger strike launches by
 ## collision now - see the class header / QA BUG-017). Retained as a deterministic velocity setter
 ## for diagnostics and possible future tooling; do NOT re-wire the plunger to call it.
 func launch(direction: Vector3, speed: float) -> void:
@@ -132,3 +141,17 @@ func launch(direction: Vector3, speed: float) -> void:
 ## Current scalar speed. STABLE SIGNATURE - the tunneling test reads this.
 func current_speed() -> float:
 	return linear_velocity.length()
+
+
+## True if the given body is currently a reported physics contact of this ball. Used by the physical
+## plunger to confirm its face is TOUCHING the ball before applying the launch impulse, so a launch
+## with no seated ball (or a ball that already left the face) is a no-op (ARCHITECTURE.md 11.2).
+## Requires contact_monitor = true (set in _ready). Reads get_colliding_bodies(), the engine's real
+## contact list, so it is an independent oracle (the contact physically exists or it does not).
+func is_touching(body: Node) -> bool:
+	if body == null:
+		return false
+	for other in get_colliding_bodies():
+		if other == body:
+			return true
+	return false

@@ -204,11 +204,18 @@ static func _build_lane_guides(parent: Node3D) -> void:
 	var center_z: float = (top_z + bottom_z) * 0.5
 	var layer: int = PhysicsLayers.STATIC_OBSTACLES
 
-	# One divider per side. The left divider sits at -LANE_GUIDE_DIVIDER_X, the right at +X (mirror).
-	# A simple vertical wall (thin in X, long in Z) is enough to separate the two lanes; the outer/
-	# inner distinction is purely which side of it the ball travels down.
+	# One divider per side. The LEFT divider sits at -LANE_GUIDE_DIVIDER_X (open left field). The
+	# RIGHT divider is ASYMMETRIC: it sits at +LANE_GUIDE_RIGHT_DIVIDER_X, INBOARD of the launch lane,
+	# because the launch lane occupies the whole right edge after the WIDEN. A symmetric right guide at
+	# +13.0 landed inside the lane across the ball's spawn/launch path and pinned the ball so it could
+	# not be launched (see TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X). A simple vertical wall (thin in X,
+	# long in Z) is enough to separate the outer (outlane) and inner (inlane) channels on each side.
+	var divider_x_by_side := {
+		-1.0: -TableConfig.LANE_GUIDE_DIVIDER_X,        ## Left: open field, symmetric placement.
+		1.0: TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X,    ## Right: inboard of the launch lane.
+	}
 	for sign: float in [-1.0, 1.0]:
-		var divider_x: float = TableConfig.LANE_GUIDE_DIVIDER_X * sign
+		var divider_x: float = divider_x_by_side[sign]
 		var guide_name: String = "LaneGuideLeft" if sign < 0.0 else "LaneGuideRight"
 		_make_box_body(
 			parent,

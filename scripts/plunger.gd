@@ -12,6 +12,19 @@ extends Node3D
 ## (local -Z) at a stroke speed mapped from the power meter; the moving face collides with the ball
 ## and throws it. No code ever sets the ball's velocity now - the contact does, like a real plunger.
 ##
+## LAUNCH MECHANISM FIX (SLICE "Table reshape + playtest fixes", 2026-06-19, ARCHITECTURE.md 11.2):
+## ROOT CAUSE of the dead plunger in the deployed build: the face relied on sync_to_physics to shove
+## the resting ball during its forward stroke. In Godot's built-in Jolt that transform-derived
+## velocity does NOT reliably transfer to a resting (or sleeping) body in contact, so the ball never
+## moved. FIX (option (c) in 11.2 - an IMPULSE ON CONTACT): we keep the physical face stroking
+## forward (it is the CCD-safe solid barrier that also stops the ball tunnelling backward), and on
+## the forward stroke we apply a central IMPULSE to the ball SIZED from the stroke speed, but ONLY
+## once we have CONFIRMED the face is actually TOUCHING the ball (the ball's own contact monitor
+## reports the PlungerFace as a contact). This is a genuine CONTACT event, not a free velocity set:
+## no contact => no launch (a release with no ball, or a ball not seated against the face, does
+## nothing). We never call ball.launch() (QA BUG-017 stays honored). The impulse is the
+## deterministic momentum transfer Jolt's animated-body contact does not give us for free.
+##
 ## FEEL TARGET (DESIGN.md "LAUNCH SKILL"): the meter sweeps fast enough to matter, slow enough to
 ## aim - a full 0..1..0 sweep on the order of 0.5-1.0 s. Released power visibly maps to launch
 ## strength (the resulting ball speed lands in TableConfig.LAUNCH_SPEED_MIN..MAX). Polled each
@@ -24,10 +37,11 @@ extends Node3D
 ##
 ## STROKE MODEL: on release we latch a target stroke speed (from power) and a stroke direction
 ## (up-table), then in _physics_process we move the AnimatableBody3D face forward at that speed each
-## frame until it has travelled PLUNGER_STROKE_LENGTH, then drive it back to rest. AnimatableBody3D
-## with sync_to_physics reports its transform-derived velocity to the solver, so the moving face
-## imparts momentum to the ball on contact. ball_launched fires the moment the stroke begins (the
-## player has committed the launch), matching the old contract timing.
+## frame until it has travelled PLUNGER_STROKE_LENGTH, then drive it back to rest. While the face is
+## stroking forward AND is confirmed in contact with the ball, we apply ONE central impulse to the
+## ball (sized from the stroke speed) so the launch momentum comes from that contact (see the LAUNCH
+## MECHANISM FIX note above; the old sync_to_physics transfer was unreliable in Jolt). The signal
+## ball_launched fires the moment the stroke begins (the player committed the launch), as before.
 ##
 ## STATE: the plunger is only active when ARMED (a fresh ball is waiting in the lane). GameFlow arms
 ## it via arm(); a release fires the stroke, disarms, and emits ball_launched.
@@ -75,6 +89,10 @@ var _stroke_state: int = StrokeState.IDLE
 var _stroke_speed: float = 0.0
 ## How far the face has travelled up-table from rest this stroke (world units).
 var _stroke_travelled: float = 0.0
+## Whether the launch impulse has already been delivered this stroke. The impulse fires EXACTLY ONCE
+## per forward stroke, the first frame the face is confirmed in contact with the ball, so a long
+## stroke cannot pump the ball repeatedly (no machine-gun launch). Reset at the start of a stroke.
+var _impulse_applied: bool = false
 
 
 func _ready() -> void:
@@ -94,10 +112,17 @@ func _build_face() -> void:
 	# KINEMATIC_OBSTACLES, mask = balls only: it pushes the ball, nothing else (matches flippers).
 	_face.collision_layer = PhysicsLayers.KINEMATIC_OBSTACLES
 	_face.collision_mask = PhysicsLayers.KINEMATIC_COLLISION_MASK
-	# sync_to_physics: derive the body's velocity from its per-frame transform change and report it to
-	# the solver, so a scripted move actually imparts momentum to the ball on contact (the whole point
-	# of a PHYSICAL plunger). Without this the face would teleport and the ball would feel a teleport.
-	_face.sync_to_physics = true
+	# sync_to_physics is deliberately OFF (QA BUG-025). The launch momentum comes SOLELY from the
+	# explicit impulse in _try_apply_launch_impulse (the reliable mechanism this slice adopted because
+	# Jolt's animated-body contact transfer is unreliable - see the LAUNCH MECHANISM FIX note above).
+	# Leaving sync_to_physics ON would ADD the solver's contact-velocity transfer ON TOP of that
+	# impulse whenever Jolt DOES resolve the contact, double-counting the launch energy: at full power
+	# the ball could leave at ~2x PLUNGER_STROKE_SPEED_MAX (~156 u/s), above every per-mechanism cap
+	# (KICK_MAX_OUTGOING_SPEED 120) and outside the intended LAUNCH_SPEED_MIN..MAX band. With sync OFF
+	# the face is still a SOLID moving barrier (its collision shape blocks the ball and backs up the
+	# ball's CCD so the struck ball cannot tunnel backward); it simply does not report velocity to the
+	# solver, so the impulse is the one and only momentum source. ONE mechanism, no double-count.
+	_face.sync_to_physics = false
 
 	# Low bounce, some friction: a clean momentum transfer, not a trampoline (mirrors the steel ball).
 	var material := PhysicsMaterial.new()
@@ -217,8 +242,10 @@ func _do_launch() -> void:
 		TableConfig.PLUNGER_STROKE_SPEED_MAX,
 		clamped_power
 	)
-	# Begin the forward stroke. _advance_stroke() drives the face from _physics_process each frame.
+	# Begin the forward stroke. _advance_stroke() drives the face from _physics_process each frame and
+	# delivers the launch impulse once the face is confirmed touching the ball.
 	_stroke_travelled = 0.0
+	_impulse_applied = false
 	_stroke_state = StrokeState.FORWARD
 
 	# Wake the ball if it has fallen asleep resting against the face, so the moving face's contact is
@@ -244,9 +271,10 @@ func _do_launch() -> void:
 
 ## Drive the AnimatableBody3D face one physics frame of its stroke. Called from _physics_process
 ## while a stroke is active. FORWARD moves the face up-table (-Z) at _stroke_speed until it has
-## travelled PLUNGER_STROKE_LENGTH, striking the ball on the way; RETURN moves it back to rest.
-## Movement is by setting the body transform: with sync_to_physics the resulting velocity is what
-## strikes the ball, so the ball's momentum comes from this motion, never from a coded velocity set.
+## travelled PLUNGER_STROKE_LENGTH; on the first forward frame the face is confirmed TOUCHING the
+## ball, it delivers the launch impulse (see _try_apply_launch_impulse). RETURN drives it to rest.
+## The moving face also remains a solid physical barrier (KINEMATIC_OBSTACLES + the ball's CCD), so
+## the struck ball cannot tunnel backward through the plunger.
 func _advance_stroke(delta: float) -> void:
 	if _face == null:
 		_stroke_state = StrokeState.IDLE
@@ -257,6 +285,10 @@ func _advance_stroke(delta: float) -> void:
 	var up_table: Vector3 = TableConfig.up_table_local()
 
 	if _stroke_state == StrokeState.FORWARD:
+		# Deliver the launch impulse on the contact (once per stroke), BEFORE moving the face this
+		# frame: the ball starts seated against the face, so the contact is already present on frame 1.
+		_try_apply_launch_impulse(up_table)
+
 		var step: float = _stroke_speed * delta
 		# Do not overshoot the full stroke length in the final frame.
 		var remaining: float = TableConfig.PLUNGER_STROKE_LENGTH - _stroke_travelled
@@ -276,6 +308,45 @@ func _advance_stroke(delta: float) -> void:
 			_stroke_state = StrokeState.IDLE
 		else:
 			_face.position += to_rest.normalized() * step
+
+
+## Apply the launch impulse to the ball ONCE per forward stroke, the first frame the face is
+## confirmed TOUCHING the ball. This is the launch (ARCHITECTURE.md 11.2 option (c)): the momentum
+## comes from a physics impulse gated on the real contact, NOT from a velocity set on the ball
+## (ball.launch() stays unused - QA BUG-017) and NOT from the unreliable sync_to_physics transfer
+## that left the deployed plunger dead.
+##
+## SIZING: the ball starts at rest, so an impulse of mass * target_speed leaves it moving at
+## target_speed. We target the ball speed = _stroke_speed (a head-on strike of a low-restitution
+## steel ball leaves at ~the face speed), preserving the existing power -> ball-speed mapping
+## (PLUNGER_STROKE_SPEED_MIN..MAX -> ~LAUNCH_SPEED_MIN..MAX). Direction is up-table (the stroke
+## direction), so the launch is straight up the lane into the arch.
+##
+## NO-CONTACT IS A NO-OP: if there is no ball, or the ball is not seated against the face (e.g. a
+## release with the ball already gone), is_touching() is false and no impulse is applied - exactly
+## the "a release with no ball does nothing" contract.
+func _try_apply_launch_impulse(up_table: Vector3) -> void:
+	if _impulse_applied:
+		return
+	if _ball == null or _face == null:
+		return
+	# Confirm a REAL physics contact between the ball and this plunger face (independent oracle: the
+	# contact physically exists or it does not). Requires the ball's contact_monitor (ball.gd._ready).
+	if not _ball.has_method("is_touching") or not _ball.is_touching(_face):
+		return
+
+	# Wake the ball so the impulse takes effect this step (a cradled ball may have slept).
+	_ball.sleeping = false
+	# apply_central_impulse expects a WORLD-space vector, but up_table is a PLAYFIELD-LOCAL direction
+	# (0,0,-1). The playfield is tilted TILT_DEG about X, so we must rotate the local up-table axis
+	# into world space through this node's global basis (the Plunger sits at the playfield origin with
+	# no local rotation, so its global basis IS the tilted playfield's basis). Without this the impulse
+	# would point along world -Z and ignore the tilt, nudging the ball into/out of the surface.
+	var up_table_world: Vector3 = (global_transform.basis * up_table).normalized()
+	# impulse = mass * desired_velocity_change; from rest this yields a launch speed of _stroke_speed.
+	var impulse: Vector3 = up_table_world * (_ball.mass * _stroke_speed)
+	_ball.apply_central_impulse(impulse)
+	_impulse_applied = true
 
 
 ## TEST HOOK (headless GUT cannot hold a key across physics frames, mirroring the flipper hook).

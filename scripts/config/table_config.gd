@@ -37,15 +37,30 @@ const BALL_FRICTION: float = 0.4
 ## The play area is an upright rectangle on the tilted plane. Local coords on the playfield node:
 ##   +X = right, -X = left, -Z = up-table (toward the arch), +Z = down-table (toward the drain).
 ## HALF_WIDTH/HALF_LENGTH are measured from playfield center to the inner wall faces.
-const HALF_WIDTH: float = 12.0      ## => 24 units wide.
-const HALF_LENGTH: float = 25.0     ## => 50 units long (tens of units, per the brief).
+## WIDEN (SLICE "Table reshape + playtest fixes", 2026-06-19): HALF_WIDTH 12 -> 16 (~33% wider).
+## WHY: developer playtest feedback - the field felt cramped and the furniture had no room to
+## breathe. This is a WIDEN ONLY: HALF_LENGTH stays 25 (the table does not get longer - DESIGN cut
+## list). The lead re-derives EVERY X-dependent constant below from HALF_WIDTH / LANE_INNER_X so the
+## proportions hold and nothing ends up in a wall, off the field, or crossing the centerline.
+## Constants written as expressions of HALF_WIDTH auto-follow; the few hardcoded X LITERALS
+## (BALL_START.x, the furniture position arrays, the slingshot X) are re-derived by hand below with
+## a WHY-comment on each. The rescale is re-validated by tools/table_viz.py + test_world_scale.gd
+## + test_furniture_layout.gd + test_shot_geometry.gd before the slice ships.
+const HALF_WIDTH: float = 16.0      ## => 32 units wide (was 24). The WIDEN.
+const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
 const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
 const WALL_THICKNESS: float = 0.8
 
 ## Launch lane up the RIGHT side. The lane is a narrow channel between the right outer wall and an
 ## inner divider; the plunger sits at its bottom and shoots the ball up into the arch.
-const LANE_INNER_X: float = 8.0     ## X of the inner divider wall (lane lives to its right).
-const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## Right wall at +HALF_WIDTH minus divider.
+## WIDEN: LANE_INNER_X 8 -> 10.5 so the lane keeps a sane proportional WIDTH on the wider table. Old
+## lane width = 12 - 8 = 4; scaled by 16/12 = 5.33. We round to a 5.5-unit lane (LANE_INNER_X 10.5)
+## so the lane reads clearly and the plunger face (LANE_WIDTH - 0.6 = 4.9) fits with clearance. The
+## divider stays well inside the +16 right wall, and the OPEN center drain region [-16, 10.5] widens
+## proportionally with the table (the drain math below is all expressed off LANE_INNER_X / HALF_W
+## so it follows automatically).
+const LANE_INNER_X: float = 10.5    ## X of the inner divider wall (lane lives to its right).
+const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 5.5).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
 ## A half-arch across the top turns the ball launched up the lane back over into the playfield.
@@ -63,12 +78,18 @@ const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BA
 ## CONSTRAINT (verified by tests/test_world_scale.gd test_flippers_do_not_overlap_at_pivots):
 ## the two bats, each reaching FLIPPER_LENGTH*cos(|REST_ANGLE|) in X toward center from its pivot,
 ## must leave a POSITIVE gap at the centerline (an inverted V, not an X). With FLIPPER_LENGTH 7 and
-## REST_ANGLE -0.55 the x-reach is ~5.97, so the spread must exceed that. 7.0 leaves a ~2.1-unit
-## drain mouth (a bit over one ball diameter) - a missed flip can drain, a cradle holds. The old 5.0
-## made the tips CROSS the center (gap -1.9): that was the past inverted-V overlap bug (commit
-## 6c64a7b
-## territory), now guarded by the test. Pivots at +/-7 stay well inside the +/-12 side walls.
-const FLIPPER_PIVOT_SPREAD: float = 7.0
+## REST_ANGLE -0.55 the x-reach is ~5.97, so the spread must exceed that.
+##
+## WIDEN (drain mouth stays ~1-ball-plus, NOT a chasm): the drain mouth is
+##   gap = 2*SPREAD - 2*FLIPPER_LENGTH*cos(|REST_ANGLE|) = 2*SPREAD - 11.94.
+## Scaling SPREAD by the full 16/12 would blow the mouth out to ~6.7 units (a chasm a ball cannot be
+## cradled over - DESIGN forbids "a chasm"). So we DO NOT scale the gap with the width; we keep a
+## sane ~2.4-unit mouth (~2 ball diameters: a missed flip can drain, a cradle still holds) and move
+## the pivots out only enough to deliver it: SPREAD = (gap + 11.94)/2 = (2.4 + 11.94)/2 = 7.17 ->
+## 7.2. This nudges the flippers slightly outward on the wider field (so the lower field is not a
+## tiny island in the middle) while the drain mouth stays the proven-playable size. Pivots at +/-7.2
+## stay well inside the +/-16 side walls, leaving the wider side channels for the lane guides.
+const FLIPPER_PIVOT_SPREAD: float = 7.2
 const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain the pivots sit.
 ## Resting and energized angles (radians) of the flipper about its pivot, measured on the playfield
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
@@ -76,28 +97,82 @@ const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain t
 const FLIPPER_REST_ANGLE: float = -0.55
 const FLIPPER_UP_ANGLE: float = 0.15
 
+## The MAXIMUM down-table (greatest +Z) a flipper BAT reaches at any swing angle, in playfield-local
+## Z. This is the DOWN-TABLE EDGE of the "catch zone" the drain volume must stay clear of (QA
+## BUG-023): if the drain's up-table edge sits above (less than) this, the drain swallows the ball a
+## player was about to cradle/flip, breaking the core loop. DERIVATION (independent oracle, QA
+## BUG-023): a bat of length FLIPPER_LENGTH and half-width FLIPPER_WIDTH/2, pivoted at
+## FLIPPER_PIVOT_Z and rotated through the rest..up sweep, reaches at most ~21.74 by the precise
+## corner math; QA's bounding-box oracle put a far corner at 23.66. We take the LARGER (pessimistic)
+## value PLUS a clearance margin so the drain edge clears the bat with room to spare regardless of
+## which oracle is tighter. The test_world_scale config assert pins DRAIN_Z - DRAIN_DEPTH/2 above
+## this value, so the boundary is machine-checked the way BUG-022's was.
+const FLIPPER_BAT_MAX_Z: float = 23.66
+## Clearance the drain's up-table edge keeps ABOVE FLIPPER_BAT_MAX_Z. Half a ball diameter is a
+## comfortable, readable buffer (a ball whose CENTER is still above the bat zone cannot trip the
+## drain). Increase if a future flipper resize pushes the bat zone further down-table.
+const DRAIN_BAT_CLEARANCE: float = 0.6
+
 ## ---- DRAIN -------------------------------------------------------------------------------------
 ## Open center drain: a trigger volume below the flippers. A ball entering it is lost.
-## DRAIN_Z sits BELOW the flipper pivot row (FLIPPER_PIVOT_Z = 20) but INSIDE the playfield bottom
-## edge (HALF_LENGTH = 25), so a ball that gets past the flippers falls into the drain BEFORE it can
-## reach the open bottom edge. table_geometry.gd deliberately leaves the bottom perimeter OPEN (no
-## bottom wall) so nothing blocks the drain. Earlier this was HALF_LENGTH + 2 = 27, which placed the
-## trigger 2 units OUTSIDE the playfield - if a naive bottom wall were ever built it would block the
-## drain (QA BUG-004). Keeping it inside the field removes that dependency.
-const DRAIN_Z: float = HALF_LENGTH - 1.0
-## DRAIN spans ONLY the OPEN CENTER region, NOT the launch lane (QA B3 / BUG-003-class fix).
-## DESIGN mandates an "open CENTER drain between/below the flippers"; the launch lane on the +X side
-## (x in [LANE_INNER_X, HALF_WIDTH]) is a RESTING chute, not a drain. A full-width drain volume
-## overlapped the lane and would swallow the resting/dribbled-back ball at BALL_START - correct
-## behavior then depended ENTIRELY on a GameFlow state guard (drain only while BALL_IN_PLAY), which
-## is fragile defense-in-depth masking wrong geometry: a dribble launch that rolls the ball back to
-## rest in the lane WHILE BALL_IN_PLAY would drain it from the lane. We instead size the drain to
-## the open center mouth so the geometry never catches a lane ball. The drain spans the open
-## region x in [-HALF_WIDTH, LANE_INNER_X] and is centered there.
-const DRAIN_WIDTH: float = HALF_WIDTH + LANE_INNER_X  ## Open center: -HALF_WIDTH .. +LANE_INNER_X.
-## Midpoint of the open center region (NOT 0): the X the drain volume is centered on.
-const DRAIN_CENTER_X: float = (LANE_INNER_X - HALF_WIDTH) * 0.5
-const DRAIN_DEPTH: float = 6.0
+## DRAIN_Z sits BELOW the flipper bat catch zone (the drain up-table edge clears FLIPPER_BAT_MAX_Z)
+## but its center stays INSIDE the playfield bottom edge (HALF_LENGTH = 25), so a ball that gets
+## past the flippers falls into the drain BEFORE it reaches the open bottom edge. table_geometry.gd
+## deliberately leaves the bottom perimeter OPEN (no bottom wall) so nothing blocks the drain.
+## Earlier this was HALF_LENGTH + 2 = 27, placing the trigger 2 units OUTSIDE the playfield - if a
+## naive bottom wall were ever built it would block the drain (QA BUG-004). Keeping the CENTER
+## inside the field removes that dependency.
+##
+## QA BUG-023 FIX: the previous DRAIN_Z (HALF_LENGTH - 1 = 24) with DRAIN_DEPTH 6 spanned z
+## [21.0, 27.0]. Its up-table edge (21.0) sat ABOVE the flipper bats (which reach down-table to
+## ~23.66), so the drain volume overlapped the flipper catch zone: a ball falling toward the
+## flippers crossed the drain up-table edge ~2.66 units BEFORE reaching the bat faces and drained
+## while the player was about to flip it (a Gate-0 core-loop break). The drain is the gap BELOW the
+## not OVER them. FIX: shrink DRAIN_DEPTH and place DRAIN_Z so the up-table edge sits a clearance
+## margin BELOW the bat zone, while the center stays inside the field. The down-table edge may
+## extend a little past the open bottom (the ball simply falls into it there), which is fine.
+##   up_table_edge = DRAIN_Z - DRAIN_DEPTH/2  must be  > FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE
+## We size DRAIN_DEPTH first (a slim catch band is enough below the flippers), then place DRAIN_Z so
+## the up-table edge lands exactly at FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE.
+const DRAIN_DEPTH: float = 1.6
+## Up-table edge = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE = 24.26; center = edge + DRAIN_DEPTH/2 =
+## 25.06. The center sits a hair past HALF_LENGTH (25.0); the down-table half of the slim band hangs
+## just below the open bottom mouth (where the ball is already lost), and the trigger fires on the
+## up-table edge at 24.26, cleanly below the bats and above the open bottom. The test_world_scale
+## config assert (DRAIN_Z - DRAIN_DEPTH/2 > FLIPPER_BAT_MAX_Z) machine-checks this boundary.
+const DRAIN_Z: float = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH * 0.5
+## DRAIN spans ONLY the CENTER MOUTH between the flipper tips - the actual gap a ball falls through
+## (QA BUG-023 behavioral fix, SLICE "Table reshape + playtest fixes", 2026-06-19).
+##
+## ROOT CAUSE this replaces: the drain previously spanned the WHOLE open-center width
+## (x in [-HALF_WIDTH, LANE_INNER_X], ~26.5 units). DESIGN says "open CENTER drain between/below the
+## flippers", but a volume that wide also covered the X under the flipper BODIES (the pivots sit at
+## +/-FLIPPER_PIVOT_SPREAD = +/-7.2). The BUG-023 fix only cleared the drain in Z (up-table edge
+## below the bats), but a ball seated in the catch zone at the LEFT pivot X (-7.2) is NOT on the
+## angled bat there (near the pivot the bat sits up at z~PIVOT_Z=20, far up-table of the ball),
+## so it rolls straight down-table and the over-wide drain swallowed it - the exact core-loop break
+## behavioral oracle (a real ball dropped at z~23.06) still caught after the Z-only math fix.
+##
+## THE FIX (geometry, not a guard): a real ball only LEAVES the table through the GAP BETWEEN THE
+## FLIPPER TIPS (the inverted-V mouth). The drain must be exactly that mouth, centered on the table
+## centerline (x = 0, between the symmetric flippers), NOT the whole open width. A ball over a
+## flipper body (x ~= +/-7.2) is the flipper's to catch/flip; it can never be in the drain volume
+## now, so the cradle/catch-zone ball cannot drain (BUG-023). A ball that slips through the center
+## gap still drains; a ball lost down a side channel is caught by the OOB failsafe (OOB_DRAIN_Y).
+## The launch lane (far +X) is also far outside this central mouth, so a lane/dribble ball never
+## drains here (QA B3 stays honored by geometry, no GameFlow state guard needed).
+##
+## WIDTH = the inter-tip mouth (2*(SPREAD - FLIPPER_LENGTH*cos|REST_ANGLE|)) PLUS one ball diameter
+## of capture margin so a ball entering the mouth slightly off-center is still caught cleanly. With
+## SPREAD 7.2, reach ~5.97 the mouth is ~2.46; +1.2 gives ~3.66 (span ~ +/-1.83), comfortably inside
+## the +/-7.2 flipper zone (no catch-zone overlap) and wide enough to read as the drain mouth.
+const _DRAIN_MOUTH: float = 2.0 * (
+	FLIPPER_PIVOT_SPREAD - FLIPPER_LENGTH * cos(absf(FLIPPER_REST_ANGLE))
+)
+const DRAIN_WIDTH: float = _DRAIN_MOUTH + 2.0 * BALL_RADIUS  ## Mouth + ball-diameter capture slack.
+## Centered on the table centerline (x = 0): the drain is the symmetric gap BETWEEN the flippers,
+## NOT the full open region. This keeps a ball over a flipper body (x ~= +/-7.2) out of the drain.
+const DRAIN_CENTER_X: float = 0.0
 
 ## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
 ## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A
@@ -126,7 +201,13 @@ const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perime
 ## pocket and the plunger face. WHY z here: with ball radius 0.6 and the pocket face at
 ## HALF_LENGTH - 0.5 = 24.5, a rest z of HALF_LENGTH - 2.0 = 23.0 leaves the ball's down-table
 ## surface (z ~= 23.6) just shy of the pocket face, so it settles against the pocket, no overlap.
-const BALL_START: Vector3 = Vector3(10.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
+## WIDEN: BALL_START.x was a hardcoded 10.0, which after LANE_INNER_X moved to 10.5 would sit OUT of
+## the lane (on the divider / in the center field). Re-derive it as the LANE CENTER so it rests
+## squarely in the widened lane: (LANE_INNER_X + HALF_WIDTH) * 0.5 = (10.5 + 16) / 2 = 13.25, the
+## same X the plunger face centers on (PLUNGER_REST_POS.x), so the face strikes the ball head-on.
+## Written as the literal 13.25 (not the expression) so the thin-client tools/table_viz.py parser,
+## which reads single-line Vector3 literals, stays simple; the derivation is the comment above.
+const BALL_START: Vector3 = Vector3(13.25, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
 
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
@@ -242,7 +323,10 @@ const KICK_COOLDOWN_S: float = 0.25
 ##
 ## POP_BUMPER_RADIUS: the solid round post radius the ball bounces off (like the standup
 ## POST_RADIUS).
-const POP_BUMPER_RADIUS: float = 1.6
+## RESIZE (SLICE "Table reshape"): 1.6 -> 2.0. Developer feedback "slots too small". A bigger bumper
+## reads clearly as a target on the wider field and is easier to aim at, while staying clear of the
+## side walls (clearance HALF_WIDTH - RADIUS = 14.0 vs the +/-6.0 bumper X) and below the arch.
+const POP_BUMPER_RADIUS: float = 2.0
 ## POP_BUMPER_HEIGHT: stands as tall as the perimeter so a ball cannot ride up and over it.
 const POP_BUMPER_HEIGHT: float = WALL_HEIGHT
 ## POP_BUMPER_SCORE: flat points per kick (placeholder, no multipliers - DESIGN scope).
@@ -253,9 +337,15 @@ const POP_BUMPER_SCORE: int = 100
 ## "something worth shooting for" up top. Validated reachable by table_viz (a flipped ball can feed
 ## it)
 ## and clear of walls/arch (radius + clearance inside +/-HALF_WIDTH and above the arch base).
+## WIDEN + RESPACE (SLICE "Table reshape"): the two lower bumpers spread from +/-4.5 to +/-6.0 to
+## use the wider field (developer feedback "not spaced well"); the apex bumper stays centered. Z
+## unchanged (the widen does not change HALF_LENGTH). Clearance to the side wall is
+## HALF_WIDTH - POP_BUMPER_RADIUS = 16 - 2 = 14, far outside +/-6, so the bigger bumpers do not foul
+## a wall (asserted by test_shot_geometry + table_viz). Still up-table of the flippers and below the
+## arch base, so a flipped ball can feed the cluster.
 const POP_BUMPER_POSITIONS: Array[Vector3] = [
-	Vector3(-4.5, 0.0, -13.0),
-	Vector3(4.5, 0.0, -13.0),
+	Vector3(-6.0, 0.0, -13.0),
+	Vector3(6.0, 0.0, -13.0),
 	Vector3(0.0, 0.0, -16.5),
 ]
 
@@ -270,8 +360,11 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 ## SLINGSHOT positions: just up-table of and outboard of each flipper pivot, inside the side wall.
 ## The left sling sits left-of-center; the right is its mirror. Y resolved on the surface by
 ## table.gd.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
+## WIDEN: slings move from +/-8.5 to +/-10.5 to stay just OUTBOARD of the widened flipper pivots
+## (+/-7.2) and inside the side walls (+/-16), so a ball falling down the wider side channel grazes
+## the sling and is kicked back into play. Z unchanged (off the unchanged flipper pivot row).
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-10.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(10.5, 0.0, FLIPPER_PIVOT_Z - 3.5)
 ## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
 ## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
 const SLINGSHOT_LENGTH: float = 5.0
@@ -305,10 +398,15 @@ const SLINGSHOT_SCORE: int = 50
 ## up-table from the flipper at full swing, so a timed flip can hit the bank - "a shot worth
 ## making".
 ## They are spread across the center so a flip from either flipper can reach the bank.
+## WIDEN + RESPACE (SLICE "Table reshape"): the bank spreads from +/-3.0 to +/-4.5 across the wider
+## mid-field so the three targets read as a spaced bank, not a tight clump (developer "not spaced
+## well"), while every target stays inside the makeable window (between the flipper-tip reach and
+## arch base) - asserted by test_shot_geometry + table_viz. Z unchanged (the widen does not move the
+## makeable window in Z). The individual target POST size is raised in scripts/target.gd (gameplay).
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-3.0, 0.0, -7.0),
+	Vector3(-4.5, 0.0, -7.0),
 	Vector3(0.0, 0.0, -7.5),
-	Vector3(3.0, 0.0, -7.0),
+	Vector3(4.5, 0.0, -7.0),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------
@@ -326,9 +424,42 @@ const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 ## the
 ## LEFT side (mirror for the right); it sits between the side wall (-HALF_WIDTH) and the flipper
 ## pivot.
+## WIDEN: kept as HALF_WIDTH - 3.0 (so the divider auto-follows to x=13.0 on the wider table). WHY
+## this form survives the widen: it holds the OUTLANE (outer channel, divider..side wall) at a
+## constant ~3.0-unit width - the classic narrow outlane that reads as drain-risk - while the INLANE
+## (divider..flipper pivot at +/-7.2) widens to ~5.8 with the table, the save lane that funnels the
+## ball back toward the flipper. Both gutters are built symmetrically (table_geometry._build_lane_
+## guides, mirrored), so the widen gives BOTH sides a proper outlane+inlane (item #4: gutters both
+## sides). Verified by test_furniture_layout + table_viz feed-path plot.
 const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
+## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix).
+## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): after the WIDEN the LAUNCH LANE
+## occupies the whole RIGHT edge (x in [LANE_INNER_X=10.5, HALF_WIDTH=16]). The symmetric guide at
+## +13.0 therefore landed INSIDE the launch lane, directly across the ball's spawn (BALL_START.x =
+## 13.25) and its entire up-lane launch path: the freshly-armed ball spawned WEDGED in that guide
+## wall and could not be launched at all (the producer's "no kick on the first stroke" - the impulse
+## fired but a wall pinned the ball). The launch lane already has its own inner divider
+## (LANE_INNER_X) and the right wall; it needs NO extra wall down its middle. The RIGHT inlane/
+## outlane guide belongs INBOARD of the lane, in the open field between the lane divider (10.5) and
+## the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2), exactly mirroring the LEFT guide's job
+## (split the side channel into an outlane feeding the drain and an inlane feeding the flipper) but
+## on the field side of the lane. 9.0 sits cleanly between 7.2 and 10.5 (a real right inlane/outlane
+## split) and is well clear of the ball's x=13.25 launch path, so the lane is a clean chute again.
+## The LEFT guide is unchanged (the left side has no launch lane, so its symmetric placement holds).
+const LANE_GUIDE_RIGHT_DIVIDER_X: float = 9.0
 ## The divider runs from just above the flipper pivot row down toward the drain, length below.
-const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 2.0
+## QA BUG-024 FIX: the offset was 2.0, putting LANE_GUIDE_TOP_Z at 18.0. The slingshot KickerBody is
+## an angled box (SLINGSHOT_LENGTH x SLINGSHOT_THICKNESS, yawed by atan2(0.6,0.8) = 36.87 deg) whose
+## OUTER (toward the side wall) corner reaches down-table to z = 18.32, 0.32 units PAST the old
+## guide top. The two StaticBody3D bodies then shared the band z [18.0, 18.32] in the outlane ball
+## path. Two static bodies do not collide with each other, but the OVERLAPPING surfaces form a
+## concave seam: a ball (radius 0.6 > the 0.14/0.32 overlap) touching both at once gives the solver
+## two conflicting contact normals, which can spike velocity or briefly clip (CCD does NOT guard a
+## static-body seam). FIX: raise LANE_GUIDE_TOP_Z above the sling outer corner by at least one
+## BALL_RADIUS so guide and sling never share volume. offset 1.0 -> top z = 19.0, clearing the sling
+## corner (18.32) by 0.68 (> BALL_RADIUS 0.6). This does NOT change shot geometry (the divider just
+## starts a unit higher up-table); test_furniture_layout asserts the static-body clearance.
+const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 1.0
 const LANE_GUIDE_BOTTOM_Z: float = HALF_LENGTH - 2.0
 const LANE_GUIDE_THICKNESS: float = WALL_THICKNESS
 const LANE_GUIDE_HEIGHT: float = WALL_HEIGHT
