@@ -114,16 +114,16 @@ func on_ball_launched() -> void:
 
 ## SOFT-LOCK FIX: the positional watchdog, driven each physics frame by table.gd with the ball's
 ## MEASURED playfield-local Z (independent oracle) and the frame delta. Only acts while LAUNCHING.
-## STABLE SIGNATURE.
 ##
-## TODO(gameplay-programmer): implement the two branches against the TableConfig contract:
-##   1. REACHED PLAY: if the ball has crossed up-table of TableConfig.LAUNCH_REACHED_PLAY_Z
-##      (up-table is -Z, so "crossed" means ball_local_z < LAUNCH_REACHED_PLAY_Z), the launch
-##      succeeded -> call notify_ball_reached_play() (promotes to BALL_IN_PLAY) and return.
-##   2. FAILED LAUNCH: else advance _launch_watch_elapsed += delta; once it exceeds
-##      TableConfig.LAUNCH_SETTLE_TIME_S with the ball STILL in the lane (not yet reached play), the
-##      launch failed -> call on_launch_failed() (re-arm the SAME ball, no ball spent) and return.
-## Keep it a no-op in every other state. Judge ONLY the passed-in measured Z; never a stored flag.
+## Two branches:
+##   1. REACHED PLAY: if ball_local_z < TableConfig.LAUNCH_REACHED_PLAY_Z (the ball crossed the
+##      flipper-pivot row up-table, so it is unambiguously in play) -> notify_ball_reached_play()
+##      promotes to BALL_IN_PLAY and returns. No further timer work needed.
+##   2. FAILED LAUNCH: ball is still down-table in the lane. Advance the settle timer; once it
+##      exceeds LAUNCH_SETTLE_TIME_S without the ball reaching play, the launch is judged FAILED
+##      and on_launch_failed() recovers: re-arms the plunger for the SAME ball, no ball spent.
+## A no-op in every state other than LAUNCHING. Judges ONLY the passed-in measured Z.
+## STABLE SIGNATURE.
 func tick_launch_watch(ball_local_z: float, delta: float) -> void:
 	if _state != State.LAUNCHING:
 		return

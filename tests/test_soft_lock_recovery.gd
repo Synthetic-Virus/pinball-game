@@ -49,7 +49,9 @@ func test_failed_launch_recovers_without_spending_a_ball() -> void:
 	## assert: state returns to READY_TO_LAUNCH, request_relaunch fired, and the ball count is
 	## UNCHANGED (a too-weak launch costs nothing). ORACLE: real state + real balls + real signal.
 	watch_signals(_flow)
-	var balls_before: int = _balls_via_signal_default(TableConfig.STARTING_BALLS)
+	# STARTING_BALLS lives in game_flow.gd (not TableConfig); use the literal 3 here to avoid a
+	# cross-script class constant reference. The value is stable (DESIGN: 3 balls per game).
+	var balls_before: int = _balls_via_signal_default(3)
 
 	_flow.on_ball_launched()
 	assert_eq(
