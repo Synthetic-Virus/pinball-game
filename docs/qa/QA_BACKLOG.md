@@ -1246,6 +1246,253 @@ still drains (test_lane_pocket_drain center-X reaches the drain).
 
 ---
 
+### BUG-029 [HIGH] Right-side gap zone (x=[9.4,13.6], z=[19.0,23.0]) has no collision bodies - ball exits via open table bottom instead of center drain
+
+Severity: HIGH - a ball that enters the right-side gap zone between the LaneGuideRight wall and the
+LaneDivider wall has no lateral containment below z=23.0 and no drain coverage at its X position.
+It rolls off the open table bottom edge and is caught by the OOB failsafe (y=-20.0), which calls
+on_ball_drained() and spends the ball. The ball IS spent correctly, but it visually disappears from
+the right side of the field rather than from the center drain. The gap was widened by the Playtest
+fixes 2 lane resize (LANE_INNER_X: 10.5 -> 14.0), which moved the lane divider outboard while the
+right lane guide stayed at x=9.0, opening a 4.2-unit gap that no existing geometry closes.
+
+Slice introduced: Playtest fixes 2 (LANE_INNER_X resize 2026-06-20). Gap existed before but was
+only ~1.2 units (barely a ball diameter); after the resize it is 4.2 units (3.5 ball diameters) and
+trivially enterable.
+
+Files and geometry:
+- /home/virus/pinball-game/scripts/config/table_config.gd
+  LANE_INNER_X = 14.0, LANE_GUIDE_RIGHT_DIVIDER_X = 9.0, WALL_THICKNESS = 0.8
+  LaneGuideRight right face: x = 9.0 + 0.4 = 9.4
+  LaneDivider left face: x = 14.0 - 0.4 = 13.6
+  Gap width: 4.2 units. Ball diameter: 1.2 units. Ball easily fits.
+  LANE_GUIDE_BOTTOM_Z = 23.0. Lane divider bottom_z = HALF_LENGTH - 1.0 = 24.0.
+  Center drain x span: [-1.832, 1.832]. Gap zone x=[9.4, 13.6] is entirely outside drain.
+- /home/virus/pinball-game/scripts/table_geometry.gd
+  _build_lane_guides: places LaneGuideRight at x=9.0, z=[19.0, 23.0].
+  _build_lane_divider: places LaneDivider at x=14.0, z=[ARCH+ARCH_R_Z, 24.0].
+  _build_lane_pocket: spans x=[14.0, 16.4+] only. Does NOT close gap zone.
+  No body closes x=[9.4, 13.6], z=[23.0, 25.0].
+
+Repro steps:
+1. Launch the ball. After it enters the main playfield, use the flippers to direct it toward the
+   right side at roughly x=11-12 (between the right lane guide at x=9.0 and the lane divider at
+   x=14.0) near z=21-22.
+2. With insufficient lateral velocity, the ball will drift into x=[9.4, 13.6], z=[19.0, 23.0].
+3. Gravity pulls the ball DOWN-TABLE (+Z). Below z=23.0 there are no containing walls.
+4. The ball rolls off the open bottom edge (z > 25.0) and falls below y=-20.0.
+5. The OOB Area3D fires on_ball_drained(). The ball IS spent.
+
+Expected: a ball that cannot be saved by the flippers should enter the CENTER drain (x in
+[-1.832, 1.832], z in [24.26, 25.86]) and trigger ball_drained normally. There is no physical drain
+in the gap zone.
+
+Actual: ball disappears from the RIGHT SIDE of the visible table surface. The player sees no clear
+drain event. The OOB failsafe recovers the game state but the visual is broken.
+
+Root cause: the Playtest fixes 2 LANE_INNER_X resize moved the lane divider to 14.0 but left the
+right lane guide at 9.0. A 4.2-unit open corridor now exists between the two structures at z=[19.0,
+23.0], widening below z=23.0 until it merges with the open table bottom. No geometry closes the gap.
+
+Fix direction: close the gap between LaneGuideRight (at x=9.4 right face) and LaneDivider (at
+x=13.6 left face) across z=[19.0, 23.0], either by moving one structure to meet the other or adding
+a short horizontal connector wall. Verify that any added body does not overlap the right flipper bat
+sweep (verified by test_furniture_layout.gd) or the slingshot body (sling ends at z=18.32, guide
+starts at z=19.0 - the existing 0.68-unit clearance from BUG-024 fix must be preserved).
+
+Suggested GUT test to lock the fix:
+  In test_furniture_layout.gd: assert that the gap zone has no accessible X+Z corridor between
+  LaneGuideRight and LaneDivider by checking that both structures together span x=[8.6, 13.6] at
+  z=[20.0, 23.0] (no gap wider than BALL_RADIUS*2=1.2 between their facing surfaces).
+
+---
+
+### BUG-030 [HIGH] Slingshot _body_yaw formula makes the face normal point AWAY from the kick direction - face and kick are misaligned by ~143 deg
+
+Severity: HIGH - the comment in slingshot.gd says "the face whose normal _body_yaw rotates to the
+kick direction" but the math is wrong. The formula atan2(kick_dir.x, -kick_dir.z) rotates the body
+so its local +Z (the kicking face normal) maps to world (0.6, 0, +0.8) for the left slingshot,
+whereas the kick direction is (0.6, 0, -0.8). The Z component is inverted: the face normal points
+toward the drain (+0.8 in Z), not into play (-0.8 in Z). The correct formula is
+atan2(kick_dir.x, kick_dir.z) (note: no negation of kick_dir.z), which maps local +Z to world
+(0.6, 0, -0.8) - matching the kick direction exactly.
+
+At runtime the severity is partially mitigated: the velocity SET in _apply_kick (line 167 of
+active_kicker.gd) overwrites the ball velocity with kick_dir * 55.0 AFTER the physics solver's
+face-normal bounce fires. The kick direction in the code is correct; only the FACE NORMAL orientation
+is wrong. The physics outcome (ball going into play at 55 u/s) is correct because the velocity set
+overrides the solver bounce for that step. However:
+  1. The MESH is also yawed by _body_yaw (slingshot.gd line 106): the visible triangular mesh
+     has its kicking face pointing toward the drain, so the player sees the ball hit the BACK of
+     the visual slingshot (the apex side), not the face.
+  2. The solver's bounce impulse (KICKER_BOUNCE = 0.5) fires in the drain direction for one step
+     before _apply_kick overwrites it. This could cause a 1-frame speed anomaly.
+  3. The comment is false and will mislead any developer who reads it to verify or modify the yaw.
+
+Files and lines:
+- /home/virus/pinball-game/scripts/slingshot.gd line 204: _body_yaw() returns
+  atan2(_kick_dir.x, -_kick_dir.z). The formula should be atan2(_kick_dir.x, _kick_dir.z).
+- /home/virus/pinball-game/scripts/slingshot.gd line 106: the mesh is yawed by _body_yaw(), so
+  the visible mesh has the same face-normal mismatch.
+- /home/virus/pinball-game/scripts/slingshot.gd lines 116-127: _triangle_outline(): face_z = +0.4
+  (face sits at local +Z). After yaw, local +Z goes to world (sin(yaw), 0, cos(yaw)).
+
+Math oracle:
+  Left kick_dir = (0.6, 0, -0.8). Want face_normal_world = (0.6, 0, -0.8).
+  Local +Z after yaw theta: (sin(theta), 0, cos(theta)).
+  theta = atan2(0.6, -0.8) = 143.13 deg (correct formula: atan2(kick_dir.x, kick_dir.z))
+  Actual code: theta = atan2(0.6, 0.8) = 36.87 deg
+  Resulting face normal at 36.87 deg: (sin(36.87), 0, cos(36.87)) = (0.6, 0, +0.8) - WRONG sign on Z.
+
+Repro (code trace):
+1. Open /home/virus/pinball-game/scripts/slingshot.gd line 202-204.
+2. _body_yaw() returns atan2(_kick_dir.x, -_kick_dir.z).
+3. For left sling kick_dir = (0.6, 0, -0.8): yaw = atan2(0.6, 0.8) = 36.87 deg.
+4. After this rotation, body local +Z in world = (sin(36.87), 0, cos(36.87)) = (0.6, 0, +0.8).
+5. This is the DRAIN direction (positive Z = down-table). Not the kick direction (0.6, 0, -0.8).
+6. The mesh yawed by _body_yaw (line 106) shows the face pointing toward drain. Visually wrong.
+
+Expected: slingshot face normal in world space = kick direction. Player visually sees ball hit the
+angled face and bounce into play. Face and kick are aligned.
+
+Actual: slingshot face normal in world space is roughly anti-parallel to kick direction. The visible
+triangle shows its BACK to the approaching ball (ball appears to hit the apex, not the face). The
+physics outcome is still correct because _apply_kick sets the velocity to the correct direction.
+
+Root cause: atan2(kick_dir.x, -kick_dir.z) computes the heading from the UP-TABLE axis (-Z), which
+yields the complement of the desired rotation. The correct formula to align local +Z with kick_dir
+is atan2(kick_dir.x, kick_dir.z) (heading from the DOWN-TABLE axis), which gives 143.13 deg
+instead of 36.87 deg.
+
+Fix direction: in slingshot.gd _body_yaw(), change:
+  return atan2(_kick_dir.x, -_kick_dir.z)
+to:
+  return atan2(_kick_dir.x, _kick_dir.z)
+Verify both slingshots by asserting body local +Z in world == kick_dir (within epsilon).
+The mesh fix follows automatically (it reads _body_yaw). Re-run test_slingshot.gd after the fix
+to confirm both kick directions still pass (the kick direction itself is correct in the code; only
+the face orientation changes, which the behavioral tests do not currently assert explicitly).
+
+Suggested GUT test to lock the fix:
+  In test_slingshot.gd: after instancing each sling, assert that _body.transform.basis.z
+  (the body's local +Z in world space) is approximately equal to the configured kick direction
+  (dot product > 0.99). Currently the face normal and kick direction are MISALIGNED; after the fix
+  this asserts they are the same direction.
+
+---
+
+### BUG-031 [MEDIUM] Soft-lock watchdog transient-crossing edge case: a ball that barely crosses LAUNCH_REACHED_PLAY_Z then rolls back into the lane leaves the game in BALL_IN_PLAY with a dead plunger and trapped ball
+
+Severity: MEDIUM - this is a soft-lock that bypasses the Playtest fixes 2 recovery. The recovery
+(BUG-024 fix) only protects a ball that NEVER crosses LAUNCH_REACHED_PLAY_Z (z=20.0). A ball that
+transiently crosses (e.g. driven by a flipper from the main field back through the guide gap) then
+rolls back into the lane promotes to BALL_IN_PLAY via notify_ball_reached_play(), after which:
+  - The watchdog stops running (it only runs in LAUNCHING state).
+  - The plunger is DISARMED (arm() is only called by request_new_ball/request_relaunch, which
+    only fire from READY_TO_LAUNCH transitions: on_ball_drained, on_launch_failed, start_game).
+  - The ball rolls back into the lane and rests between the solid plunger face (z=23.6) and the
+    solid lane pocket (z=24.5). The ball is physically trapped.
+  - The flippers have no reach into the lane (ball at x=15, flippers at x=+/-7.2). No input works.
+  - The player must rely on a timeout or external reset that does not exist in BALL_IN_PLAY.
+  - SOFT-LOCK: the session is dead until the player quits.
+
+This edge case can occur when:
+  a) A ball re-enters the launch-lane channel from the gap zone (x=[9.0, 14.0] near z=19.0),
+     crossing ball_local_z < 20.0 in the main field, then rolling back +Z into the lane.
+  b) A ball with very low speed enters the playfield (z just below 20.0) and gravity reverses it.
+
+Note: with PLUNGER_STROKE_SPEED_MIN = 35 u/s and lane length = 3 units, the minimum launch speed
+(12.1 u/s needed to just cross z=20.0) is lower than the minimum stroke speed, so a direct-launch
+transient crossing is NOT possible from the plunger alone. The soft-lock requires the ball to
+re-enter the play zone from the side (via the gap zone gap from BUG-029).
+
+Files and lines:
+- /home/virus/pinball-game/scripts/game_flow.gd lines 127-137: tick_launch_watch - once the ball
+  crosses z < LAUNCH_REACHED_PLAY_Z the LAUNCHING state is exited permanently. No reversal.
+- /home/virus/pinball-game/scripts/game_flow.gd lines 143-146: notify_ball_reached_play - sets
+  state = BALL_IN_PLAY with an idempotent guard; once set, never reverts to LAUNCHING.
+- /home/virus/pinball-game/scripts/plunger.gd lines 258-269: _do_launch - _armed = false on
+  launch. arm() is only called from request_new_ball/request_relaunch signals (game_flow.gd).
+  BALL_IN_PLAY state never emits either signal, so the plunger cannot be re-armed.
+- /home/virus/pinball-game/tests/test_soft_lock_recovery.gd: no test covers the scenario where
+  the ball transiently crosses the play line and then rolls back. The existing tests cover:
+  (a) ball never crosses (watchdog recovers); (b) ball crosses and stays in play (normal).
+
+Repro steps (requires BUG-029 gap to exist to make the scenario reachable):
+1. Launch the ball at any power. Ball enters the main field.
+2. Direct the ball toward the right side such that it enters the gap zone (x=[9.4, 13.6],
+   z=[19.0, 20.0]) - the small up-table portion of the gap.
+3. The ball crosses z < 20.0 (LAUNCH_REACHED_PLAY_Z) briefly while in the gap.
+4. tick_launch_watch sees z < 20.0 -> notify_ball_reached_play() -> BALL_IN_PLAY.
+5. The ball loses speed and gravity pulls it back +Z (down-table) into the lane.
+6. Ball rests in lane at z~23.0. State = BALL_IN_PLAY. Plunger = DISARMED. SOFT-LOCK.
+
+Expected: if the ball returns to the lane after crossing the play line (a state the design intent
+calls "reached play"), the game should have a recovery mechanism - either the drain/OOB catches
+it, or a watchdog in BALL_IN_PLAY detects a lane-zone ball and triggers on_ball_drained().
+
+Actual: the ball is in BALL_IN_PLAY but trapped in the lane. Neither drain nor OOB fires (ball is
+on the surface at z=23.0, not at z>25 or y<-20). No timer recovers BALL_IN_PLAY. Dead session.
+
+Note: the likelihood of this specific repro depends on BUG-029 being present. Fixing BUG-029
+(closing the gap zone) may eliminate the primary way to trigger this scenario.
+
+Suggested GUT test to lock awareness of this edge case:
+  In test_soft_lock_recovery.gd: add test_transient_crossing_then_roll_back_does_not_soft_lock.
+  Feed tick_launch_watch with IN_PLAY_Z for one tick (triggers notify_ball_reached_play -> BALL_IN_PLAY),
+  then call on_ball_drained() directly (simulating the OOB catching the ball). Assert state returns
+  to READY_TO_LAUNCH and balls_changed fires. This validates the RECOVERY PATH for a ball that
+  transiently crossed and then fell off-table (the expected safe recovery), NOT the stuck-lane case.
+
+---
+
+### BUG-032 [LOW] Slingshot top-cap winding for the mirrored right slingshot uses forward winding for both sides - top cap faces -Y (into table surface), bottom cap faces +Y (up): caps are culled or lit incorrectly
+
+Severity: LOW - visual only; no physics or game-state impact. The slingshot mesh in
+_build_triangle_mesh (slingshot.gd lines 183-188) adds the top cap (at +half_h) wound
+A->B->C (counterclockwise when viewed from +Y = from above) and the bottom cap (at -half_h)
+wound A->C->B (CW from below). Winding is consistent for the LEFT slingshot (right-hand triangle).
+For the RIGHT slingshot (mirrored, apex at C=(-2.5, -2.75) instead of +(2.5, -2.75)), the outline
+order changes handedness. With generate_normals(), the computed cap normals may flip, making the
+top cap face down (-Y) and the bottom cap face up (+Y). With back-face culling the top cap is
+culled (invisible when viewed from above) and the bottom cap is visible from below (inside table).
+Since the game uses a playfield-top camera, the top caps of the right slingshot will be invisible.
+
+Files and lines:
+- /home/virus/pinball-game/scripts/slingshot.gd lines 162-194: _build_triangle_mesh
+- /home/virus/pinball-game/scripts/slingshot.gd lines 115-127: _triangle_outline() - the apex X
+  flips sign between left (hand_sign=+1, apex at +2.5) and right (hand_sign=-1, apex at -2.5),
+  changing the winding handedness of the CCW-labelled outline.
+- /home/virus/pinball-game/scripts/flipper.gd: _emit_tri has a _flip flag that correctly handles
+  this for the mirrored right flipper. The slingshot mesh builder has no equivalent flip guard.
+
+Repro (trace):
+1. Open slingshot.gd _triangle_outline() for the right sling (mirrored=true).
+   Corners: A=(-2.5, 0.4), B=(2.5, 0.4), C=(-2.5, -2.75).  (apex_x=-2.5 for right side)
+2. _build_triangle_mesh top cap: adds A, B, C in order at +half_h.
+   Cross product (B-A) x (C-A) = (5,0) x (0,-3.15) = (0,0, -15.75). This points in -Z (local),
+   which maps to -Y in world space (into the table). The top cap faces DOWN into the surface.
+3. With generate_normals(), the computed normal for the top cap triangle will be -Y.
+   If StandardMaterial3D has cull_back enabled (default), the top cap is culled when viewed from +Y.
+
+Expected: the top cap of both slingshots (left and right) should face +Y (up, toward the player's
+camera). The mesh should be fully visible from a top-down or angled-top camera.
+
+Actual: the right slingshot's top cap winding is reversed due to apex position mirroring. The cap
+faces downward (-Y) and may be culled from the player's viewpoint.
+
+Fix direction: in _build_triangle_mesh, detect the mirrored case (_mirrored flag) and emit the top
+cap in reversed winding order (A->C->B instead of A->B->C) for the right slingshot, matching the
+flipper.gd _emit_tri _flip pattern. Or compute the winding explicitly from the cross product sign
+and choose the order that gives +Y. generate_normals() will then compute the correct up-facing normal.
+
+Suggested GUT test to lock the fix:
+  No existing test asserts cap face direction. Add a structural test in test_slingshot.gd that
+  iterates the ArrayMesh surface to read computed normals and asserts all triangle normals have
+  Y > 0 (top cap faces up). This requires enabling Mesh::ARRAY_NORMAL in the vertex array.
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
 - SLICE Table reshape: THE RUNNER IS RED. The slice HAS now been through CI (PR #10, run
   27858434688 on the pushed sha) and it FAILED: 6 failing tests (see BUG-026/027/028). The producer
