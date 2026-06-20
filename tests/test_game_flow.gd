@@ -49,9 +49,10 @@ func before_each() -> void:
 ## call with a Z clearly in-play (0.0 is at the table center, well past the flipper row).
 ## This mirrors exactly what table.gd does each physics frame in real gameplay: the ball's
 ## measured Z is fed to the watchdog, and once it crosses LAUNCH_REACHED_PLAY_Z the machine
-## promotes. WHY 0.0: it is unambiguously up-table of LAUNCH_REACHED_PLAY_Z (= FLIPPER_PIVOT_Z
-## = 20.0 in world scale). Tests that are not about the LAUNCHING state call this immediately
-## after on_ball_launched() to reach BALL_IN_PLAY cleanly.
+## promotes. WHY 0.0: it is the table center, unambiguously up-table of LAUNCH_REACHED_PLAY_Z
+## (= FLIPPER_PIVOT_Z - 3.5 = 16.5 in world scale after the QA BUG-031 hardening). Tests that are
+## not about the LAUNCHING state call this immediately after on_ball_launched() to reach
+## BALL_IN_PLAY cleanly.
 func _promote_to_ball_in_play() -> void:
 	flow.tick_launch_watch(0.0, 1.0 / 240.0)
 

@@ -1305,6 +1305,18 @@ Suggested GUT test to lock the fix:
   LaneGuideRight and LaneDivider by checking that both structures together span x=[8.6, 13.6] at
   z=[20.0, 23.0] (no gap wider than BALL_RADIUS*2=1.2 between their facing surfaces).
 
+RESOLVED 2026-06-20 (lead polish, partial - working-as-designed + comment fix): on review the band
+between the slingshot (x~10.5) and the lane divider (x=14.0) is the RIGHT OUTLANE (DESIGN "A DRAIN
+YOU EARN, EITHER SIDE"): a ball down it drains off the open bottom and is correctly SPENT by the OOB
+failsafe, the same way the left side band drains. The center drain is intentionally the narrow inter-
+tip mouth only (BUG-023 geometry); side bands are outlanes by design. So the ball being spent is
+correct behavior, not a leak. What WAS wrong: (a) the stale TableConfig comment on
+LANE_GUIDE_RIGHT_DIVIDER_X still claimed the lane divider was at 10.5 (pre-resize) - corrected to
+state the real 14.0 geometry and document the band as the right outlane; (b) the genuinely harmful
+consequence this band could feed was the BUG-031 transient false-promotion, now closed independently
+(see BUG-031). The right divider stays 9.0 (still the correct inlane/outlane split inboard of the
+slingshot). No new geometry added (scope: no new element types).
+
 ---
 
 ### BUG-030 [HIGH] Slingshot _body_yaw formula makes the face normal point AWAY from the kick direction - face and kick are misaligned by ~143 deg
@@ -1379,6 +1391,16 @@ Suggested GUT test to lock the fix:
   (dot product > 0.99). Currently the face normal and kick direction are MISALIGNED; after the fix
   this asserts they are the same direction.
 
+RESOLVED 2026-06-20 (lead polish): slingshot.gd _body_yaw() now returns atan2(_kick_dir.x,
+_kick_dir.z) (negation removed), exactly the suggested fix. Verified against Godot's actual Y-basis
+convention (cross-checked with the arch's proven atan2(-chord.z, chord.x) heading): the body-local
++Z (the kicking-face normal) now maps to _kick_dir, so the visible mesh, the solid body, and the
+detector all face into play. The misleading "the face whose normal _body_yaw rotates to the kick
+direction" comment is now TRUE. The kick velocity was already correct (set directly in
+active_kicker._apply_kick), so no physics behavior changed; only the visible/collider orientation
+was corrected. test_slingshot.gd's BUG-018 corner test derives its face axes from the live
+_body_yaw(), so it self-adjusts and stays valid.
+
 ---
 
 ### BUG-031 [MEDIUM] Soft-lock watchdog transient-crossing edge case: a ball that barely crosses LAUNCH_REACHED_PLAY_Z then rolls back into the lane leaves the game in BALL_IN_PLAY with a dead plunger and trapped ball
@@ -1444,6 +1466,20 @@ Suggested GUT test to lock awareness of this edge case:
   to READY_TO_LAUNCH and balls_changed fires. This validates the RECOVERY PATH for a ball that
   transiently crossed and then fell off-table (the expected safe recovery), NOT the stuck-lane case.
 
+RESOLVED 2026-06-20 (lead polish, root-cause fix): the false-promotion that enabled this edge case
+came from LAUNCH_REACHED_PLAY_Z sitting at the flipper-pivot row (z=20.0), close enough that a ball
+draining down a SIDE channel could transiently dip its center across it. FIX: moved the reached-play
+line UP-TABLE of the slingshot row (FLIPPER_PIVOT_Z - 3.5 = 16.5) in TableConfig. A ball that
+genuinely reached play (climbed the lane, came over the arch) is far up-table of 16.5; a dribble or a
+side-roll cannot reach up-table of the slingshots without being kicked back into play (which IS
+reaching play). So the watchdog no longer falsely promotes on a transient crossing, and the
+specific stuck-lane soft-lock this describes is no longer reachable. Combined with the BUG-029
+write-up (the side band is a designed outlane), the transient-crossing path is closed. The repro's
+"directly call on_ball_drained" recovery path is also still valid (OOB spends a genuinely off-table
+ball). NOT added: a BALL_IN_PLAY lane-zone watchdog - DESIGN scopes recovery to "a ball that NEVER
+reached play"; a true in-play-then-stuck ball is out of this slice's scope (and is now unreachable
+via this path).
+
 ---
 
 ### BUG-032 [LOW] Slingshot top-cap winding for the mirrored right slingshot uses forward winding for both sides - top cap faces -Y (into table surface), bottom cap faces +Y (up): caps are culled or lit incorrectly
@@ -1490,6 +1526,18 @@ Suggested GUT test to lock the fix:
   No existing test asserts cap face direction. Add a structural test in test_slingshot.gd that
   iterates the ArrayMesh surface to read computed normals and asserts all triangle normals have
   Y > 0 (top cap faces up). This requires enabling Mesh::ARRAY_NORMAL in the vertex array.
+
+RESOLVED 2026-06-20 (lead polish - NOT REPRODUCIBLE as written, hardened anyway): re-deriving the
+cross product in actual 3D (the outline (x, z) becomes Vector3(x, half_h, z), so the cap triangle
+lies in a constant-Y plane) gives the top-cap normal Y-component = +15.75 for BOTH the left AND the
+right slingshot - the cap already faces UP on both sides. The repro's "-Y" conclusion is a sign error
+in the 2D X-Z cross-product reasoning (an X-Z cross with constant Y maps to +Y here, not -Y). The
+mirror flips only apex_x, and A/B (the kicking-face vertices) are fixed on the same z-line, so the
+outline's winding SIGN does NOT flip (unlike flipper.gd, where the WHOLE outline is X-negated). So
+there is no actual visual defect. HARDENED REGARDLESS: _build_triangle_mesh now orients each cap from
+the outline's signed area (new _signed_area_xz helper) so the top cap is guaranteed +Y and the bottom
+-Y for ANY future outline change, with no per-side flag to thread. Result is identical (correct) for
+today's geometry; the code is now robust to the class of bug QA was guarding against.
 
 ---
 

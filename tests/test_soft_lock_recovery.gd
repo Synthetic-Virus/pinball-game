@@ -12,9 +12,11 @@ extends GutTest
 ## reading the REAL state + ball count + signals, never a self-reported "recovered" flag.
 ##
 ## SCOPE: GameFlow's state-machine recovery (the rules half), driven directly with measured ball Z
-## fed to tick_launch_watch exactly as table.gd feeds it in play. The full integrated soft-lock
-## (a real too-weak plunger strike leaving the ball recoverable in the live Table.tscn) is covered
-## the integration check at the bottom. Both judge the REAL ball position / count, not a counter.
+## fed to tick_launch_watch exactly as table.gd feeds it in play. The full INTEGRATED soft-lock (a
+## real too-weak plunger strike leaving the ball recoverable in the live Table.tscn, through the
+## plunger -> GameFlow -> re-arm wiring) is covered by a SEPARATE file,
+## tests/test_soft_lock_integration.gd (added in the lead polish pass for QA finding B2). Both judge
+## the REAL ball position / count / plunger state, never a self-reported counter.
 ##
 ## CONTRACT under test (scripts/game_flow.gd, ARCHITECTURE.md 12):
 ##   - on_ball_launched() enters LAUNCHING (NOT BALL_IN_PLAY).

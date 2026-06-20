@@ -128,6 +128,10 @@ func tick_launch_watch(ball_local_z: float, delta: float) -> void:
 	if _state != State.LAUNCHING:
 		return
 	# Branch 1: the ball reached play (crossed up-table of the reached-play line).
+	# NOTE (N2): the reached-play line (LAUNCH_REACHED_PLAY_Z, the slingshot row) sits DOWN-table of
+	# every scoring body (the standup bank and pop bumpers are further up-table at z <= -7), so a ball
+	# always promotes to BALL_IN_PLAY BEFORE it can reach any target/bumper. No score is ever lost to
+	# the on_target_scored BALL_IN_PLAY guard during the brief LAUNCHING window.
 	if ball_local_z < TableConfig.LAUNCH_REACHED_PLAY_Z:
 		notify_ball_reached_play()
 		return

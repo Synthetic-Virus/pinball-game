@@ -157,8 +157,18 @@ func _extrude_triangle_to_hull(outline: PackedVector2Array, height: float) -> Pa
 
 
 ## Build the visible triangular-prism mesh from the same (x, z) outline as the collider so the two
-## AGREE. A single-surface gray-box mesh (sides + top cap + bottom cap). The exact normals are not
-## load-bearing for a gray-box visual; generate_normals gives readable shading.
+## AGREE. A single-surface gray-box mesh (sides + top cap + bottom cap).
+##
+## QA BUG-032 HARDENING (2026-06-20): the caps were emitted with a FIXED vertex order (A->B->C top,
+## A->C->B bottom). QA flagged that the mirrored RIGHT slingshot could face the top cap DOWN (-Y)
+## and be back-face-culled (the same class of mirrored-winding bug flipper.gd fixes). On THIS
+## triangle the fixed order happens to face +Y for BOTH sides (the kicking-face vertices A and B are
+## fixed and only
+## the apex moves along the same z-line, so the mirror does NOT reverse the winding sign here - QA's
+## analysis assumed a full X-negation like flipper.gd's). To make the cap orientation correct
+## REGARDLESS of any future outline change, we now orient each cap from the outline's ACTUAL signed
+## area in the X-Z plane so the TOP cap always faces +Y and the BOTTOM always faces -Y, with no
+## per-side flag to thread. The side walls wrap the perimeter and read fine under generate_normals.
 func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMesh:
 	var half_h: float = height * 0.5
 	var mesh := ArrayMesh.new()
@@ -179,13 +189,30 @@ func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMe
 		st.add_vertex(b_top)
 		st.add_vertex(a_bot)
 		st.add_vertex(b_bot)
-	# Top cap (face +Y) and bottom cap (face -Y) as single triangles (the footprint is a triangle).
-	st.add_vertex(Vector3(outline[0].x, half_h, outline[0].y))
-	st.add_vertex(Vector3(outline[1].x, half_h, outline[1].y))
-	st.add_vertex(Vector3(outline[2].x, half_h, outline[2].y))
-	st.add_vertex(Vector3(outline[0].x, -half_h, outline[0].y))
-	st.add_vertex(Vector3(outline[2].x, -half_h, outline[2].y))
-	st.add_vertex(Vector3(outline[1].x, -half_h, outline[1].y))
+	# Caps: orient from the outline's signed area so the TOP faces +Y and the BOTTOM faces -Y for both
+	# the left (CCW) and the mirrored right (CW) outlines (QA BUG-032). A CCW X-Z triangle's forward
+	# fan normal (via (v1-v0)x(v2-v0)) points -Y, so a CCW outline needs the top cap REVERSED to face
+	# +Y; a CW outline (the mirrored sling) needs it forward. _signed_area_xz < 0 means CW.
+	var top_forward: bool = _signed_area_xz(outline) < 0.0
+	var i0: int = 0
+	var i1: int = 1
+	var i2: int = 2
+	# Top cap (+Y).
+	st.add_vertex(Vector3(outline[i0].x, half_h, outline[i0].y))
+	if top_forward:
+		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
+		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
+	else:
+		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
+		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
+	# Bottom cap (-Y): the opposite winding of the top cap.
+	st.add_vertex(Vector3(outline[i0].x, -half_h, outline[i0].y))
+	if top_forward:
+		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
+		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
+	else:
+		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
+		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
 	st.generate_normals()
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.55, 0.55, 0.58)
@@ -194,11 +221,35 @@ func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMe
 	return mesh
 
 
-## Yaw the box so its flat face normal aligns with the kick direction (the face kicks the ball along
-## its normal). The kick direction is in XZ; the face normal of an unrotated box (thin in Z) is
-## +/-Z,
-## so the yaw is the angle from -Z to the kick direction about Y. This keeps the visible angled wall
-## consistent with where the ball is actually fired.
+## Signed area of a top-down (x, z) outline in the X-Z plane (the shoelace formula). Positive when
+## the points wind counter-clockwise, negative when clockwise. Used to orient the prism caps so the
+## top always faces +Y regardless of the per-side mirror (QA BUG-032).
+func _signed_area_xz(outline: PackedVector2Array) -> float:
+	var area: float = 0.0
+	var n: int = outline.size()
+	for i in range(n):
+		var a: Vector2 = outline[i]
+		var b: Vector2 = outline[(i + 1) % n]
+		area += a.x * b.y - b.x * a.y
+	return area * 0.5
+
+
+## Yaw the body (and, via _detector_yaw + _make_mesh, the detector and the visible mesh) so the
+## KICKING FACE normal aligns with the kick direction. The triangle outline puts the long kicking
+## face (edge A-B) at the body's LOCAL +Z, so its outward normal is local +Z; we rotate so that
+## local +Z maps to _kick_dir (into play). The face then faces where the ball is fired, the visible
+## triangle reads correctly (the player sees the ball strike the long inner face, not the
+## apex), and the solid body + detector enclose that contact.
+##
+## QA BUG-030 FIX (2026-06-20): the prior formula atan2(x, -z) rotated local +Z to the OPPOSITE of
+## the kick direction (it aligned +Z with -_kick_dir), so the visible kicking face pointed at the
+## DRAIN while the ball was actually fired up-table. The physics outcome was already correct (the
+## base _apply_kick SETS the velocity along _kick_dir, independent of this yaw), but the MESH and
+## the solid body faced the wrong way, so the player saw the ball bounce off the BACK (apex) of the
+## triangle. The correct heading that maps a body-local +Z column vector to _kick_dir under Godot's
+## Y-basis is atan2(kick.x, kick.z) (verified against the arch's proven atan2(-chord.z, chord.x)
+## heading convention). For the left kick (0.6, 0, -0.8) this yaw maps local +Z -> (0.6, 0, -0.8)
+## exactly; the previous formula mapped it to (0.6, 0, +0.8), into the drain.
 func _body_yaw() -> float:
-	# atan2(x, -z): heading of the kick direction measured from the up-table (-Z) axis about +Y.
-	return atan2(_kick_dir.x, -_kick_dir.z)
+	# Heading that rotates the face normal (body-local +Z) onto the kick direction about +Y.
+	return atan2(_kick_dir.x, _kick_dir.z)

@@ -295,13 +295,25 @@ const PLUNGER_REST_POS: Vector3 = Vector3(
 ##
 ## LAUNCH_REACHED_PLAY_Z: the playfield-local Z line (up-table is -Z) the ball CENTER must cross to
 ## count as "reached play". WHY this value: the ball rests at BALL_START.z (HALF_LENGTH - 2.0 = 23)
-## and a successful launch carries it up the lane and over the arch into the field. The flipper
-## pivots sit at FLIPPER_PIVOT_Z (HALF_LENGTH - 5.0 = 20.0); the open field is up-table of there. We
-## pick the flipper pivot row as the "reached play" line: if the ball is up-table past the flippers
-## it is unambiguously in play (a dribble that never clears the lane stays near z=23, far down-table
-## of 20). Expressed off FLIPPER_PIVOT_Z so it tracks the flipper row, with no extra margin needed
-## (the gap from 23 to 20 is ~5 ball diameters - a clean split between "dribbled" and "in play").
-const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z
+## and a successful launch carries it up the lane and over the arch into the field.
+##
+## QA BUG-031 HARDENING (2026-06-20): the line was the flipper pivot row (FLIPPER_PIVOT_Z = 20.0).
+## That was too close to the lane: a ball rolling down a SIDE channel (e.g. the field band between a
+## slingshot and the launch-lane divider) can TRANSIENTLY dip its center across z=20 while it is
+## really just draining down the side, never having reached play. The watchdog would then falsely
+## promote LAUNCHING -> BALL_IN_PLAY on that transient crossing; if the ball then rolled back into
+## the launch lane (z ~= 23) the plunger was dead (disarmed, watchdog stopped) and the original
+## soft-lock returned by a different path. FIX: move the reached-play line UP-TABLE of the slingshot
+## row (FLIPPER_PIVOT_Z - 3.5 = 16.5) so only a ball genuinely up in the field counts as "in play".
+## A ball that climbed the lane and came over the arch is at z far up-table of 16.5; a dribble or a
+## side-roll stays down-table of it. WHY this exact line: the slingshots sit at
+## FLIPPER_PIVOT_Z - 3.5 (SLINGSHOT_*_POS.z), so this line is the slingshot row - the down-table
+## edge of the open mid-field.
+## A side-draining ball can reach the slingshot Z but not cross UP-TABLE of it without being kicked
+## back into play (which is itself "reached play"); a transient dip toward the flippers cannot reach
+## this far up. The gap from the lane (23) to this line (16.5) is ~5 ball diameters, still a clean,
+## unambiguous split between "dribbled / draining" and "in play".
+const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z - 3.5
 ## LAUNCH_SETTLE_TIME_S: how long after ball_launched we wait before judging a launch failed. WHY
 ## 2.0 s: a full-power launch (LAUNCH_SPEED_MAX 90 u/s) clears the lane and crosses the reached-play
 ## line in a fraction of a second; even a marginal launch that just barely clears does so well under
@@ -484,20 +496,30 @@ const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 ## guides, mirrored), so the widen gives BOTH sides a proper outlane+inlane (item #4: gutters both
 ## sides). Verified by test_furniture_layout + table_viz feed-path plot.
 const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
-## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix).
-## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): after the WIDEN the LAUNCH LANE
-## occupies the whole RIGHT edge (x in [LANE_INNER_X=10.5, HALF_WIDTH=16]). The symmetric guide at
-## +13.0 therefore landed INSIDE the launch lane, directly across the ball's spawn (BALL_START.x =
-## 13.25) and its entire up-lane launch path: the freshly-armed ball spawned WEDGED in that guide
-## wall and could not be launched at all (the producer's "no kick on the first stroke" - the impulse
-## fired but a wall pinned the ball). The launch lane already has its own inner divider
-## (LANE_INNER_X) and the right wall; it needs NO extra wall down its middle. The RIGHT inlane/
-## outlane guide belongs INBOARD of the lane, in the open field between the lane divider (10.5) and
-## the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2), exactly mirroring the LEFT guide's job
-## (split the side channel into an outlane feeding the drain and an inlane feeding the flipper) but
-## on the field side of the lane. 9.0 sits cleanly between 7.2 and 10.5 (a real right inlane/outlane
-## split) and is well clear of the ball's x=13.25 launch path, so the lane is a clean chute again.
-## The LEFT guide is unchanged (the left side has no launch lane, so its symmetric placement holds).
+## RIGHT-side guide divider X (SLICE "Table reshape + playtest fixes", 2026-06-19, launch-lane fix;
+## comment corrected for the SLICE "Playtest fixes 2" lane resize, QA BUG-029, 2026-06-20).
+## WHY THIS IS ASYMMETRIC (not +LANE_GUIDE_DIVIDER_X like the left): the LAUNCH LANE occupies the
+## RIGHT edge (x in [LANE_INNER_X, HALF_WIDTH]). A symmetric guide at +13.0 would land INSIDE the
+## launch lane, across the ball's spawn (BALL_START.x = 15.0) and its up-lane launch path, wedging
+## the freshly-armed ball so it could not launch (the producer's "no kick on the first stroke"). The
+## launch lane already has its own inner divider (LANE_INNER_X) and the right wall; it needs NO
+## extra wall down its middle. The RIGHT inlane/outlane guide belongs INBOARD of the lane, in the
+## open field between the right flipper pivot (FLIPPER_PIVOT_SPREAD = 7.2) and the right slingshot
+## (SLINGSHOT_RIGHT_POS.x = 10.5): 9.0 sits cleanly between them, splitting that channel into an
+## INLANE (7.2..9.0, feeds back toward the flipper = save) and an OUTLANE (9.0..the slingshot, the
+## outer drain-risk channel), mirroring the LEFT guide's job on the field side of the lane.
+##
+## QA BUG-029 (2026-06-20) corrected the STALE part of the prior comment: it claimed the lane
+## divider was at 10.5, but the "Playtest fixes 2" lane resize moved LANE_INNER_X to 14.0. The
+## divider stays 9.0 (still the correct inlane/outlane split inboard of the slingshot) and stays
+## clear of the new x=15.0 launch path. The widened field band between the slingshot (10.5) and the
+## lane divider (14.0) is the right OUTLANE proper: a ball down it drains off the open bottom
+## (caught and SPENT by the OOB failsafe, OOB_DRAIN_Y - correct outlane "drain = risk", DESIGN "A
+## DRAIN YOU EARN, EITHER SIDE"), NOT a soft-lock. The transient-dip false-promotion that band could
+## feed is closed
+## independently by the BUG-031 reached-play-line hardening above (the line is now up-table of the
+## slingshot row, so a side-draining ball cannot falsely count as "in play"). The LEFT guide is
+## unchanged (no launch lane on the left, so its symmetric placement holds).
 const LANE_GUIDE_RIGHT_DIVIDER_X: float = 9.0
 ## The divider runs from just above the flipper pivot row down toward the drain, length below.
 ## QA BUG-024 FIX: the offset was 2.0, putting LANE_GUIDE_TOP_Z at 18.0. The slingshot KickerBody is

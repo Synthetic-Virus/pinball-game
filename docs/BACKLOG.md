@@ -445,6 +445,21 @@ Tasks (pull from here - keep them small and finishable):
       slingshot. Real instanced bodies, measured position/velocity, never a self-reported counter.
       Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance: the FULL updated suite runs GREEN on
       the homelab godot runner (the artifact, not a doc claim).
+      LEAD POLISH 2026-06-20 (QA findings B2 + BUG-029..032): folded in the hardening this slice owns.
+      (B2) tests/test_soft_lock_integration.gd ADDED - instances the REAL Table.tscn, fires a too-weak
+      strike through the real plunger, lets the live watchdog run past LAUNCH_SETTLE_TIME_S, and
+      asserts plunger.is_armed() true + NO balls_changed (the headline soft-lock fix, on the integrated
+      tree, not just the unit GameFlow). The false "integration check at the bottom" header claim in
+      test_soft_lock_recovery.gd is corrected to point at the new file. (BUG-031, root-cause) hardened
+      LAUNCH_REACHED_PLAY_Z from the flipper-pivot row (z=20) to the slingshot row (FLIPPER_PIVOT_Z -
+      3.5 = 16.5) so a side-draining ball can no longer transiently dip across the line and falsely
+      promote to BALL_IN_PLAY (the secondary soft-lock path). (BUG-030) slingshot.gd _body_yaw() fixed
+      to atan2(x, z) so the visible triangle face + solid body + detector all face the actual kick
+      direction (was 180 deg off, pointing the face at the drain - physics was already correct).
+      (BUG-029) confirmed the right field band is a designed OUTLANE (OOB spends correctly); corrected
+      the stale LANE_GUIDE_RIGHT_DIVIDER_X comment (lane divider is 14.0, not 10.5). (BUG-032) NOT
+      reproducible (the cap already faces +Y on both sides - QA had a 2D-cross sign error); hardened the
+      cap winding via signed-area anyway. All changed files gdlint-clean, no emoji/em-dash, lines <=100.
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (eight fixes only, no new element types/art/
       rescale) and that the soft-lock + flipper-material + triangular-sling + lane-resize + UX claims
       are GREEN on the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
