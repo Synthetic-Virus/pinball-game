@@ -61,6 +61,14 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
       Written: tests/test_game_flow.gd (test_drain_decrements_balls_and_requests_new_ball,
       test_game_over_at_zero_balls, test_no_new_ball_request_at_game_over). FAILS until
       gameplay-programmer fills on_ball_drained(). Correct pre-impl state.
+- [ ] TEST DEBT (locks BUG-023): drain trigger volume must not overlap the flipper-bat catch zone.
+      TWO assertions: (1) a CONFIG/structural assert DRAIN_Z - DRAIN_DEPTH/2 > max flipper-bat z
+      (the drain's up-table edge clears the bat sweep) - the cheap machine-check the existing
+      center-only assert is missing; (2) a BEHAVIORAL integration test that seats the REAL Ball
+      cradled on a REAL flipper (left, then right) held energized, watches Drain.ball_drained for
+      the full settle, asserts ZERO emissions (independent oracle). Goes in test_world_scale.gd +
+      test_table_integration.gd. Write it RED now (the current geometry overlaps), green after fix.
+      Owner: gamedev-test-builder + gamedev-qa-lead.
 
 ## Stream 2 - Bug repros (found defects, reproduced and logged)
 
@@ -895,7 +903,71 @@ tests/test_lane_pocket_drain.gd test_lane_resting_ball_does_not_drain - seats th
 BALL_START, watches the REAL Drain.ball_drained signal for the full settle, and asserts ZERO
 emissions (independent oracle, not a flag), plus a sanity check that the ball stayed in the lane.
 
+---
+
+### BUG-023 [BLOCKING] Drain trigger volume overlaps the entire flipper-bat catch zone - a ball falling to the flippers drains before it can be flipped
+
+Severity: BLOCKING - this breaks the core loop at Gate 0 (DESIGN: "the player catches the ball and
+chooses a shot"). A ball arriving at the flippers crosses the drain trigger's up-table edge (z=21)
+at the flipper PIVOT row, so drain.body_entered fires while the ball is still ~2.66 units up-table
+of the flipper faces. It is spent as a drain in BALL_IN_PLAY (the exact state on_ball_drained acts
+in - the GameFlow guard does NOT mask this), so the player loses a ball they were about to flip.
+Same defect CLASS as BUG-022 (drain geometry overlapping a legitimate ball position), now on the
+flipper cradle instead of the launch lane. The BUG-022 fix narrowed the drain in X but never
+reconciled the drain's Z extent with the flipper-bat Z span.
+
+Slice: Table reshape + playtest fixes. Found by QA review 2026-06-19 (geometry oracle).
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd:108 DRAIN_Z = HALF_LENGTH - 1.0 (= 24)
+- /home/virus/pinball-game/scripts/config/table_config.gd:121 DRAIN_DEPTH = 6.0
+- /home/virus/pinball-game/scripts/config/table_config.gd:92-93 FLIPPER_PIVOT_SPREAD 7.2 /
+  FLIPPER_PIVOT_Z = HALF_LENGTH - 5.0 (= 20)
+- /home/virus/pinball-game/scripts/drain.gd:35-52 (box sized DRAIN_WIDTH x WALL_HEIGHT x DRAIN_DEPTH,
+  centered at DRAIN_CENTER_X, DRAIN_Z)
+
+Evidence (geometry oracle, derived from the committed constants):
+1. Drain trigger box: x in [-16.0, 10.5], z in [DRAIN_Z - DRAIN_DEPTH/2, DRAIN_Z + DRAIN_DEPTH/2]
+   = [21.0, 27.0], y centered 0 with height WALL_HEIGHT 2.4 -> y in [-1.2, 1.2].
+2. Flipper bats at rest (both sides, symmetric): the bat sweeps from the pivot (x=+/-7.2, z=20.0)
+   to the tip (x=+/-1.23, z=23.66). The ENTIRE bat lies at z 21.46..23.66, fully inside the drain
+   z-band [21, 27], and at x inside the drain x-band [-16, 10.5].
+3. A ball falling down-table toward the flippers reaches z=21 (the drain's up-table edge) BEFORE it
+   reaches the bat faces (z 20..23.66). So body_entered fires as the ball passes the pivot row, ~2.66
+   units before it could land on a bat.
+4. The ball center over a cradling bat sits at y ~= 1.2 (bat-top 0.6 + ball radius 0.6), at the very
+   top edge of the drain y-band - on the tilted plane this is borderline, so the EXACT runtime trigger
+   point needs a real integration test to pin (see the test-debt item), but the volume overlap is
+   unambiguous and the design intent (drain is the gap BELOW/BETWEEN the flippers, not over them) is
+   violated by geometry.
+
+Why CI did not catch it: tests/test_world_scale.gd test_drain_position_is_past_flippers asserts only
+DRAIN_Z > FLIPPER_PIVOT_Z (24 > 20, passes). It checks the drain CENTER against the pivot, never the
+drain VOLUME's up-table edge against the flipper-bat catch zone. The trigger is the volume, not the
+center. This is the testability gap.
+
+Suggested fix (lead/physics): push the drain's up-table edge BELOW the flipper-tip z. Options:
+  (a) raise DRAIN_Z and/or shrink DRAIN_DEPTH so DRAIN_Z - DRAIN_DEPTH/2 > max flipper-bat z (>23.66),
+      e.g. DRAIN_DEPTH 2.0 with DRAIN_Z 25.0 -> edge at 24.0 (just below the tips) - but verify the
+      ball still drains before the open bottom edge (HALF_LENGTH 25);
+  (b) place the drain trigger purely BELOW the surface in the center gap (a catch box under the open
+      mouth) rather than a tall on-plane box that the flipper bats poke into.
+  Whatever the choice, the drain's up-table edge must clear the flipper-bat catch zone, and a ball
+  dribbling through the open mouth must still drain.
+
+Suggested GUT test to lock the fix (independent oracle): seat the REAL Ball cradled on a REAL left
+(then right) flipper held energized, watch Drain.ball_drained for the full settle, assert ZERO
+emissions; plus a config assert DRAIN_Z - DRAIN_DEPTH/2 > (max flipper-bat z) so the boundary is
+machine-checked the way BUG-022's was.
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
+- SLICE Table reshape: BUG-023 (drain-vs-flipper overlap) must be fixed AND a cradle-does-not-drain
+  integration test added before this slice can pass the producer's scope/finish gate. After the fix,
+  re-confirm test_world_scale drain asserts, test_lane_pocket_drain (center still drains, lane does
+  not), and a full headless GUT run GREEN ON THE RUNNER (the table-reshape slice has NEVER been
+  through CI - HEAD a4d509b has no CI run; last CI was 990644c, pre-slice).
 - SLICE core-interactions-physics: after BUG-012/013/015 fixes land, re-run the FULL GUT suite on
   the runner (not just the slice files) and confirm the pre-slice gates stay green: test_ball_tunneling.gd,
   test_flipper_momentum.gd, test_plunger.gd contract (the five tests that still pass), test_game_flow.gd,
