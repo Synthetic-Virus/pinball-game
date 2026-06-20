@@ -1128,12 +1128,137 @@ Awaiting CI green.
 
 ---
 
+### BUG-026 [BLOCKING] Table-reshape slice is RED on the runner - the #1 fix (the launch) does not fire in CI
+
+Severity: BLOCKING - the slice's headline fix (make the plunger actually launch the ball) is proven
+FALSE by the runner. CI on the pushed sha is the source of truth and it is FAILURE.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20 against the runner artifact
+(NOT a doc claim): PR #10, CI run 27858434688, status FAILURE. Totals: 143 tests, 137 passing,
+6 FAILING, 942 asserts. The producer gate requires GREEN CI on the pushed sha; this is provably red.
+
+The 6 failing tests, all read off the runner log (independent oracle):
+1. test_plunger_launch.gd::test_strike_imparts_velocity_to_ball - ball speed 0.00006 (rest), not > 1.0.
+2. test_plunger_launch.gd::test_full_power_outthrows_weak_strike - full 0.000002 NOT > weak 0.00004.
+3. test_plunger_launch.gd::test_launched_ball_speed_lands_in_design_range - got 0.000016, need >= 30.
+4. test_plunger_launch.gd::test_max_strike_does_not_tunnel... - ball ends z=24.08 > start 23.0 (it
+   drifted DOWN-table to the pocket, was never thrown up-table; the strike did nothing 20x).
+5. test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain - a real ball at the
+   cradle (z=23.06) STILL drains (BUG-023 not actually fixed at runtime - see BUG-028).
+6. test_target_no_tunneling.gd::test_tunneling_check_matches_flat_wall_test_threshold - stale
+   POST_RADIUS (see BUG-027).
+
+ROOT CAUSE of the launch failures (the four plunger_launch reds), traced from geometry + the impulse
+gate in scripts/plunger.gd._try_apply_launch_impulse (line 335: only fires if _ball.is_touching(_face)):
+- BALL_START.z = HALF_LENGTH - 2.0 = 23.0; the ball is parked there, then under the 7-deg tilt it
+  rolls DOWN-table (+Z) and settles against the lane pocket (LANE_POCKET_FACE_Z = 24.5), measured at
+  z ~= 24.08 after SETTLE_FRAMES.
+- PLUNGER_REST_POS.z = BALL_START.z + BALL_RADIUS + PLUNGER_FACE_THICKNESS*0.5 = 23.0 + 0.6 + 0.4 =
+  24.0. The face is seated at 24.0, which is now UP-table of the settled ball at 24.08.
+- So at the moment of the strike the ball is resting against the POCKET, not against the FACE. The
+  face at 24.0 is on the wrong side of the ball; is_touching(_face) is FALSE; the impulse never fires;
+  the ball never moves. The whole impulse-on-contact mechanism is geometrically defeated by the ball
+  settling past the face.
+The design is sound (impulse gated on a real contact, independent-oracle correct) but the SEATING is
+wrong: the ball must come to rest CONTACTING the face (between the face and the pocket, touching the
+face), or the strike must not require a pre-existing contact (the forward stroke must catch up to and
+strike the drifting ball). Either way, today the launch is dead in CI exactly as the developer
+reported in the deployed build - the fix did not fix it.
+
+Fix direction (physics-programmer): make the resting ball physically touch the plunger face. Options:
+(a) seat the face just up-table of BALL_START so the ball, drifting down-table, rests AGAINST the
+    face (face down-table of the ball, ball trapped between face and... no - the ball drifts toward
+    the pocket, so the face must be DOWN-table of the ball's rest, i.e. between the ball and the
+    pocket, and the ball rests on it). Re-derive PLUNGER_REST_POS.z and/or BALL_START.z so the
+    settled ball is in continuous contact with the face (assert it: ball.is_touching(face) is TRUE
+    after SETTLE_FRAMES, a new structural-behavioral test).
+(b) drop the is_touching pre-gate and instead apply the impulse on the first frame the forward stroke
+    REGISTERS a fresh contact with the ball (drive the face into the ball even if it starts a hair
+    apart), so a ball resting anywhere ahead of the face is struck when the stroke reaches it.
+Add a test that asserts the settled ball touches the face (lock the seating), not only that a strike
+imparts speed (which masks WHY it failed).
+
+---
+
+### BUG-027 [HIGH] test_target_no_tunneling.gd POST_RADIUS is stale (1.5) after the resize to 2.0 - the resized-target stress gate is wrong AND red
+
+Severity: HIGH - this is the slice-item-5 stress gate ("no tunneling on the BIGGER target at >= 2x
+LAUNCH_SPEED_MAX"). The resize raised target.gd POST_RADIUS 1.5 -> 2.0, but this stress test still
+hardcodes 1.5, so it both FAILS CI and tests the wrong geometry.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20.
+
+Files:
+- /home/virus/pinball-game/scripts/target.gd:47  const POST_RADIUS: float = 2.0  (the resize)
+- /home/virus/pinball-game/tests/test_target_no_tunneling.gd:28  const POST_RADIUS: float = 1.5 (STALE)
+
+Evidence:
+1. git log 990644c..HEAD on tests/test_target_no_tunneling.gd is EMPTY: the slice resized the post
+   but NEVER updated this stress test. test_target_physical.gd WAS updated to 2.0 (line 33); this one
+   was missed.
+2. CI run 27858434688: test_tunneling_check_matches_flat_wall_test_threshold FAILS:
+   "[2.0] expected to equal [1.5]: test constant POST_RADIUS (1.500) does not match the actual
+   deflector radius (2.000)." The test's own maintenance guard caught it.
+3. The stress LOOP also uses the stale 1.5: tunnel_threshold = 1.5 + BALL_RADIUS*0.5 = 1.8, but the
+   real far face is at 2.0, so the loop's pass band is mis-calibrated for the body it fires at. The
+   gate that is supposed to prove the BIGGER post does not tunnel is not actually measuring the bigger
+   post correctly. Even when the consistency assert is fixed, the loop threshold must move to 2.0.
+
+Fix: set POST_RADIUS = 2.0 in test_target_no_tunneling.gd (matching target.gd and
+test_target_physical.gd). Better: read the radius from the live Deflector shape in before_each so the
+constant cannot drift again (the file already reads it in the consistency test - reuse that). Re-run
+the 100-iteration loop at 2x LAUNCH_SPEED_MAX against the 2.0 post and confirm green.
+
+---
+
+### BUG-028 [HIGH] BUG-023 "fix" satisfied the config arithmetic but the real ball still drains in the cradle
+
+Severity: HIGH - the BUG-023 fix (commit 73f8fc7) tuned DRAIN_Z/DRAIN_DEPTH so the CONFIG assert
+passes, but the BEHAVIORAL integration test still FAILS: a real ball seated at the cradle drains.
+The config oracle is a false comfort; the behavioral oracle is the truth and it is red.
+
+Slice: table-reshape-playtest-fixes. Found by QA peer review 2026-06-20.
+
+Files:
+- /home/virus/pinball-game/scripts/config/table_config.gd (DRAIN_Z, DRAIN_DEPTH, FLIPPER_BAT_MAX_Z)
+- /home/virus/pinball-game/scripts/drain.gd (the drain Area3D volume)
+- /home/virus/pinball-game/tests/test_world_scale.gd::test_drain_up_table_edge_clears_the_flipper_bat_catch_zone (config assert - PASSES)
+- /home/virus/pinball-game/tests/test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain (behavioral - FAILS)
+
+Evidence (CI run 27858434688):
+1. test_drain_up_table_edge_clears_the_flipper_bat_catch_zone shows '*' (PASS): the arithmetic guard
+   DRAIN_Z - DRAIN_DEPTH/2 > FLIPPER_BAT_MAX_Z (23.66) is satisfied.
+2. test_ball_in_flipper_catch_zone_does_not_drain FAILS: "Expected Drain to NOT emit ball_drained:
+   a ball in the flipper catch zone (z=23.06) must NOT drain (QA BUG-023)" at line 206.
+3. So a REAL ball placed where a player cradles it (z=23.06, below the asserted clearance edge) still
+   enters the drain volume and fires ball_drained. The config math says the edge clears the bat MAX_Z
+   (23.66) but the ball at 23.06 is UP-table of that and STILL drains - meaning either the drain
+   volume in drain.gd is larger/positioned differently than the constants imply, or FLIPPER_BAT_MAX_Z
+   (23.66) under-states the real catch zone, or the ball settles into the volume from above.
+4. This is exactly why the QA backlog mandated TWO oracles for BUG-023 (a config assert AND a
+   behavioral integration test). The config assert alone would have shipped this as "fixed".
+
+Fix direction (lead/physics): make the BEHAVIORAL test green, not just the config assert. Either move
+the drain volume further down-table (raise DRAIN_Z and/or shrink DRAIN_DEPTH so the actual Area3D
+up-table edge sits below the real ball-rest at the cradle), or correct FLIPPER_BAT_MAX_Z to the true
+down-table extent of a cradled ball. Verify with the behavioral test, then re-confirm the center
+still drains (test_lane_pocket_drain center-X reaches the drain).
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
-- SLICE Table reshape: BUG-023 (drain-vs-flipper overlap) must be fixed AND a cradle-does-not-drain
-  integration test added before this slice can pass the producer's scope/finish gate. After the fix,
-  re-confirm test_world_scale drain asserts, test_lane_pocket_drain (center still drains, lane does
-  not), and a full headless GUT run GREEN ON THE RUNNER (the table-reshape slice has NEVER been
-  through CI - HEAD a4d509b has no CI run; last CI was 990644c, pre-slice).
+- SLICE Table reshape: THE RUNNER IS RED. The slice HAS now been through CI (PR #10, run
+  27858434688 on the pushed sha) and it FAILED: 6 failing tests (see BUG-026/027/028). The producer
+  gate (GREEN CI on the pushed sha) CANNOT pass on this sha. Blockers to clear before re-review:
+  (1) BUG-026 - the launch does not fire (4 plunger_launch reds; the ball settles past the face so
+      is_touching is false and no impulse fires). This is the slice's #1 reason to exist; it is dead.
+  (2) BUG-028 - BUG-023 is NOT actually fixed at runtime (cradle still drains) despite the config
+      assert passing.
+  (3) BUG-027 - the resized-target stress gate has a stale POST_RADIUS (1.5 vs 2.0) and is red.
+  After fixes: re-confirm test_world_scale drain asserts AND test_table_integration cradle behavior,
+  test_lane_pocket_drain (center still drains, lane does not), test_plunger_launch (all behavioral +
+  stress green with a REAL launch), test_target_no_tunneling at the 2.0 post, and a full headless GUT
+  run GREEN ON THE RUNNER. Re-derive green from the runner artifact, never from a BACKLOG note.
 - SLICE core-interactions-physics: after BUG-012/013/015 fixes land, re-run the FULL GUT suite on
   the runner (not just the slice files) and confirm the pre-slice gates stay green: test_ball_tunneling.gd,
   test_flipper_momentum.gd, test_plunger.gd contract (the five tests that still pass), test_game_flow.gd,
