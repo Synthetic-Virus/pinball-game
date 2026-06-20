@@ -918,6 +918,15 @@ reconciled the drain's Z extent with the flipper-bat Z span.
 
 Slice: Table reshape + playtest fixes. Found by QA review 2026-06-19 (geometry oracle).
 
+LEAD FIX LANDED 2026-06-19 (polish pass): added FLIPPER_BAT_MAX_Z (23.66, QA's pessimistic oracle)
+and DRAIN_BAT_CLEARANCE (0.6) to TableConfig; shrank DRAIN_DEPTH 6.0 -> 1.6 and re-derived DRAIN_Z =
+FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH/2 = 25.06, so the drain volume's up-table edge
+sits at 24.26 - cleanly below the bats (23.66) and above the open bottom mouth. drain.gd comment
+updated. Two config asserts added to tests/test_world_scale.gd (up-table edge > FLIPPER_BAT_MAX_Z;
+center not far past the open bottom) and one cradle integration test added to
+tests/test_table_integration.gd (real Ball seated in the flipper catch zone, real Drain watched,
+ZERO ball_drained emissions). table_viz.py DRAIN_Z now tracks the config formula. Awaiting CI green.
+
 Suspected files/lines:
 - /home/virus/pinball-game/scripts/config/table_config.gd:108 DRAIN_Z = HALF_LENGTH - 1.0 (= 24)
 - /home/virus/pinball-game/scripts/config/table_config.gd:121 DRAIN_DEPTH = 6.0
@@ -1028,6 +1037,14 @@ Suggested GUT test to lock the fix:
   (or less than an epsilon like 0.01). This is a pure geometry assertion that can be computed
   from the committed TableConfig constants without running physics.
 
+LEAD FIX LANDED 2026-06-19 (polish pass): took option (a) - raised LANE_GUIDE_TOP_Z from
+FLIPPER_PIVOT_Z - 2.0 (18.0) to FLIPPER_PIVOT_Z - 1.0 (19.0), clearing the sling outer corner
+(18.32) by 0.68 (> BALL_RADIUS 0.6), more headroom than the suggested 18.35. Does not change shot
+geometry. Added test_slingshot_and_lane_guide_do_not_overlap to tests/test_furniture_layout.gd: it
+computes each body's world AABB from the LIVE instanced scene (global transform x box size over all
+8 rotated corners) and asserts the slingshot-vs-guide intersection volume is < 0.001 on both sides.
+table_viz.py LANE_GUIDE_TOP_Z now mirrors the new config formula. Awaiting CI green.
+
 ---
 
 ### BUG-025 [MEDIUM] Plunger face has sync_to_physics = true AND an explicit apply_central_impulse active simultaneously - ball can receive double the intended launch energy if Jolt executes both transfers
@@ -1098,6 +1115,16 @@ Suggested GUT test to lock the fix:
   99 u/s cap) without being sensitive to normal launch variance. The existing test asserts
   LAUNCH_SPEED_MIN..LAUNCH_SPEED_MAX on a post-settle position oracle, which does not directly
   bound peak speed at the moment of launch.
+
+LEAD FIX LANDED 2026-06-19 (polish pass): took option (a) - set _face.sync_to_physics = false in
+scripts/plunger.gd._build_face so the launch momentum comes SOLELY from the explicit impulse (one
+mechanism, no double-count). The face is still a SOLID moving barrier (its collision shape blocks
+the ball and backs up the ball's CCD against backward tunneling); it just no longer reports velocity
+to the solver. Added test_full_strike_peak_speed_stays_under_double_energy_ceiling to
+tests/test_plunger_launch.gd: it fires a full-power strike and samples ball.current_speed() each of
+the first 12 frames (in the straight lane, before any arch bounce), asserting the PEAK stays under
+LAUNCH_SPEED_MAX * 1.1 = 99 (a correct single-impulse launch peaks ~78; a 2x stack would hit ~156).
+Awaiting CI green.
 
 ---
 

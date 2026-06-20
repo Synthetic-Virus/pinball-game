@@ -112,10 +112,17 @@ func _build_face() -> void:
 	# KINEMATIC_OBSTACLES, mask = balls only: it pushes the ball, nothing else (matches flippers).
 	_face.collision_layer = PhysicsLayers.KINEMATIC_OBSTACLES
 	_face.collision_mask = PhysicsLayers.KINEMATIC_COLLISION_MASK
-	# sync_to_physics: derive the body's velocity from its per-frame transform change and report it to
-	# the solver, so a scripted move actually imparts momentum to the ball on contact (the whole point
-	# of a PHYSICAL plunger). Without this the face would teleport and the ball would feel a teleport.
-	_face.sync_to_physics = true
+	# sync_to_physics is deliberately OFF (QA BUG-025). The launch momentum comes SOLELY from the
+	# explicit impulse in _try_apply_launch_impulse (the reliable mechanism this slice adopted because
+	# Jolt's animated-body contact transfer is unreliable - see the LAUNCH MECHANISM FIX note above).
+	# Leaving sync_to_physics ON would ADD the solver's contact-velocity transfer ON TOP of that
+	# impulse whenever Jolt DOES resolve the contact, double-counting the launch energy: at full power
+	# the ball could leave at ~2x PLUNGER_STROKE_SPEED_MAX (~156 u/s), above every per-mechanism cap
+	# (KICK_MAX_OUTGOING_SPEED 120) and outside the intended LAUNCH_SPEED_MIN..MAX band. With sync OFF
+	# the face is still a SOLID moving barrier (its collision shape blocks the ball and backs up the
+	# ball's CCD so the struck ball cannot tunnel backward); it simply does not report velocity to the
+	# solver, so the impulse is the one and only momentum source. ONE mechanism, no double-count.
+	_face.sync_to_physics = false
 
 	# Low bounce, some friction: a clean momentum transfer, not a trampoline (mirrors the steel ball).
 	var material := PhysicsMaterial.new()

@@ -97,15 +97,50 @@ const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain t
 const FLIPPER_REST_ANGLE: float = -0.55
 const FLIPPER_UP_ANGLE: float = 0.15
 
+## The MAXIMUM down-table (greatest +Z) a flipper BAT reaches at any swing angle, in playfield-local
+## Z. This is the DOWN-TABLE EDGE of the "catch zone" the drain volume must stay clear of (QA
+## BUG-023): if the drain's up-table edge sits above (less than) this, the drain swallows the ball a
+## player was about to cradle/flip, breaking the core loop. DERIVATION (independent oracle, QA
+## BUG-023): a bat of length FLIPPER_LENGTH and half-width FLIPPER_WIDTH/2, pivoted at
+## FLIPPER_PIVOT_Z and rotated through the rest..up sweep, reaches at most ~21.74 by the precise
+## corner math; QA's bounding-box oracle put a far corner at 23.66. We take the LARGER (pessimistic)
+## value PLUS a clearance margin so the drain edge clears the bat with room to spare regardless of
+## which oracle is tighter. The test_world_scale config assert pins DRAIN_Z - DRAIN_DEPTH/2 above
+## this value, so the boundary is machine-checked the way BUG-022's was.
+const FLIPPER_BAT_MAX_Z: float = 23.66
+## Clearance the drain's up-table edge keeps ABOVE FLIPPER_BAT_MAX_Z. Half a ball diameter is a
+## comfortable, readable buffer (a ball whose CENTER is still above the bat zone cannot trip the
+## drain). Increase if a future flipper resize pushes the bat zone further down-table.
+const DRAIN_BAT_CLEARANCE: float = 0.6
+
 ## ---- DRAIN -------------------------------------------------------------------------------------
 ## Open center drain: a trigger volume below the flippers. A ball entering it is lost.
-## DRAIN_Z sits BELOW the flipper pivot row (FLIPPER_PIVOT_Z = 20) but INSIDE the playfield bottom
-## edge (HALF_LENGTH = 25), so a ball that gets past the flippers falls into the drain BEFORE it can
-## reach the open bottom edge. table_geometry.gd deliberately leaves the bottom perimeter OPEN (no
-## bottom wall) so nothing blocks the drain. Earlier this was HALF_LENGTH + 2 = 27, which placed the
-## trigger 2 units OUTSIDE the playfield - if a naive bottom wall were ever built it would block the
-## drain (QA BUG-004). Keeping it inside the field removes that dependency.
-const DRAIN_Z: float = HALF_LENGTH - 1.0
+## DRAIN_Z sits BELOW the flipper bat catch zone (the drain up-table edge clears FLIPPER_BAT_MAX_Z)
+## but its center stays INSIDE the playfield bottom edge (HALF_LENGTH = 25), so a ball that gets
+## past the flippers falls into the drain BEFORE it reaches the open bottom edge. table_geometry.gd
+## deliberately leaves the bottom perimeter OPEN (no bottom wall) so nothing blocks the drain.
+## Earlier this was HALF_LENGTH + 2 = 27, placing the trigger 2 units OUTSIDE the playfield - if a
+## naive bottom wall were ever built it would block the drain (QA BUG-004). Keeping the CENTER
+## inside the field removes that dependency.
+##
+## QA BUG-023 FIX: the previous DRAIN_Z (HALF_LENGTH - 1 = 24) with DRAIN_DEPTH 6 spanned z
+## [21.0, 27.0]. Its up-table edge (21.0) sat ABOVE the flipper bats (which reach down-table to
+## ~23.66), so the drain volume overlapped the flipper catch zone: a ball falling toward the
+## flippers crossed the drain up-table edge ~2.66 units BEFORE reaching the bat faces and drained
+## while the player was about to flip it (a Gate-0 core-loop break). The drain is the gap BELOW the
+## not OVER them. FIX: shrink DRAIN_DEPTH and place DRAIN_Z so the up-table edge sits a clearance
+## margin BELOW the bat zone, while the center stays inside the field. The down-table edge may
+## extend a little past the open bottom (the ball simply falls into it there), which is fine.
+##   up_table_edge = DRAIN_Z - DRAIN_DEPTH/2  must be  > FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE
+## We size DRAIN_DEPTH first (a slim catch band is enough below the flippers), then place DRAIN_Z so
+## the up-table edge lands exactly at FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE.
+const DRAIN_DEPTH: float = 1.6
+## Up-table edge = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE = 24.26; center = edge + DRAIN_DEPTH/2 =
+## 25.06. The center sits a hair past HALF_LENGTH (25.0); the down-table half of the slim band hangs
+## just below the open bottom mouth (where the ball is already lost), and the trigger fires on the
+## up-table edge at 24.26, cleanly below the bats and above the open bottom. The test_world_scale
+## config assert (DRAIN_Z - DRAIN_DEPTH/2 > FLIPPER_BAT_MAX_Z) machine-checks this boundary.
+const DRAIN_Z: float = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH * 0.5
 ## DRAIN spans ONLY the OPEN CENTER region, NOT the launch lane (QA B3 / BUG-003-class fix).
 ## DESIGN mandates an "open CENTER drain between/below the flippers"; the launch lane on the +X side
 ## (x in [LANE_INNER_X, HALF_WIDTH]) is a RESTING chute, not a drain. A full-width drain volume
@@ -118,7 +153,6 @@ const DRAIN_Z: float = HALF_LENGTH - 1.0
 const DRAIN_WIDTH: float = HALF_WIDTH + LANE_INNER_X  ## Open center: -HALF_WIDTH .. +LANE_INNER_X.
 ## Midpoint of the open center region (NOT 0): the X the drain volume is centered on.
 const DRAIN_CENTER_X: float = (LANE_INNER_X - HALF_WIDTH) * 0.5
-const DRAIN_DEPTH: float = 6.0
 
 ## Out-of-bounds failsafe (defense in depth, QA BUG-006): if the ball ever escapes the playfield
 ## sideways or pops over a wall, it would fall forever and soft-lock the game in BALL_IN_PLAY. A
@@ -379,7 +413,18 @@ const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 ## sides). Verified by test_furniture_layout + table_viz feed-path plot.
 const LANE_GUIDE_DIVIDER_X: float = HALF_WIDTH - 3.0
 ## The divider runs from just above the flipper pivot row down toward the drain, length below.
-const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 2.0
+## QA BUG-024 FIX: the offset was 2.0, putting LANE_GUIDE_TOP_Z at 18.0. The slingshot KickerBody is
+## an angled box (SLINGSHOT_LENGTH x SLINGSHOT_THICKNESS, yawed by atan2(0.6,0.8) = 36.87 deg) whose
+## OUTER (toward the side wall) corner reaches down-table to z = 18.32, 0.32 units PAST the old
+## guide top. The two StaticBody3D bodies then shared the band z [18.0, 18.32] in the outlane ball
+## path. Two static bodies do not collide with each other, but the OVERLAPPING surfaces form a
+## concave seam: a ball (radius 0.6 > the 0.14/0.32 overlap) touching both at once gives the solver
+## two conflicting contact normals, which can spike velocity or briefly clip (CCD does NOT guard a
+## static-body seam). FIX: raise LANE_GUIDE_TOP_Z above the sling outer corner by at least one
+## BALL_RADIUS so guide and sling never share volume. offset 1.0 -> top z = 19.0, clearing the sling
+## corner (18.32) by 0.68 (> BALL_RADIUS 0.6). This does NOT change shot geometry (the divider just
+## starts a unit higher up-table); test_furniture_layout asserts the static-body clearance.
+const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 1.0
 const LANE_GUIDE_BOTTOM_Z: float = HALF_LENGTH - 2.0
 const LANE_GUIDE_THICKNESS: float = WALL_THICKNESS
 const LANE_GUIDE_HEIGHT: float = WALL_HEIGHT

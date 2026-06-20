@@ -79,6 +79,33 @@ func test_drain_position_is_past_flippers() -> void:
 		]
 	)
 
+func test_drain_up_table_edge_clears_the_flipper_bat_catch_zone() -> void:
+	# QA BUG-023: the drain VOLUME (not just its center) must not overlap the flipper bats. A ball
+	# falling toward the flippers must reach the bat catch zone WITHOUT first crossing the drain's
+	# up-table edge, or it drains while the player is about to cradle/flip it (core-loop break).
+	# The drain volume's up-table edge is DRAIN_Z - DRAIN_DEPTH/2; it must sit below (greater Z than)
+	# the furthest down-table a bat reaches (FLIPPER_BAT_MAX_Z), with a clearance margin. This is the
+	# same machine-checked boundary BUG-022 introduced, now applied to the cradle, not the lane.
+	var up_table_edge: float = TableConfig.DRAIN_Z - TableConfig.DRAIN_DEPTH * 0.5
+	assert_true(
+		up_table_edge > TableConfig.FLIPPER_BAT_MAX_Z,
+		"drain up-table edge (%f) must clear the flipper bat catch zone (FLIPPER_BAT_MAX_Z=%f)" % [
+			up_table_edge, TableConfig.FLIPPER_BAT_MAX_Z
+		]
+	)
+
+func test_drain_center_stays_inside_or_at_the_open_bottom() -> void:
+	# QA BUG-004 guard, re-checked after the BUG-023 reshape: the drain CENTER must not sit far
+	# outside the open bottom edge (where a stray future bottom wall could block it). A slim band
+	# whose center hangs at most one depth past HALF_LENGTH is acceptable (the down-table half is the
+	# already-lost open mouth); assert it does not drift wildly past the field.
+	assert_true(
+		TableConfig.DRAIN_Z <= TableConfig.HALF_LENGTH + TableConfig.DRAIN_DEPTH,
+		"DRAIN_Z (%f) must not sit far past the open bottom edge (HALF_LENGTH=%f)" % [
+			TableConfig.DRAIN_Z, TableConfig.HALF_LENGTH
+		]
+	)
+
 func test_ball_start_is_in_the_launch_lane() -> void:
 	# BALL_START.x must be between LANE_INNER_X and HALF_WIDTH (inside the right lane).
 	assert_true(

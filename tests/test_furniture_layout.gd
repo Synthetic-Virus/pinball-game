@@ -178,3 +178,60 @@ func test_both_lane_guides_at_correct_widened_spacing() -> void:
 			"LaneGuideRight position x=%f should be near LANE_GUIDE_DIVIDER_X=%f on the right side"
 			% [right.position.x, expected_x]
 		)
+
+
+# ---- STATIC-BODY CLEARANCE (QA BUG-024) ---------------------------------------------------------
+# Two StaticBody3D bodies do not collide with each other, so an OVERLAP between them raises no
+# engine warning - but the overlapping surfaces form a concave seam that hands the solver two
+# conflicting contact normals when the ball straddles both, causing velocity spikes or micro-clips
+# CCD cannot guard. The slingshot KickerBody outer corner overlapped the LaneGuide wall in the
+# outlane path (z band [18.0, 18.32]). This computes each body's world AABB from the LIVE scene
+# (global transform x shape size, an independent oracle on the instanced geometry) and asserts every
+# slingshot-vs-guide pair is disjoint. It FAILS at the old LANE_GUIDE_TOP_Z, PASSES after the fix.
+
+## World-space AABB of a StaticBody3D's first BoxShape3D (accounts for the body's yaw). Returns a
+## zero-size AABB at the body origin if no box shape is found (a missing body fails loudly above).
+func _body_world_aabb(body: Node3D) -> AABB:
+	var col: CollisionShape3D = body.find_child("*", true, false) as CollisionShape3D
+	for child in body.get_children():
+		if child is CollisionShape3D and (child as CollisionShape3D).shape is BoxShape3D:
+			col = child as CollisionShape3D
+			break
+	if col == null or not (col.shape is BoxShape3D):
+		return AABB((body as Node3D).global_position, Vector3.ZERO)
+	var half: Vector3 = (col.shape as BoxShape3D).size * 0.5
+	var xform: Transform3D = col.global_transform
+	# Expand the world AABB over all 8 rotated corners of the box.
+	var aabb := AABB(xform.origin, Vector3.ZERO)
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			for sz in [-1.0, 1.0]:
+				var corner: Vector3 = xform * Vector3(sx * half.x, sy * half.y, sz * half.z)
+				aabb = aabb.expand(corner)
+	return aabb
+
+
+func test_slingshot_and_lane_guide_do_not_overlap() -> void:
+	## QA BUG-024: assert the slingshot KickerBody and the LaneGuide wall share NO volume on either
+	## side. An AABB intersection of effectively zero is required (a tiny epsilon absorbs float noise).
+	if not ("slingshots" in _table):
+		return
+	var guides: Array[Node3D] = []
+	for guide_name in ["LaneGuideLeft", "LaneGuideRight"]:
+		var g: Node3D = _table.find_child(guide_name, true, false) as Node3D
+		if g != null:
+			guides.append(g)
+	for sling in _table.slingshots:
+		var body: Node3D = (sling as Node).find_child("KickerBody", true, false) as Node3D
+		if body == null:
+			continue
+		var sling_aabb: AABB = _body_world_aabb(body)
+		for guide in guides:
+			var guide_aabb: AABB = _body_world_aabb(guide)
+			var overlap: AABB = sling_aabb.intersection(guide_aabb)
+			var vol: float = overlap.size.x * overlap.size.y * overlap.size.z
+			assert_lt(
+				vol, 0.001,
+				"slingshot KickerBody must not overlap %s (overlap volume %f, size %s)"
+				% [guide.name, vol, str(overlap.size)]
+			)
