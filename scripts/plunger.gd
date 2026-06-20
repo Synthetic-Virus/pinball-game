@@ -117,8 +117,8 @@ func _build_face() -> void:
 	# Jolt's animated-body contact transfer is unreliable - see the LAUNCH MECHANISM FIX note above).
 	# Leaving sync_to_physics ON would ADD the solver's contact-velocity transfer ON TOP of that
 	# impulse whenever Jolt DOES resolve the contact, double-counting the launch energy: at full power
-	# the ball could leave at ~2x PLUNGER_STROKE_SPEED_MAX (~156 u/s), above every per-mechanism cap
-	# (KICK_MAX_OUTGOING_SPEED 120) and outside the intended LAUNCH_SPEED_MIN..MAX band. With sync OFF
+	# the ball could leave at ~2x PLUNGER_STROKE_SPEED_MAX (~216 u/s after the "Fix the launch" slice
+	# raised the stroke max to 108), far above the intended LAUNCH_SPEED_MIN..MAX band. With sync OFF
 	# the face is still a SOLID moving barrier (its collision shape blocks the ball and backs up the
 	# ball's CCD so the struck ball cannot tunnel backward); it simply does not report velocity to the
 	# solver, so the impulse is the one and only momentum source. ONE mechanism, no double-count.

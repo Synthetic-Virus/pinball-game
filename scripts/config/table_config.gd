@@ -224,8 +224,38 @@ const BALL_START: Vector3 = Vector3(15.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
 ## target the physical plunger strike is calibrated against; the HUD/tests still read these bounds.
-const LAUNCH_SPEED_MIN: float = 30.0
-const LAUNCH_SPEED_MAX: float = 90.0
+##
+## RAISE THE FLOOR (SLICE "Fix the launch", 2026-06-20): LAUNCH_SPEED_MIN 30 -> 60, LAUNCH_SPEED_MAX
+## 90 -> 110. WHY (measured-first, the slice's measure-then-fix rule):
+##
+## THE BUG (cause (a), floor-too-low - confirmed by geometry, then by the diagnostic harness
+## tests/test_launch_diagnostic.gd which gd_prints the delivered speed + apex at MIN/MID/MAX):
+## the ball rests at BALL_START.z = 23.0 and the launch lane is walled (the LaneDivider at
+## LANE_INNER_X) all the way up to where it ends at z = ARCH_CENTER_Z + ARCH_RADIUS_Z = -13.0, where
+## the arch curves the ball over into the open field. So to ESCAPE the lane the ball must climb from
+## z=23.0 to z=-13.0 = 36 units; to crest the arch center (z=-19) it climbs 42 units. The down-slope
+## deceleration on the 7-degree tilt is GRAVITY*sin(7) = 24.37 u/s^2, so the FRICTIONLESS climb
+## requirement is sqrt(2*24.37*36) = ~41.9 u/s to reach the divider top and sqrt(2*24.37*42) =
+## ~45.3 u/s to crest the arch center. Rolling friction (BALL_FRICTION 0.4) bleeds more on top of
+## that. The OLD floor (LAUNCH_SPEED_MIN 30, fed by PLUNGER_STROKE_SPEED_MIN 30) delivered a ball
+## WELL BELOW the ~42-45 u/s climb requirement, so the entire lower half of the meter climbed part
+## way, stalled, and rolled back - the exact reported symptom. The bottom of the meter was a dead
+## zone.
+##
+## THE FIX: raise the FLOOR to 60 u/s - comfortably above the ~45.3 u/s frictionless arch-crest
+## requirement, with ~15 u/s of margin to absorb the rolling-friction / wall-rattle loss the
+## diagnostic measures in the snug lane, so EVEN A MINIMUM plunge crests the arch and enters the
+## open field (the whole meter is now useful, no dead bottom half). MAX rises to 110 to keep a
+## clearly-readable weak-vs-strong spread (110/60 = 1.83x, well over the 1.5x feel floor in
+## test_plunger_launch.gd) and to keep a hard plunge feeling punchy. The mapping stays monotonic and
+## the contract (power 0..1) is unchanged - this is a TUNING change behind the same contract.
+##
+## NO-TUNNEL: every no-tunnel stress test fires at 2.0 * LAUNCH_SPEED_MAX (read LIVE, never
+## hardcoded), so raising MAX to 110 raises the stress speed to 220 u/s automatically; at 240 Hz
+## that is 0.92 u/step and the ball's continuous_cd sweeps continuously, so the gate holds (the
+## stress suite re-confirms zero tunneling at the new 220 u/s).
+const LAUNCH_SPEED_MIN: float = 60.0
+const LAUNCH_SPEED_MAX: float = 110.0
 
 ## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
 ## The plunger is now a PHYSICAL body (AnimatableBody3D on KINEMATIC_OBSTACLES, like the flippers)
@@ -241,8 +271,17 @@ const LAUNCH_SPEED_MAX: float = 90.0
 ## are the first on-device tuning knobs: verify in the browser build that a full strike clears the
 ## arch and a min strike dribbles, and nudge these two numbers (only) if needed. Tests assert the
 ## MAPPING is monotonic and meaningful and that the ball lands in-range, not an exact value.
-const PLUNGER_STROKE_SPEED_MIN: float = 30.0  ## Power 0.0: a gentle dribble out of the lane.
-const PLUNGER_STROKE_SPEED_MAX: float = 78.0  ## Power 1.0: a hard strike that clears the arch.
+## RAISE THE FLOOR (SLICE "Fix the launch", 2026-06-20): the stroke speeds FEED the delivered ball
+## speed (the launch impulse is mass * stroke_speed applied to a ball at rest, so the ball leaves at
+## ~the stroke speed - see scripts/plunger.gd _try_apply_launch_impulse). So these track
+## LAUNCH_SPEED_MIN..MAX. MIN 30 -> 60 so even the weakest plunge delivers ~60 u/s, above the
+## ~45.3 u/s arch-crest climb requirement plus the measured friction loss (see the LAUNCH_SPEED_MIN
+## WHY note above). MAX 78 -> 108: a hard strike delivers ~108 u/s (just under LAUNCH_SPEED_MAX 110,
+## so a full launch lands inside the design band and the test_plunger_launch double-energy peak
+## ceiling LAUNCH_SPEED_MAX*1.1 = 121 is comfortably clear, with a steel-ball restitution bounce on
+## top). Spread 108/60 = 1.8x preserves the readable weak-vs-strong feel (>= the 1.5x test floor).
+const PLUNGER_STROKE_SPEED_MIN: float = 60.0   ## Power 0.0: clears the lane with margin (was 30).
+const PLUNGER_STROKE_SPEED_MAX: float = 108.0  ## Power 1.0: a hard strike, just under MAX (was 78).
 
 ## How far (world units) the plunger face travels up-table on a full stroke before it returns home.
 ## It only needs to travel far enough to stay in solid contact with the ball through the strike; a

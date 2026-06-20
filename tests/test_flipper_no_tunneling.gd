@@ -23,8 +23,9 @@ extends GutTest
 
 ## Fire the worst-case shot many times. Matches the flat-wall and target stress loops (100 / 60).
 const TEST_ITERATIONS: int = 80
-## At 240 Hz, 30 frames = 125 ms. A ball at 2*LAUNCH_SPEED_MAX (180 u/s) travels 22.5 units in that
-## span, far past a bat a few units away, so a missed contact shows up as the ball behind the bat.
+## At 240 Hz, 30 frames = 125 ms. A ball at 2*LAUNCH_SPEED_MAX (220 u/s after the "Fix the launch"
+## slice raised MAX to 110) travels 27.5 units in that span, far past a bat a few units away, so a
+## missed contact shows up as the ball behind the bat. _test_speed reads the live config.
 const STEP_FRAMES: int = 30
 ## How far in front of the bat face (along the face normal) the ball starts each shot.
 const START_OFFSET: float = 4.0

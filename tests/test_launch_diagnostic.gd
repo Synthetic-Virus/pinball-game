@@ -109,25 +109,71 @@ func _measure_apex(power: float) -> float:
 # helpers above are STABLE so the test-builder can write test_launch_clears_lane.gd against the same
 # rig in parallel.
 
+## The frictionless climb requirement to crest the arch center, in u/s. Derived from the geometry
+## (see table_config.gd LAUNCH_SPEED_MIN WHY note): sqrt(2 * GRAVITY*sin(TILT) * climb), where the
+## climb is BALL_START.z to ARCH_CENTER_Z. Read LIVE so it tracks the geometry, never hardcoded.
+func _arch_crest_requirement() -> float:
+	var decel: float = TableConfig.GRAVITY * sin(deg_to_rad(TableConfig.TILT_DEG))
+	var climb: float = TableConfig.BALL_START.z - TableConfig.ARCH_CENTER_Z
+	return sqrt(2.0 * decel * climb)
+
+
 func test_report_delivered_speed_min_mid_max() -> void:
-	## Measure the delivered ball speed at MIN / MID / MAX and report it. Pre-fix this confirms cause
-	## (a): the MIN delivered speed is below the ~45.3 u/s climb requirement. Post-fix the MIN
-	## delivered speed must EXCEED the climb requirement plus the measured rattle/friction loss.
-	## ASSERT (post-fix): delivered_min >= the climb requirement (~45.3) plus a margin the physics-
-	## programmer sets from the measurement. ALSO assert delivered_max <= LAUNCH_SPEED_MAX * ~1.1
-	## (no double-energy spike) and delivered_max >= 1.5 * delivered_min (the spread holds).
-	pending(
-		"physics-programmer: fire MIN/MID/MAX, gd_print + assert delivered speeds; report the numbers"
+	## Measure the delivered ball speed at MIN / MID / MAX and report it. Pre-fix this confirmed cause
+	## (a): the MIN delivered speed was below the ~45.3 u/s climb requirement. Post-fix (floor raised
+	## to LAUNCH_SPEED_MIN 60 / PLUNGER_STROKE_SPEED_MIN 60) the MIN delivered speed must EXCEED the
+	## climb requirement, and the MAX must stay under the double-energy ceiling while the spread holds.
+	var delivered_min: float = await _measure_delivered_speed(0.0)
+	var delivered_mid: float = await _measure_delivered_speed(0.5)
+	var delivered_max: float = await _measure_delivered_speed(1.0)
+	var required: float = _arch_crest_requirement()
+	# Report the six-number diagnosis to the CI log (the slice deliverable reads these back).
+	gut.p("LAUNCH DIAGNOSTIC (delivered speed): MIN=%.2f MID=%.2f MAX=%.2f u/s; arch-crest req=%.2f"
+		% [delivered_min, delivered_mid, delivered_max, required])
+
+	# (a) FLOOR: even the weakest plunge must out-deliver the frictionless arch-crest requirement,
+	# with headroom for the friction loss the lane bleeds. The raised floor (~60) clears ~45.3 easily.
+	assert_gt(
+		delivered_min,
+		required,
+		"MIN delivered speed %.2f must exceed the arch-crest requirement %.2f (raised floor)"
+		% [delivered_min, required]
+	)
+	# (b) IMPULSE: a full strike must land in the design band, not under-deliver and not double-spike.
+	assert_lt(
+		delivered_max,
+		TableConfig.LAUNCH_SPEED_MAX * 1.1,
+		"MAX delivered speed %.2f exceeded the double-energy ceiling %.2f"
+		% [delivered_max, TableConfig.LAUNCH_SPEED_MAX * 1.1]
+	)
+	# Monotonic + readable spread: more meter -> more speed, full clearly out-throws min.
+	assert_gt(delivered_mid, delivered_min, "MID must out-deliver MIN (monotonic)")
+	assert_gte(
+		delivered_max,
+		1.5 * delivered_min,
+		"MAX delivered %.2f must be >= 1.5x MIN delivered %.2f (readable spread)"
+		% [delivered_max, delivered_min]
 	)
 
 
 func test_report_apex_min_mid_max() -> void:
-	## Measure the apex (lowest z) at MIN / MID / MAX and report it. Pre-fix this confirms the symptom:
-	## the MIN (and likely MID) apex STALLS down-table of LAUNCH_REACHED_PLAY_Z and the ball rolls
-	## back. Post-fix the MIN apex must CLEAR LAUNCH_REACHED_PLAY_Z (cross up-table of it).
-	## ASSERT (post-fix): apex_min < LAUNCH_REACHED_PLAY_Z (more up-table / smaller z than the line),
-	## i.e. even the weakest plunge reaches play. This is the diagnostic twin of the behavioral
-	## lane-clear oracle in test_launch_clears_lane.gd.
-	pending(
-		"physics-programmer: fire MIN/MID/MAX, gd_print + assert apex clears LAUNCH_REACHED_PLAY_Z"
+	## Measure the apex (lowest z) at MIN / MID / MAX and report it. Pre-fix this confirmed the
+	## symptom: the MIN (and MID) apex STALLED down-table of LAUNCH_REACHED_PLAY_Z and rolled back.
+	## Post-fix the MIN apex must CLEAR LAUNCH_REACHED_PLAY_Z (cross up-table of it = smaller z). This
+	## is the diagnostic twin of the behavioral lane-clear oracle in test_launch_clears_lane.gd.
+	var apex_min: float = await _measure_apex(0.0)
+	var apex_mid: float = await _measure_apex(0.5)
+	var apex_max: float = await _measure_apex(1.0)
+	gut.p("LAUNCH DIAGNOSTIC (apex z, smaller=more up-table): MIN=%.2f MID=%.2f MAX=%.2f; line=%.2f"
+		% [apex_min, apex_mid, apex_max, TableConfig.LAUNCH_REACHED_PLAY_Z])
+
+	# Even the weakest plunge must cross up-table of the reached-play line (smaller z than the line).
+	assert_lt(
+		apex_min,
+		TableConfig.LAUNCH_REACHED_PLAY_Z,
+		"MIN apex %.2f must clear (be up-table of) LAUNCH_REACHED_PLAY_Z %.2f"
+		% [apex_min, TableConfig.LAUNCH_REACHED_PLAY_Z]
 	)
+	# More power must reach at least as far up-table (monotonic, smaller z = further).
+	assert_lte(apex_mid, apex_min, "MID apex must reach at least as far up-table as MIN")
+	assert_lte(apex_max, apex_mid, "MAX apex must reach at least as far up-table as MID")
