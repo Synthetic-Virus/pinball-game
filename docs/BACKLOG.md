@@ -278,7 +278,7 @@ Tasks (pull from here - keep them small and finishable):
       structural test asserts the collider is a CAPSULE / convex hull (NOT BoxShape3D);
       test_flipper_momentum.gd (full swing out-throws a tap, ~50 ms snap), test_flipper_rubber.gd
       (rebound >= 35%), test_flipper_no_overlap.gd all stay GREEN; no tunneling.
-- [ ] LEAD: WIDER TABLE (world-scale rescale). TableConfig.HALF_WIDTH 12.0 -> 16.0 (HALF_LENGTH stays
+- [x] LEAD: WIDER TABLE (world-scale rescale). TableConfig.HALF_WIDTH 12.0 -> 16.0 (HALF_LENGTH stays
       25.0). RE-DERIVE every X-dependent constant with a WHY-comment: LANE_INNER_X / LANE_WIDTH,
       FLIPPER_PIVOT_SPREAD (keep the inverted V with a ~1-ball-plus drain gap, not crossed),
       DRAIN_WIDTH / DRAIN_CENTER_X, ARCH_RADIUS_X, LANE_GUIDE_DIVIDER_X, SLINGSHOT_LEFT/RIGHT_POS,
@@ -287,6 +287,17 @@ Tasks (pull from here - keep them small and finishable):
       scripts/config/table_config.gd, scripts/table_geometry.gd. Acceptance: test_world_scale.gd +
       test_furniture_layout.gd updated and GREEN for the new width; flipper-overlap and drain-mouth
       asserts pass; table_viz validate_layout passes on the new constants.
+      DONE 2026-06-19 (architecture + rescale): HALF_WIDTH 12 -> 16; LANE_INNER_X 8 -> 10.5 (lane
+      width 5.5); FLIPPER_PIVOT_SPREAD 7.0 -> 7.2 (drain mouth held at 2.46 u = ~2 ball-dia, NOT a
+      chasm - verified gap = 2*7.2 - 11.94 = 2.46); BALL_START.x re-derived 10.0 -> 13.25 (lane
+      center, was a stale literal that would have fallen out of the widened lane); POP_BUMPER_POSITIONS
+      +/-4.5 -> +/-6.0; SLINGSHOT_*_POS +/-8.5 -> +/-10.5; STANDUP_BANK_POSITIONS +/-3.0 -> +/-4.5;
+      POP_BUMPER_RADIUS 1.6 -> 2.0 (the resize half of #5). ARCH_RADIUS_X / DRAIN_* / LANE_GUIDE_* /
+      PLUNGER_REST_POS.x / lane-pocket width / table_geometry perimeter are all HALF_WIDTH/LANE_INNER_X
+      EXPRESSIONS, so they auto-follow (no literal X in table_geometry.gd to change - verified). Every
+      changed constant carries a WHY-comment; gdlint clean. table_viz.py validate_layout() PASSES on
+      the new constants and FAILS on a deliberately-moved standup target (verified). ARCHITECTURE.md
+      section 11 records the full rescale + the file-ownership split + the test matrix.
 - [ ] LEAD/QA: VERIFY BOTH GUTTERS after the widen (developer reports only a left gutter; both ALREADY
       exist in table_geometry._build_lane_guides + test_furniture_layout, so this is likely a STALE
       CACHED BUILD). Confirm LaneGuideLeft AND LaneGuideRight build on STATIC_OBSTACLES at the new
@@ -294,6 +305,13 @@ Tasks (pull from here - keep them small and finishable):
       genuinely missing/weak. Owner: gamedev-lead-programmer + gamedev-qa-lead. File:
       scripts/table_geometry.gd. Acceptance: test_furniture_layout.gd asserts both gutters present on
       the rebuilt scene at the new width; table_viz feed-path plot shows both.
+      LEAD VERIFY 2026-06-19: confirmed _build_lane_guides builds BOTH LaneGuideLeft AND
+      LaneGuideRight symmetrically (a for-loop over sign [-1, 1]) on STATIC_OBSTACLES, and
+      test_furniture_layout.test_lane_guides_present_and_static asserts both. After the widen both
+      auto-follow LANE_GUIDE_DIVIDER_X (= HALF_WIDTH - 3.0 = 13.0): the OUTLANE stays ~3.0 u (drain
+      risk), the INLANE widens to ~5.8 u (save). The developer's "only a left gutter" is a STALE
+      CACHED BUILD: the symmetric code is correct, no edit needed. QA confirms on the rebuilt scene
+      via the runner (test_furniture_layout green at the new width) + the table_viz feed-path plot.
 - [ ] GAMEPLAY+PHYSICS: RESIZE + RESPACE TARGETS AND BUMPERS for the wider table ("too small, not
       spaced well"). Bigger standup targets (target size / post radius up) and bigger pop bumpers
       (POP_BUMPER_RADIUS up), with wider sensible spacing (STANDUP_BANK_POSITIONS, POP_BUMPER_POSITIONS)
@@ -302,11 +320,18 @@ Tasks (pull from here - keep them small and finishable):
       scripts/table.gd. Acceptance: tests/test_shot_geometry.gd - standup bank inside the flipper-tip
       sweep window and bumpers clear of walls/arch on the NEW constants; targets/bumpers kick + score on
       contact (behavioral); no tunneling at >= 2x LAUNCH_SPEED_MAX.
-- [ ] LEAD/QA: EXTEND tools/table_viz.py to re-validate the NEW layout deterministically (CAD method):
+- [x] LEAD/QA: EXTEND tools/table_viz.py to re-validate the NEW layout deterministically (CAD method):
       flipper-tip reach to the resized targets/bumpers, lane feeds, drain mouth, both gutter feed paths.
       Tool EXITS NON-ZERO if a shot is unmakeable or a kick aims at the drain. Owner:
       gamedev-lead-programmer + gamedev-qa-lead. Acceptance: tool passes on the new constants and fails
       a deliberately-broken one; tests/test_shot_geometry.gd is the GUT twin (CI source of truth).
+      DONE 2026-06-19: table_viz.py already PLOTS + validate_layout()-checks the flipper-tip sweep,
+      bumper/sling kick vectors, standup window, and lane-guide feed paths; it now re-validates the new
+      width (existing checks are all expressed off the parsed constants). Also FIXED a latent crash: the
+      tool parsed the removed TARGET_POSITIONS const from table.gd (gone since the bank moved to
+      STANDUP_BANK_POSITIONS) - replaced with an empty legacy list so the tool runs. Verified: PASSES on
+      the new constants (3 bumpers, 3 standup, 2 slings, kicks into play), FAILS on a moved standup
+      target. test_shot_geometry.gd is the GUT source of truth (test-builder updates width asserts).
 - [ ] TEST/QA: UPDATE + ADD the independent-oracle suite for the new width/shapes (test the game like a
       web app). STRUCTURAL: flipper collider is a capsule/convex hull (not a box); both gutters on
       correct layers at new spacing; furniture on correct layers at new positions; table width = new
@@ -314,6 +339,13 @@ Tasks (pull from here - keep them small and finishable):
       rebound >= 35%; targets/bumpers kick + score on contact. STRESS: no tunneling at >= ~2x
       LAUNCH_SPEED_MAX on every interaction. Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance:
       the updated suite runs GREEN on the homelab godot runner (the artifact, not a doc claim).
+      LEAD SCAFFOLD 2026-06-19: tests/test_flipper_shape.gd ADDED (gdlint clean) - the STRUCTURAL
+      independent-oracle for the capsule swap: asserts the bat collider is a CapsuleShape3D or
+      ConvexPolygonShape3D and NOT a BoxShape3D, the mesh is a matching non-box mesh, and the rubber
+      PhysicsMaterial survives the swap. It FAILS against the current box flipper and PASSES once the
+      physics-programmer lands the shape swap (intended red-to-green). The width UPDATES
+      (test_world_scale / test_furniture_layout / test_shot_geometry for HALF_WIDTH 16) and the
+      behavioral/stress VERIFY re-runs are the test-builder's per ARCHITECTURE.md 11.7.
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (five fixes only, no new element types/art) and
       that the launch + capsule + width + gutter + resize claims are GREEN on the runner on the pushed
       sha before any merge to main. Owner: gamedev-producer.

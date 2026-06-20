@@ -103,10 +103,11 @@ bs = re.search(r"BALL_START:\s*Vector3\s*=\s*Vector3\(([^)]+)\)", CFG)
 _ns = {"BALL_RADIUS": BALL_R, "HALF_LENGTH": HALF_L, "HALF_WIDTH": HALF_W}
 BALL_START = [eval(p, {"__builtins__": {}}, _ns) for p in bs.group(1).split(",")]
 
-# Target positions from table.gd.
-targets = []
-for m in re.finditer(r"Vector3\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)", TABLE.split("TARGET_POSITIONS")[1].split("]")[0]):
-    targets.append((float(m.group(1)), float(m.group(3))))  # (x, z)
+# The legacy scattered TARGET_POSITIONS const was removed from table.gd (the 3 targets are now the
+# STANDUP_BANK_POSITIONS bank, parsed above). Keep an empty list so the legacy overlay loop below is
+# a no-op; the bank is drawn from STANDUP_BANK. (Parsing TARGET_POSITIONS here used to crash the tool
+# because the const no longer exists - SLICE "Table reshape" fix.)
+targets: list = []
 
 # Camera tunables from table.gd _build_presentation.
 def vec3(name: str, text: str):
