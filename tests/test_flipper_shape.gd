@@ -93,12 +93,12 @@ func test_bat_has_a_visible_non_box_mesh() -> void:
 	assert_not_null(bat, "flipper must have a FlipperBody")
 	if bat == null:
 		return
-	var mesh_instance: MeshInstance3D = null
-	for child in bat.get_children():
-		if child is MeshInstance3D:
-			mesh_instance = child as MeshInstance3D
-			break
-	assert_not_null(mesh_instance, "the bat must have a MeshInstance3D so it is visible")
+	# Find the PROCEDURAL mesh by NAME ("FlipperMesh"), not "first MeshInstance3D child". Since the
+	# "first-real-3d-asset" slice the FlipperBody has two MeshInstance3D children (procedural
+	# "FlipperMesh" + imported "FlipperVisual"); the .glb is not the gray-box capsule mesh this test
+	# asserts against. Find-by-name is immune to any reorder of the node adds in flipper.gd.
+	var mesh_instance: MeshInstance3D = bat.find_child("FlipperMesh", true, false) as MeshInstance3D
+	assert_not_null(mesh_instance, "the bat must have a FlipperMesh MeshInstance3D so it is visible")
 	if mesh_instance != null and mesh_instance.mesh != null:
 		assert_false(
 			mesh_instance.mesh is BoxMesh,

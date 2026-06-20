@@ -341,6 +341,87 @@ func test_collider_geometry_unchanged_by_visual_swap() -> void:
 	)
 
 
+# ---- (orientation) VISUAL LONG AXIS RUNS ALONG THE COLLIDER LONG AXIS --------------------------
+
+## World-space AABB of a node3d-with-AABB (its local AABB transformed by global_transform), as the
+## min/max-corner box over all 8 transformed corners. Shared by the visual (its mesh AABB) and the
+## collider (its debug-mesh AABB) so both are measured in the SAME world frame and can be compared.
+func _world_aabb(node: Node3D, local_aabb: AABB) -> AABB:
+	var xform: Transform3D = node.global_transform
+	var lo: Vector3 = local_aabb.position
+	var hi: Vector3 = local_aabb.end
+	var corners: PackedVector3Array = PackedVector3Array()
+	corners.append(xform * Vector3(lo.x, lo.y, lo.z))
+	corners.append(xform * Vector3(hi.x, lo.y, lo.z))
+	corners.append(xform * Vector3(lo.x, hi.y, lo.z))
+	corners.append(xform * Vector3(lo.x, lo.y, hi.z))
+	corners.append(xform * Vector3(hi.x, hi.y, lo.z))
+	corners.append(xform * Vector3(hi.x, lo.y, hi.z))
+	corners.append(xform * Vector3(lo.x, hi.y, hi.z))
+	corners.append(xform * Vector3(hi.x, hi.y, hi.z))
+	var wmin: Vector3 = corners[0]
+	var wmax: Vector3 = corners[0]
+	for c: Vector3 in corners:
+		wmin = wmin.min(c)
+		wmax = wmax.max(c)
+	return AABB(wmin, wmax - wmin)
+
+
+## Index (0=X, 1=Y, 2=Z) of the longest axis of a world-space size vector. The dominant axis of the
+## visual must equal the dominant axis of the collider: both run pivot-to-tip along the bat's long
+## direction, so their world-space bounding boxes are longest along the SAME world axis.
+func _dominant_axis(size: Vector3) -> int:
+	if size.x >= size.y and size.x >= size.z:
+		return 0
+	if size.y >= size.x and size.y >= size.z:
+		return 1
+	return 2
+
+
+func _assert_visual_long_axis_aligns_with_collider(flipper: Node3D, side: String) -> void:
+	## N1 deterministic orientation oracle. The existing scale test only checks the visual's longest
+	## axis LENGTH against FLIPPER_LENGTH, and the mirror test only checks the basis determinant sign;
+	## NEITHER asserts that the visual's long axis points along the COLLIDER's long axis. If a future
+	## re-export of the .glb had its longest AABB axis on a DIFFERENT axis than pivot-to-tip,
+	## _derive_visual_scale would fit the wrong axis and the 180-deg-about-Y mirror could leave the bat
+	## oriented across the table while the length and determinant tests both still passed. This check
+	## closes that gap: the visual's world-space dominant axis must equal the collider's.
+	var visual: MeshInstance3D = _imported_visual(flipper)
+	var cs: CollisionShape3D = _bat_collision_shape(flipper)
+	assert_not_null(visual, "%s flipper must have a FlipperVisual to test its orientation" % side)
+	assert_not_null(cs, "%s flipper must have a collider to compare orientation against" % side)
+	if visual == null or visual.mesh == null or cs == null or cs.shape == null:
+		return
+	var visual_size: Vector3 = _world_aabb(visual, visual.mesh.get_aabb()).size
+	var collider_size: Vector3 = _world_aabb(cs, cs.shape.get_debug_mesh().get_aabb()).size
+	var visual_axis: int = _dominant_axis(visual_size)
+	var collider_axis: int = _dominant_axis(collider_size)
+	assert_eq(
+		visual_axis,
+		collider_axis,
+		(
+			"%s FlipperVisual long axis (world index %d, size %s) must run along the COLLIDER long "
+			+ "axis (world index %d, size %s). A re-exported asset with a different long axis would "
+			+ "scale/orient off the wrong axis and fail here while the length+determinant tests pass."
+		) % [side, visual_axis, visual_size, collider_axis, collider_size]
+	)
+
+
+func test_left_visual_long_axis_aligns_with_collider() -> void:
+	var flipper: Node3D = _make_flipper("left_flipper", false)
+	await wait_frames(2)
+	_assert_visual_long_axis_aligns_with_collider(flipper, "LEFT")
+
+
+func test_right_visual_long_axis_aligns_with_collider() -> void:
+	## The mirrored bat is the harder case: the 180-deg-about-+Y rotation must keep the visual's long
+	## axis on the SAME world axis as the (mirrored) collider, only pointing the other way. A wrong
+	## mirror (e.g. a rotation about the wrong axis) would swing the long axis onto Z and fail here.
+	var flipper: Node3D = _make_flipper("right_flipper", true)
+	await wait_frames(2)
+	_assert_visual_long_axis_aligns_with_collider(flipper, "RIGHT")
+
+
 # ---- (mirror) BLUE RUBBER ON TOP, BOTH SIDES ---------------------------------------------------
 
 func test_both_flippers_use_the_imported_visual() -> void:
@@ -437,6 +518,11 @@ func test_fallback_to_procedural_when_asset_missing() -> void:
 		"the flipper must still expose is_energized() after a failed asset load (no crash)"
 	)
 	if flipper.has_method("is_energized"):
-		# Should not throw; just exercise the path. Discard the result.
+		# Exercise the path: it must return a real bool without throwing. With no input held and no
+		# force-override, a freshly-configured flipper reads as NOT energized - assert that concrete
+		# fact (the previous "energized and false" was a tautology that proved nothing).
 		var energized: bool = flipper.is_energized()
-		assert_false(energized and false, "exercising is_energized() must not crash")
+		assert_false(
+			energized,
+			"a freshly-configured flipper with no input held must read as not energized after fallback"
+		)
