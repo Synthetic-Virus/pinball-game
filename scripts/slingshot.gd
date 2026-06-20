@@ -56,10 +56,10 @@ func configure(mirrored: bool) -> void:
 	_height = TableConfig.SLINGSHOT_HEIGHT
 	points = TableConfig.SLINGSHOT_SCORE
 	# The kick direction is the load-bearing "into play, never the drain" guarantee. Pick per side.
-	_kick_dir = (
-		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored
-		else TableConfig.SLINGSHOT_LEFT_KICK_DIR
-	).normalized()
+	var raw_dir: Vector3 = (
+		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
+	)
+	_kick_dir = raw_dir.normalized()
 
 
 ## FIXED kick: always the face normal into play, independent of the contact point (ball_pos unused).
@@ -114,16 +114,16 @@ func _make_mesh() -> MeshInstance3D:
 ## fan/winding is consistent. Three (x, z) points.
 func _triangle_outline() -> PackedVector2Array:
 	var half_l: float = _length * 0.5
-	var face_z: float = _thickness * 0.5            ## the kicking face sits at +Z (its normal is +Z).
-	var apex_z: float = -TRIANGLE_BACK_DEPTH         ## the apex points back, away from play.
+	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
+	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
 	# Apex X offset per handedness: a real slingshot's apex sits toward the OUTER (side-wall) end. The
 	# mirror flips which end. hand_sign is +1 for the left sling, -1 for the right (mirror).
 	var hand_sign: float = -1.0 if _mirrored else 1.0
 	var apex_x: float = half_l * hand_sign
 	var pts := PackedVector2Array()
-	pts.append(Vector2(-half_l, face_z))   ## A: kicking-face end 1
-	pts.append(Vector2(half_l, face_z))    ## B: kicking-face end 2
-	pts.append(Vector2(apex_x, apex_z))    ## C: apex (back, offset per side)
+	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
+	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
+	pts.append(Vector2(apex_x, apex_z))  ## C: apex (back, offset per side)
 	return pts
 
 

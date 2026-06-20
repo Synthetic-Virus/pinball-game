@@ -99,7 +99,7 @@ const ROUND_SEGMENTS: int = 4
 ## BLACK body + WHITE rubber TOP surface (DESIGN/ARCHITECTURE.md 11.3: a 2-tone gray-box look only;
 ## the kenney.nl CC0 art pass is LATER and must NOT block this slice). The white top is a VISUAL cue
 ## for the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial, unchanged).
-const BODY_COLOR: Color = Color(0.05, 0.05, 0.05)   ## Near-black bat body.
+const BODY_COLOR: Color = Color(0.05, 0.05, 0.05)  ## Near-black bat body.
 const RUBBER_TOP_COLOR: Color = Color(0.92, 0.92, 0.92)  ## White rubber top cap.
 ## Bat restitution: the RUBBER SLEEVE. DESIGN must-feel #3 / "RUBBER THAT REBOUNDS": a ball striking
 ## the flipper face rebounds with a live, slightly-springy feel (a rubber-sleeved bat), not off a
@@ -205,9 +205,9 @@ func _build_flipper() -> void:
 	# Build a basis whose Z column is the hinge axis (+Y local). X stays X; Y becomes -Z so the
 	# basis is right-handed and orthonormal.
 	_hinge.transform = Transform3D(
-		Vector3(1.0, 0.0, 0.0),   # local X
+		Vector3(1.0, 0.0, 0.0),  # local X
 		Vector3(0.0, 0.0, -1.0),  # local Y
-		Vector3(0.0, 1.0, 0.0),   # local Z == hinge axis == surface normal
+		Vector3(0.0, 1.0, 0.0),  # local Z == hinge axis == surface normal
 		Vector3.ZERO,
 	)
 	add_child(_hinge)
@@ -356,7 +356,7 @@ func _build_bat_outline() -> PackedVector2Array:
 	var base_half: float = TableConfig.FLIPPER_WIDTH * 0.5
 	var tip_half: float = base_half * TIP_WIDTH_FRACTION
 	var taper_x: float = fl * TAPER_START_FRACTION  ## Full width up to here, then narrow to the tip.
-	var tip_x: float = fl - tip_half                 ## The rounded tip cap is centered here.
+	var tip_x: float = fl - tip_half  ## The rounded tip cap is centered here.
 
 	# Build the two long edges as (x, +/-half_width) pairs, full width to taper_x then narrowing to
 	# tip_half at the tip cap center. We then add rounded end caps (pivot + tip) as arcs.
@@ -432,21 +432,26 @@ func _extrude_outline_to_hull(outline: PackedVector2Array, height: float) -> Pac
 ## the white RUBBER TOP cap (the up-facing face) - the 2-tone gray-box look (DESIGN/ARCH 11.3).
 ##
 ## hand_sign (+1 left, -1 right): the outline was X-mirrored upstream for the right bat, which
-## REVERSES its perimeter winding order. The cap/side windings below assume the +X order, so
-## for the mirrored bat we must FLIP each triangle's winding to keep the normals facing the SAME way
-## (top cap up +Y, sides outward, bottom cap down -Y). Without this the right bat's WHITE rubber top
-## faces DOWN and is culled, so the right flipper renders all black (SLICE "Playtest fixes 2").
+## REVERSES its perimeter winding order. The cap/side windings below assume the +X (left) order, so
+## for the mirrored bat we FLIP each triangle's winding (via _emit_tri's flip flag) to keep the
+## normals facing the SAME way as the left bat (top cap up +Y, sides outward, bottom cap down -Y).
+## Without this the right bat's WHITE rubber top faces DOWN and is culled, so the right flipper
+## renders all black (the developer's report, SLICE "Playtest fixes 2", fix 2).
 ##
-## TODO(physics-programmer): implement the winding correction. The agreed approach: when hand_sign <
-## 0, emit each triangle with its two non-apex vertices SWAPPED (reverse winding) for all 3 parts
-## (side quads, bottom cap, top cap), OR equivalently set the top/body materials' cull_mode to
-## DISABLED so the rubber top is visible from both faces. Prefer the winding fix (keeps correct
-## lighting normals). The structural test (tests/test_flipper_rubber_top.gd) asserts BOTH bats carry
-## the RUBBER_TOP_COLOR surface AND that the top cap faces +Y on the right bat as on the left.
+## TWO SEPARATE WINDING CONCERNS, both fixed here (physics-programmer, 2026-06-20):
+##   (A) HANDEDNESS: hand_sign < 0 reverses the perimeter, so flip_winding swaps every triangle on
+##       the mirrored bat. This makes the RIGHT bat's caps/sides face the SAME way as the LEFT bat.
+##   (B) ABSOLUTE ORIENTATION: the outline is wound CCW in the X-Z plane, and a CCW X-Z loop's
+##       cap normal (via SurfaceTool.generate_normals' (v1-v0)x(v2-v0)) points -Y, NOT +Y. So the
+##       naive fan order (outline[0], i, i+1) at +half_h faces the top cap DOWN. We therefore emit
+##       the TOP cap REVERSED (outline[0], i+1, i) so its normal faces +Y (the visible up face the
+##       camera sees), and the BOTTOM cap in forward order so it faces -Y. (A) was the only concern
+##       the scaffold addressed; (B) is the deeper one the structural-test oracle exposed: it
+##       asserts the top cap's average normal Y is POSITIVE on BOTH bats (test_flipper_rubber_top),
+##       which the naive order fails on the LEFT bat too. Both fixes make BOTH rubber tops face up.
 func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: float) -> ArrayMesh:
-	# WHY this flag exists: it is the one switch the winding correction keys off. Reference it so the
-	# scaffold compiles and gdlint does not flag an unused parameter; the physics-programmer wires the
-	# actual per-triangle winding swap (or cull-disable) against it where the triangles are emitted.
+	# Concern (A): the mirrored (right) bat has a reversed perimeter, so flip every triangle's winding
+	# to keep its normals facing the same direction as the left bat's. _emit_tri does the swap.
 	var flip_winding: bool = hand_sign < 0.0
 	var half_h: float = height * 0.5
 	var mesh := ArrayMesh.new()
@@ -466,13 +471,15 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 		# Two triangles per side quad (wound so the normal faces outward).
 		_emit_tri(st_body, a_top, a_bot, b_top, flip_winding)
 		_emit_tri(st_body, b_top, a_bot, b_bot, flip_winding)
-	# Bottom cap (fan from the first point), wound to face down (-Y).
+	# Bottom cap (fan from the first point), wound to face DOWN (-Y). The outline is CCW in X-Z, whose
+	# fan in FORWARD order (0, i, i+1) at -half_h faces -Y - exactly what a bottom cap wants - so we do
+	# NOT reverse it here (contrast the top cap below, which is reversed to face +Y). See concern (B).
 	for i in range(1, n - 1):
 		_emit_tri(
 			st_body,
 			Vector3(outline[0].x, -half_h, outline[0].y),
-			Vector3(outline[i + 1].x, -half_h, outline[i + 1].y),
 			Vector3(outline[i].x, -half_h, outline[i].y),
+			Vector3(outline[i + 1].x, -half_h, outline[i + 1].y),
 			flip_winding
 		)
 	st_body.generate_normals()
@@ -482,14 +489,18 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 	st_body.commit(mesh)
 
 	# --- Surface 1: WHITE RUBBER TOP cap (the up-facing face). ---
+	# Wound to face UP (+Y) - the face the top-down camera sees. The outline is CCW in X-Z, whose fan
+	# in FORWARD order (0, i, i+1) at +half_h faces -Y (concern (B) above), so we emit the top cap
+	# REVERSED (0, i+1, i) so its normal points +Y. test_flipper_rubber_top.gd asserts this (the cap's
+	# average normal Y must be POSITIVE on both bats); the naive forward order failed it on BOTH sides.
 	var st_top := SurfaceTool.new()
 	st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(1, n - 1):
 		_emit_tri(
 			st_top,
 			Vector3(outline[0].x, half_h, outline[0].y),
-			Vector3(outline[i].x, half_h, outline[i].y),
 			Vector3(outline[i + 1].x, half_h, outline[i + 1].y),
+			Vector3(outline[i].x, half_h, outline[i].y),
 			flip_winding
 		)
 	st_top.generate_normals()
