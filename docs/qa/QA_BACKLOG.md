@@ -962,6 +962,145 @@ machine-checked the way BUG-022's was.
 
 ---
 
+### BUG-024 [HIGH] Left and right slingshot KickerBody (StaticBody3D) geometrically overlaps the LaneGuide wall (StaticBody3D) at the outlane corner
+
+Severity: HIGH - the overlap is in the primary outlane ball-path: every ball heading for the left
+or right outlane passes through the X[-12.74, -12.60] x Z[18.0, 18.32] junction on the left side
+(symmetric on the right). Two StaticBody3D bodies do not collide with each other, but their
+overlapping surfaces create a concave geometry pocket that can produce unpredictable collision
+normals when the ball's contact manifold straddles both bodies simultaneously. In the worst case
+the solver returns conflicting normals and the ball is ejected at an unpredicted angle or
+momentarily has no valid contact face to resolve against, causing a velocity spike (speed
+explosion) or a brief clip. This is exactly the kind of static-body seam that CCD does NOT guard
+against (CCD prevents tunneling through a moving face, not velocity explosions from dual-body
+contact ambiguity).
+
+Found by QA geometry oracle 2026-06-19.
+
+Repro steps (geometry-based, no playtest required):
+1. Open scripts/slingshot.gd and scripts/table_geometry.gd.
+2. Compute left slingshot KickerBody world extents:
+   - Center: (-10.5, 0, 16.5), yaw = atan2(0.6, 0.8) = 36.87 deg
+   - Box local half-extents: (SLINGSHOT_LENGTH/2, WALL_HEIGHT/2, SLINGSHOT_THICKNESS/2) = (2.5, 1.2, 0.4)
+   - Rotated world X range: [-12.74, -8.26], world Z range: [14.68, 18.32]
+3. Compute LaneGuideLeft world extents:
+   - Center X: -LANE_GUIDE_DIVIDER_X = -13.0
+   - Box half-width in X: WALL_THICKNESS/2 = 0.4 -> X range: [-13.4, -12.6]
+   - Z range: [LANE_GUIDE_TOP_Z, LANE_GUIDE_BOTTOM_Z] = [18.0, 23.0]
+4. Intersection: X overlap [-12.74, -12.60] (0.14 units), Z overlap [18.0, 18.32] (0.32 units).
+   Both bodies are on STATIC_OBSTACLES. The overlap is real geometry interpenetration.
+5. Right slingshot / LaneGuideRight is symmetric: X[12.60, 12.74] x Z[18.0, 18.32].
+
+Expected: the slingshot KickerBody outer corner and the lane guide wall do not share any volume.
+The gap between them should be at least BALL_RADIUS (0.6 units) to prevent the ball from having
+simultaneous contact with both bodies at the seam.
+
+Actual: 0.14 unit X x 0.32 unit Z overlap. The ball (radius 0.6) is larger than either overlap
+dimension individually, so it cannot physically sit entirely within the overlap zone. However a
+ball traveling along the outer wall CAN touch both bodies simultaneously at the seam (it has
+radius > overlap dimension, so both contact normals are active at once). The solver receives two
+overlapping StaticBody3D contact normals in a concave-like pocket and must reconcile them. The
+Jolt solver may clip velocity, spike it, or produce a micro-stutter depending on the exact
+contact manifold resolution order. This is a non-deterministic failure mode: it may not reproduce
+every frame, which is what makes it high-severity (silent in testing, visible in play).
+
+Suspected files/lines:
+- /home/virus/pinball-game/scripts/config/table_config.gd
+  SLINGSHOT_LEFT_POS, SLINGSHOT_RIGHT_POS, SLINGSHOT_LENGTH, SLINGSHOT_THICKNESS (lines ~130-135)
+  LANE_GUIDE_DIVIDER_X = HALF_WIDTH - 3.0 = 13.0 (line ~140)
+  LANE_GUIDE_TOP_Z = 18.0 (line ~141)
+- /home/virus/pinball-game/scripts/slingshot.gd: _build_body() places KickerBody at _pos + yaw
+- /home/virus/pinball-game/scripts/table_geometry.gd: _build_lane_guides() places LaneGuide walls
+
+Root cause:
+The lane guide Z range starts at LANE_GUIDE_TOP_Z = 18.0. The slingshot outer corner (the
+corner of the rotated box at the up-table end of the outer side) lands at Z = 18.32, 0.32 units
+BELOW the lane guide top. The two bodies share the Z band [18.0, 18.32]. The fix is to either:
+  (a) raise LANE_GUIDE_TOP_Z to at least 18.35 (clear of the sling corner),
+  (b) shorten SLINGSHOT_LENGTH by ~0.5 so the outer corner no longer reaches Z=18, or
+  (c) shift the sling center slightly down-table (larger Z) by 0.5 units to pull the outer corner
+      away from the guide.
+Option (a) is the least-intrusive single-constant change and does not alter shot geometry.
+
+Suggested GUT test to lock the fix:
+  In test_furniture_layout.gd or a new test_static_body_clearance.gd, for each pair
+  (KickerBody world AABB, LaneGuide world AABB), assert the AABB intersection volume is zero
+  (or less than an epsilon like 0.01). This is a pure geometry assertion that can be computed
+  from the committed TableConfig constants without running physics.
+
+---
+
+### BUG-025 [MEDIUM] Plunger face has sync_to_physics = true AND an explicit apply_central_impulse active simultaneously - ball can receive double the intended launch energy if Jolt executes both transfers
+
+Severity: MEDIUM - the design intent of the physical-launch slice was that the impulse would be
+the RELIABLE fallback for the unreliable sync_to_physics contact transfer (DESIGN.md and plunger.gd
+comments both say sync_to_physics "can be unreliable in Jolt"). The current code leaves
+sync_to_physics ON and adds the impulse ON TOP of it. In the common case (Jolt correctly resolves
+the sync_to_physics contact transfer), the ball receives both the contact impulse from the solver
+AND the explicit apply_central_impulse in _try_apply_launch_impulse(), giving approximately 2x the
+intended speed. At full power (PLUNGER_STROKE_SPEED_MAX = 78 u/s) the resulting ball speed could
+reach ~156 u/s, which is above KICK_MAX_OUTGOING_SPEED (120 u/s) and may exceed the CCD-safe
+validated envelope (the no-tunneling stress test runs at 2 * LAUNCH_SPEED_MAX = 180 u/s, so 156
+is inside the test band, but it is above every intended per-mechanism cap). In the uncommon case
+(Jolt sync_to_physics does NOT transfer momentum, the stated reason the impulse was added), only
+the impulse fires and the launch is correct.
+
+This is a latent behavior-under-physics-engine-version defect: the Jolt build variant or settings
+that determine whether AnimatableBody3D velocity bleeds into RigidBody3D contact may change across
+Godot upgrades. Today's behavior may differ from CI's Godot version's behavior.
+
+Found by QA code inspection 2026-06-19.
+
+Repro steps:
+1. Open /home/virus/pinball-game/scripts/plunger.gd.
+2. Line 118: _face.sync_to_physics = true  (sync is ON; face reports velocity to solver).
+3. Lines 341-347: _try_apply_launch_impulse() applies apply_central_impulse(up_table_world * ball.mass
+   * _stroke_speed) when is_touching() is true.
+4. On the first physics frame of the forward stroke (_stroke_state = FORWARD):
+   - The face has NOT yet moved this frame, so sync_to_physics velocity from the previous frame is 0.
+     The solver adds 0 contact energy. The impulse fires (is_touching is true, face didn't move yet).
+   - On subsequent forward frames (_impulse_applied = true blocks re-fire), sync_to_physics CAN
+     transfer energy to the ball if the ball is still in contact with the moving face.
+5. The net result depends on whether the ball separates from the face after the first-frame impulse.
+   If face speed (78 u/s) == impulse-imparted speed (78 u/s), they move at equal speed: the ball
+   rides the face and continues receiving sync_to_physics energy every frame until it separates.
+   The double-energy case is most likely at high stroke speeds with a heavy ball.
+
+Expected: the ball's outgoing speed equals PLUNGER_STROKE_SPEED_MAX * power_fraction (0 to 78 u/s),
+which the test suite asserts (LAUNCH_SPEED_MIN..LAUNCH_SPEED_MAX).
+
+Actual: the ball may reach approximately 2x PLUNGER_STROKE_SPEED_MAX under Jolt when
+sync_to_physics contact transfer is active, an excess that the existing test suite may not detect
+if the test's SETTLE_FRAMES of 120 bring the ball to a peak-then-slow trajectory rather than a
+peak speed snapshot. The tunneling test covers up to 180 u/s (2x LAUNCH_SPEED_MAX = 2*90) but does
+not distinguish a plunger-caused speed spike from an intentional stress-test input.
+
+Suspected file/line:
+- /home/virus/pinball-game/scripts/plunger.gd line 118: _face.sync_to_physics = true
+- /home/virus/pinball-game/scripts/plunger.gd lines 341-347: _try_apply_launch_impulse()
+
+Root cause:
+The physical-launch slice added the impulse as a "reliable alternative" to sync_to_physics without
+turning sync_to_physics off. The correct fix is one of:
+  (a) Disable sync_to_physics on the face (_face.sync_to_physics = false) and rely solely on the
+      impulse mechanism (the stated design intent per the architecture note). The face still blocks
+      the ball physically via its collision shape; it just doesn't report velocity to the solver.
+  (b) Remove the explicit apply_central_impulse and accept sync_to_physics as-is (reverts the
+      physical-launch fix rationale, not recommended).
+  (c) Guard _try_apply_launch_impulse with a Jolt sync check and only fire if the solver did NOT
+      transfer energy (impossible to query directly; option (a) is simpler and safer).
+Option (a) is preferred: sync_to_physics = false, impulse only.
+
+Suggested GUT test to lock the fix:
+  In test_plunger_launch.gd, add a peak-speed oracle: immediately after ball_launched emits,
+  read ball.current_speed() within 2 frames (before damping) and assert it is < LAUNCH_SPEED_MAX
+  * 1.1 (a 10% tolerance for physics step alignment). This catches a 2x energy spike (156 u/s >>
+  99 u/s cap) without being sensitive to normal launch variance. The existing test asserts
+  LAUNCH_SPEED_MIN..LAUNCH_SPEED_MAX on a post-settle position oracle, which does not directly
+  bound peak speed at the moment of launch.
+
+---
+
 ## Stream 3 - Regression sweeps (re-verify after changes)
 - SLICE Table reshape: BUG-023 (drain-vs-flipper overlap) must be fixed AND a cradle-does-not-drain
   integration test added before this slice can pass the producer's scope/finish gate. After the fix,
