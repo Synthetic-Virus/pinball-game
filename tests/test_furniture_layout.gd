@@ -168,31 +168,31 @@ func test_both_lane_guides_at_correct_widened_spacing() -> void:
 	##               (gutters both sides) independent check on the INSTANCED nodes.
 	var left: Node3D = _table.find_child("LaneGuideLeft", true, false) as Node3D
 	var right: Node3D = _table.find_child("LaneGuideRight", true, false) as Node3D
+	# The guides are now SYMMETRIC inlane rails at x = +/- (FLIPPER_PIVOT_SPREAD + 3.0) - the outer
+	# wall of each inlane, ~3 units outboard of the flipper pivot (the rebuilt hooked-rail lower third).
+	var expected_x: float = TableConfig.FLIPPER_PIVOT_SPREAD + 3.0
 	if left != null:
-		# Left guide is at -LANE_GUIDE_DIVIDER_X within one wall-thickness (body is centered).
-		assert_gt(
-			absf(left.position.x),
-			TableConfig.LANE_GUIDE_DIVIDER_X - TableConfig.WALL_THICKNESS,
-			"LaneGuideLeft position x=%f should be near -LANE_GUIDE_DIVIDER_X=%f"
-			% [left.position.x, -TableConfig.LANE_GUIDE_DIVIDER_X]
+		assert_almost_eq(
+			left.position.x,
+			-expected_x,
+			TableConfig.WALL_THICKNESS,
+			"LaneGuideLeft x=%f should be the inlane rail at -(FLIPPER_PIVOT_SPREAD+3)=%f"
+			% [left.position.x, -expected_x]
 		)
 	if right != null:
-		# Right guide is INBOARD of the launch lane: it must sit BETWEEN the right flipper pivot and
-		# the lane divider, and crucially CLEAR of the ball's launch path so the lane is a clean chute.
 		assert_almost_eq(
 			right.position.x,
-			TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X,
+			expected_x,
 			TableConfig.WALL_THICKNESS,
-			"LaneGuideRight position x=%f should be near LANE_GUIDE_RIGHT_DIVIDER_X=%f (inboard "
-			% [right.position.x, TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X]
-			+ "of the launch lane, not in it)"
+			"LaneGuideRight x=%f should be the inlane rail at +(FLIPPER_PIVOT_SPREAD+3)=%f"
+			% [right.position.x, expected_x]
 		)
+		# It must still stay CLEAR of the launch-lane ball path so the lane is a clean chute.
 		assert_lt(
 			right.position.x + TableConfig.WALL_THICKNESS * 0.5,
 			TableConfig.BALL_START.x - TableConfig.BALL_RADIUS,
-			"LaneGuideRight (x=%f) must stay CLEAR of the launch-lane ball path (BALL_START.x=%f); a "
+			"LaneGuideRight (x=%f) must stay CLEAR of the launch-lane ball path (BALL_START.x=%f)"
 			% [right.position.x, TableConfig.BALL_START.x]
-			+ "guide in the lane pins the ball and breaks the launch"
 		)
 
 
