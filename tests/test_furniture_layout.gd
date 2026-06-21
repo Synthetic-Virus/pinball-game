@@ -168,9 +168,9 @@ func test_both_lane_guides_at_correct_widened_spacing() -> void:
 	##               (gutters both sides) independent check on the INSTANCED nodes.
 	var left: Node3D = _table.find_child("LaneGuideLeft", true, false) as Node3D
 	var right: Node3D = _table.find_child("LaneGuideRight", true, false) as Node3D
-	# The guides are now SYMMETRIC inlane rails at x = +/- (FLIPPER_PIVOT_SPREAD + 3.0) - the outer
-	# wall of each inlane, ~3 units outboard of the flipper pivot (the rebuilt hooked-rail lower third).
-	var expected_x: float = TableConfig.FLIPPER_PIVOT_SPREAD + 3.0
+	# FAITHFUL RECREATION: the guide body sits at the OUTLANE OUTER rail X (LANE_GUIDE_OUTER_X), now
+	# SYMMETRIC. The angled inlane sweep rail is a child of the same body (see _build_lane_guides).
+	var expected_x: float = TableConfig.LANE_GUIDE_OUTER_X
 	if left != null:
 		assert_almost_eq(
 			left.position.x,

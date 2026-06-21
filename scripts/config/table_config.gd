@@ -568,6 +568,12 @@ const LANE_GUIDE_TOP_Z: float = FLIPPER_PIVOT_Z - 1.0
 const LANE_GUIDE_BOTTOM_Z: float = HALF_LENGTH - 2.0
 const LANE_GUIDE_THICKNESS: float = WALL_THICKNESS
 const LANE_GUIDE_HEIGHT: float = WALL_HEIGHT
+## FAITHFUL RECREATION (2026-06-21, docs/REFERENCE_LAYOUT.md): the lower-third guides were reshaped
+## into the reference's inlane/outlane rails. LANE_GUIDE_OUTER_X is the X of the OUTLANE OUTER rail on
+## each side (now SYMMETRIC). It must stay CLEAR of the launch-lane ball path on the right:
+## OUTER_X + THICKNESS/2 < BALL_START.x - BALL_RADIUS (12.8 + 0.5 = 13.3 < 14.4). The angled INLANE
+## sweep rail endpoints are literals in _build_lane_guides (measured from the reference).
+const LANE_GUIDE_OUTER_X: float = 12.8
 
 ## ---- HELPERS -----------------------------------------------------------------------------------
 

@@ -235,56 +235,57 @@ static func _build_lane_pocket(parent: Node3D) -> void:
 static func _build_lane_guides(parent: Node3D) -> void:
 	var h: float = TableConfig.LANE_GUIDE_HEIGHT
 	var t: float = TableConfig.LANE_GUIDE_THICKNESS
-	var spread: float = TableConfig.FLIPPER_PIVOT_SPREAD
-	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
+	var outer_x: float = TableConfig.LANE_GUIDE_OUTER_X
 
-	# The guide is the same rail + hook shape, but now ONE body that is FLIPPED and ROTATED into place
-	# (developer feedback: "flip and rotate"). GUIDE_ROT_DEG is the tunable lean (mirrored per side);
-	# HOOK_LOCAL_YAW_DEG flips the hook. Change these two numbers to dial the orientation - no rebuild.
-	var guide_rot_deg: float = 28.0
-	var hook_local_yaw_deg: float = 52.0
+	# FAITHFUL inlane/outlane (docs/REFERENCE_LAYOUT.md, measured from the reference top-down). Each
+	# side has TWO rails: an angled INLANE GUIDE sweeping from the sling-bottom (x ~ +/-10.5, z 12)
+	# down to near the flipper (x ~ +/-3.5, z 20), and a near-vertical OUTLANE OUTER rail at +/-outer_x
+	# that, with the side wall (left) or the lane divider (right), forms the drain channel. The body
+	# sits at the outer-rail X so layout tests find each guide there; rails are given in WORLD coords
+	# and made local in _add_rail_between. Symmetric now: outer_x stays clear of the launch-lane path.
 	for sgn: float in [-1.0, 1.0]:
-		var nm: String = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
 		var body := StaticBody3D.new()
-		body.name = nm
+		body.name = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
 		body.collision_layer = PhysicsLayers.STATIC_OBSTACLES
 		body.collision_mask = 0
-		# Body origin at the representative rail X (~spread+3) so layout tests find the guide there; the
-		# whole body is then rotated to lean the guide into place.
-		body.position = Vector3(sgn * (spread + 3.0), h * 0.5, piv_z - 4.0)
-		body.rotation.y = deg_to_rad(sgn * guide_rot_deg)
-		# Rail (along local Z), centered on the body.
-		_add_guide_part(body, Vector3(t, h, 8.0), Vector3.ZERO, 0.0)
-		# Hook at the up-table end of the rail, angled toward center (flip via HOOK_LOCAL_YAW_DEG sign).
-		_add_guide_part(
-			body,
-			Vector3(t, h, 3.6),
-			Vector3(sgn * -1.0, 0.0, -4.6),
-			sgn * deg_to_rad(hook_local_yaw_deg)
+		body.position = Vector3(sgn * outer_x, 0.0, 0.0)
+		# Inlane guide: angled sweep from near the sling down to the flipper.
+		_add_rail_between(
+			body, Vector3(sgn * 10.5, h * 0.5, 12.0), Vector3(sgn * 3.5, h * 0.5, 20.0), t, h
+		)
+		# Outlane outer: near-vertical rail outboard, forming the drain channel with the wall/lane.
+		_add_rail_between(
+			body, Vector3(sgn * outer_x, h * 0.5, 15.5), Vector3(sgn * outer_x, h * 0.5, 23.0), t, h
 		)
 		parent.add_child(body)
 
 
-## Add one box part (collision shape + matching mesh) to a guide body at a LOCAL position/yaw, so the
-## body's own flip/rotation carries the part with it. Lets a guide be built from a few parts and then
-## flipped+rotated as a unit.
-static func _add_guide_part(
-	body: StaticBody3D, size: Vector3, local_pos: Vector3, local_yaw: float
+## Add one straight rail (collision box + matching gray mesh) between two WORLD points on the
+## playfield. The points are made LOCAL to the body so the body origin can sit at a representative X
+## for layout tests. The box runs along its local +X and is yawed to point from a to b about +Y.
+static func _add_rail_between(
+	body: StaticBody3D, a_world: Vector3, b_world: Vector3, t: float, h: float
 ) -> void:
+	var a: Vector3 = a_world - body.position
+	var b: Vector3 = b_world - body.position
+	var mid: Vector3 = (a + b) * 0.5
+	var d: Vector3 = b - a
+	var length: float = maxf(d.length(), t)
+	var yaw: float = atan2(-d.z, d.x)  ## align local +X with the a->b direction about +Y
 	var col := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = size
+	box.size = Vector3(length, h, t)
 	col.shape = box
-	col.position = local_pos
-	col.rotation.y = local_yaw
+	col.position = mid
+	col.rotation.y = yaw
 	body.add_child(col)
 	var mi := MeshInstance3D.new()
 	var box_mesh := BoxMesh.new()
-	box_mesh.size = size
+	box_mesh.size = Vector3(length, h, t)
 	box_mesh.material = _gray_material()
 	mi.mesh = box_mesh
-	mi.position = local_pos
-	mi.rotation.y = local_yaw
+	mi.position = mid
+	mi.rotation.y = yaw
 	body.add_child(mi)
 
 
