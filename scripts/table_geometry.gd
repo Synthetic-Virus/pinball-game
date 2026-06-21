@@ -33,7 +33,6 @@ static func build(playfield: Node3D) -> void:
 	_build_lane_pocket(playfield)
 	_build_arch(playfield)
 	_build_lane_guides(playfield)
-	_build_inlane_aprons(playfield)
 
 
 ## A shared gray-box material so every static body reads as the same neutral surface. Built fresh
@@ -262,38 +261,6 @@ static func _build_lane_guides(parent: Node3D) -> void:
 			Vector3(divider_x, h * 0.5, center_z),
 			layer
 		)
-
-
-## INLANE FEED APRONS: the missing piece that makes the inlane actually FEED the flipper (a modern
-## Stern lower third). Per side, a short angled wall sits just OUTBOARD of the flipper, running from
-## up near the slingshot down to the flipper's outboard (pivot) end, angled INWARD. A ball riding
-## down the inlane meets the apron's inner face and is delivered onto the bat instead of dribbling
-## past it into open space (the "rough inlane" the developer flagged). A ball further out, beyond the
-## apron, stays in the outlane and drains off the open bottom = the risk lane. STATIC guide walls
-## only (no rollover scoring/lights - DESIGN cut list).
-static func _build_inlane_aprons(parent: Node3D) -> void:
-	var h: float = TableConfig.LANE_GUIDE_HEIGHT
-	var t: float = TableConfig.LANE_GUIDE_THICKNESS
-	var spread: float = TableConfig.FLIPPER_PIVOT_SPREAD
-	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
-	for sgn: float in [-1.0, 1.0]:
-		# Top end up near the slingshot, bottom end just outboard of the flipper pivot, angled inward
-		# so the inner face guides a descending ball onto the bat.
-		var a := Vector3(sgn * (spread + 2.3), 0.0, piv_z - 6.5)
-		var b := Vector3(sgn * (spread + 0.9), 0.0, piv_z - 0.5)
-		var chord: Vector3 = b - a
-		var mid: Vector3 = (a + b) * 0.5
-		mid.y = h * 0.5
-		var apron_name: String = "InlaneApronLeft" if sgn < 0.0 else "InlaneApronRight"
-		var body: StaticBody3D = _make_box_body(
-			parent,
-			apron_name,
-			Vector3(chord.length() + t, h, t),
-			mid,
-			PhysicsLayers.STATIC_OBSTACLES
-		)
-		# Rotate about Y so the long (local X) axis lies along the chord (same convention as the arch).
-		body.rotation.y = atan2(-chord.z, chord.x)
 
 
 ## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the
