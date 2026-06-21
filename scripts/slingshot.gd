@@ -120,7 +120,46 @@ func _make_mesh() -> MeshInstance3D:
 	mesh_instance.mesh = _build_triangle_mesh(_triangle_outline(), _height)
 	# The solid body is yawed by _body_yaw() in the base; yaw the visible mesh the same so they agree.
 	mesh_instance.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
+	# A real slingshot is THREE rubber posts with bands stretched between them. Add those as children of
+	# the (yawed) mesh so they inherit its orientation and sit exactly on the collider's three corners.
+	_add_posts_and_rubber(mesh_instance)
 	return mesh_instance
+
+
+## Build the visible 3-post-and-rubber assembly (posts at the triangle corners, bands along the edges)
+## as children of the yawed mesh. PURELY visual - the collider and active kick are unchanged - so this
+## gives the slingshot its real look without touching the proven physics.
+func _add_posts_and_rubber(parent: Node3D) -> void:
+	var corners: PackedVector2Array = _raw_corners()
+	var rubber := StandardMaterial3D.new()
+	rubber.albedo_color = Color(0.72, 0.10, 0.10)  ## red rubber, like the reference posts
+	var post_r: float = _thickness * 0.6
+	# Posts: short cylinders standing a little taller than the rubber band, one per corner.
+	for c: Vector2 in corners:
+		var post := MeshInstance3D.new()
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = post_r
+		cyl.bottom_radius = post_r
+		cyl.height = _height * 1.15
+		cyl.material = rubber
+		post.mesh = cyl
+		post.position = Vector3(c.x, 0.0, c.y)
+		parent.add_child(post)
+	# Rubber bands: a thin bar along each edge, between consecutive posts, at mid height.
+	for i: int in range(corners.size()):
+		var a: Vector2 = corners[i]
+		var b: Vector2 = corners[(i + 1) % corners.size()]
+		var edge: Vector2 = b - a
+		var mid: Vector2 = (a + b) * 0.5
+		var band := MeshInstance3D.new()
+		var bar := BoxMesh.new()
+		bar.size = Vector3(edge.length(), _height * 0.55, post_r * 0.8)
+		bar.material = rubber
+		band.mesh = bar
+		band.position = Vector3(mid.x, 0.0, mid.y)
+		# Align the bar's local +X with the edge direction (about +Y): X -> (cos, 0, -sin).
+		band.rotation.y = atan2(-edge.y, edge.x)
+		parent.add_child(band)
 
 
 ## The triangle footprint in the body's LOCAL X-Z plane (before _body_yaw). The long KICKING FACE is
@@ -129,21 +168,27 @@ func _make_mesh() -> MeshInstance3D:
 ## a left-handed triangle and the right (mirrored) sling a right-handed one. Returned CCW so the cap
 ## fan/winding is consistent. Three (x, z) points.
 func _triangle_outline() -> PackedVector2Array:
+	# Round the three sharp corners into small arcs (rubber-wrapped posts are round, not pointed).
+	# Both the collider hull and the visible mesh consume this outline, so this rounds both at once.
+	return _round_corners(_raw_corners(), CORNER_RADIUS, CORNER_SEGMENTS)
+
+
+## The THREE raw corners of the slingshot triangle (local X-Z, before rounding) - A and B are the
+## kicking-face ends at +Z, C is the apex back on -Z. These are also where the visible rubber POSTS
+## stand (a real slingshot is three posts with rubber stretched between them), so the collider and the
+## posts share one definition. Apex X is offset per handedness so the pointed corner aims at the
+## GUTTER (outer end): hand_sign +1 for the left sling, -1 for the right (mirror).
+func _raw_corners() -> PackedVector2Array:
 	var half_l: float = _length * 0.5
 	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
 	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
-	# Apex X offset per handedness: the pointed corner must aim toward the GUTTER (the OUTER, side-wall
-	# end), per developer feedback. hand_sign is +1 for the left sling, -1 for the right (mirror); the
-	# leading minus aims the apex at the outer end so the corner points into the gutter, not the center.
 	var hand_sign: float = -1.0 if _mirrored else 1.0
 	var apex_x: float = -half_l * hand_sign
 	var pts := PackedVector2Array()
 	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
 	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
 	pts.append(Vector2(apex_x, apex_z))  ## C: apex (back, offset per side)
-	# Round the three sharp corners into small arcs (rubber-wrapped posts are round, not pointed).
-	# Both the collider hull and the visible mesh consume this outline, so this rounds both at once.
-	return _round_corners(pts, CORNER_RADIUS, CORNER_SEGMENTS)
+	return pts
 
 
 ## Replace each sharp corner of a CCW (x, z) polygon with a rounded arc. For each vertex we trim in
