@@ -90,24 +90,30 @@ static func _build_surface(parent: Node3D) -> void:
 ## (the drain mouth). Each segment is a thin white wall: it contains the ball and reads as the
 ## outline. Points are the wall CENTERLINE in table coords (X, _, Z).
 static func _build_borders(parent: Node3D) -> void:
-	# Outer outline, walked as a polyline: up the left wall, around the rounded top-left corner,
-	# across the top, and down the right wall. The bottom is left open for the drain.
+	# Outer outline, walked as a polyline: up the left wall, around the rounded top-left corner, across
+	# the top, around the rounded top-RIGHT corner, and down the right wall. Bottom open for the drain.
+	# BOTH top corners are rounded (developer: the top-right was square and sealed the ball in).
 	var outline: Array[Vector3] = [
 		Vector3(-16.4, 0.0, 24.0),    ## bottom-left (left wall, near the drain)
 		Vector3(-16.4, 0.0, -17.0),   ## up the left wall to where the corner begins
 		Vector3(-15.2, 0.0, -21.0),   ## rounded top-left corner (3 short chords)
 		Vector3(-13.0, 0.0, -23.6),
 		Vector3(-10.6, 0.0, -25.0),   ## top edge begins
-		Vector3(16.4, 0.0, -25.0),    ## across the top to the top-right
+		Vector3(10.6, 0.0, -25.0),    ## top edge ends (symmetric)
+		Vector3(13.0, 0.0, -23.6),    ## rounded top-right corner (3 short chords)
+		Vector3(15.2, 0.0, -21.0),
+		Vector3(16.4, 0.0, -17.0),    ## down to where the right wall begins
 		Vector3(16.4, 0.0, 24.0),     ## down the right wall toward the drain
 	]
 	for i: int in range(outline.size() - 1):
 		_add_border_segment(parent, outline[i], outline[i + 1], "Border%d" % i)
 
 	# The launch-lane divider: the inner right wall forming the shooter lane (x ~ +14.5), parallel to
-	# the right wall. The lane is the channel between the two.
+	# the right wall. It STOPS short of the top (z -16) so the top of the lane is OPEN: a launched ball
+	# clears the divider and curves left into the field around the rounded top-right corner, instead of
+	# being sealed in the corner (developer feedback).
 	_add_border_segment(
-		parent, Vector3(14.5, 0.0, -25.0), Vector3(14.5, 0.0, 23.0), "LaneDivider"
+		parent, Vector3(14.5, 0.0, -16.0), Vector3(14.5, 0.0, 23.0), "LaneDivider"
 	)
 
 

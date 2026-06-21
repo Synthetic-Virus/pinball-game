@@ -65,3 +65,19 @@ func _make_detector_shape() -> Shape3D:
 	shape.radius = _radius + TableConfig.BALL_RADIUS
 	shape.height = _height
 	return shape
+
+
+## Visible mesh: a ROUND cylinder matching the collision post (the base _make_mesh returns a tiny
+## 1x1 box - the "little squares" the developer saw). A red cap-coloured cylinder of the real radius
+## so the bumper reads as a chunky round bumper, not a dot.
+func _make_mesh() -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = _radius
+	cyl.bottom_radius = _radius
+	cyl.height = _height
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.85, 0.18, 0.18)
+	cyl.material = mat
+	mesh_instance.mesh = cyl
+	return mesh_instance
