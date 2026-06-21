@@ -232,53 +232,14 @@ func _build_dynamic_elements() -> void:
 	playfield.add_child(right_flipper)
 	right_flipper.configure("right_flipper", true)
 
-	# --- Standup target bank (re-homed physical targets, SLICE "real pinball furniture") ----------
-	# The 3 existing physical targets become a readable mid-field BANK at a flipper-makeable position
-	# (TableConfig.STANDUP_BANK_POSITIONS, validated by table_viz). Same target.gd body + contract.
+	# --- Furniture: REMOVED in the 2026-06-21 reset ----------------------------------------------
+	# The standup bank, pop bumpers, and slingshots were thrown out with the old table (the generated
+	# objects overlapped and did not play). The arrays stay (empty) so the signal wiring and HUD have
+	# nothing to iterate, and we add furniture back one verified piece at a time onto the new flat
+	# play area + borders (TableGeometry). See docs/REFERENCE_LAYOUT.md.
 	targets.clear()
-	for pos: Vector3 in TableConfig.STANDUP_BANK_POSITIONS:
-		var target: Area3D = TargetScene.instantiate()
-		target.position = pos
-		playfield.add_child(target)
-		target.set_ball(ball)
-		targets.append(target)
-
-	# --- Pop bumpers (active kickers, upper-middle cluster) ---------------------------------------
-	# 2-3 round active bumpers that fire the ball radially outward on contact. Each is configured from
-	# TableConfig and handed the ball, exactly like a target; the active kick + cap + cooldown live in
-	# active_kicker.gd (physics-programmer's half). configure() runs before add_child so _ready sees
-	# the resolved geometry.
 	pop_bumpers.clear()
-	for pos: Vector3 in TableConfig.POP_BUMPER_POSITIONS:
-		var bumper: Area3D = PopBumperScene.instantiate()
-		bumper.position = pos
-		if bumper.has_method("configure"):
-			bumper.configure()
-		playfield.add_child(bumper)
-		bumper.set_ball(ball)
-		pop_bumpers.append(bumper)
-
-	# --- Slingshots (active kickers, one above each flipper) --------------------------------------
-	# Left and right angled kickers that fire a side-falling ball UP-table and toward center (into
-	# play, never the drain). configure(mirrored) picks the per-side kick direction from TableConfig.
 	slingshots.clear()
-	var left_sling: Area3D = SlingshotScene.instantiate()
-	left_sling.name = "LeftSlingshot"
-	left_sling.position = TableConfig.SLINGSHOT_LEFT_POS
-	if left_sling.has_method("configure"):
-		left_sling.configure(false)
-	playfield.add_child(left_sling)
-	left_sling.set_ball(ball)
-	slingshots.append(left_sling)
-
-	var right_sling: Area3D = SlingshotScene.instantiate()
-	right_sling.name = "RightSlingshot"
-	right_sling.position = TableConfig.SLINGSHOT_RIGHT_POS
-	if right_sling.has_method("configure"):
-		right_sling.configure(true)
-	playfield.add_child(right_sling)
-	right_sling.set_ball(ball)
-	slingshots.append(right_sling)
 
 	# --- Plunger ----------------------------------------------------------------------------------
 	# CONTRACT (QA BUG-013): the Plunger node MUST sit at the playfield origin (Vector3.ZERO). Its

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lower playfield skeleton - clean vector duplicate of Andrew's hand sketch (2026-06-20),
+  updated to apply his deep-red markup:
+    - removed the two top side tabs (crossed out)
+    - removed the white lamp circles inside the slingshots (marked with no-symbol)
+    - the two side ovals and the centre oval are drawn as DRAINS
+    - labels added for: slingshot kick (orange), ball + spring launcher (grey), ball travel (yellow)
+  Faithful trace for presentation; geometry is reference, not surveyed. Main field mirrored about x=268.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-160 -50 980 640" font-family="sans-serif">
+  <rect x="-160" y="-50" width="980" height="640" fill="#ffffff"/>
+
+  <!-- ============ DRAINS (drawn first so structure lines sit on top) ============ -->
+  <g fill="#d9dee4" stroke="#5b6470" stroke-width="2">
+    <ellipse cx="130" cy="360" rx="26" ry="40"/>   <!-- left outlane drain -->
+    <ellipse cx="406" cy="360" rx="26" ry="40"/>   <!-- right outlane drain -->
+    <ellipse cx="268" cy="452" rx="44" ry="22"/>   <!-- centre main drain -->
+  </g>
+
+  <!-- ============ BLACK STRUCTURE (walls, guides, aprons) ============ -->
+  <g fill="none" stroke="#111111" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- outer side walls -->
+    <path d="M 16,0 L 16,300 L 95,430 L 150,470"/>
+    <path d="M 520,0 L 520,300 L 441,430 L 386,470"/>
+    <!-- lane dividers (outlane / inlane) -->
+    <path d="M 105,270 L 150,430" stroke-width="4"/>
+    <path d="M 431,270 L 386,430" stroke-width="4"/>
+    <!-- bottom aprons forming the centre drain funnel -->
+    <path d="M 150,470 L 256,468"/>
+    <path d="M 386,470 L 280,468"/>
+    <!-- shooter / plunger lane walls -->
+    <path d="M 556,0 L 556,470"/>
+    <path d="M 614,0 L 614,470"/>
+  </g>
+
+  <!-- thick black ball-guide rails (diagonals down to the flippers) -->
+  <g fill="none" stroke="#111111" stroke-width="13" stroke-linecap="round">
+    <line x1="60"  y1="222" x2="185" y2="300"/>
+    <line x1="476" y1="222" x2="351" y2="300"/>
+  </g>
+
+  <!-- ============ SLINGSHOTS (yellow rubber + orange kicker + posts) ============ -->
+  <!-- left -->
+  <polygon points="105,72 175,148 90,205" fill="none" stroke="#f5d416" stroke-width="6" stroke-linejoin="round"/>
+  <polyline points="168,128 86,160 168,188" fill="none" stroke="#f08000" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="105" cy="72" r="7" fill="#111111"/>
+  <circle cx="175" cy="148" r="7" fill="#111111"/>
+  <circle cx="90" cy="205" r="7" fill="#111111"/>
+  <!-- right (mirror of left) -->
+  <polygon points="431,72 361,148 446,205" fill="none" stroke="#f5d416" stroke-width="6" stroke-linejoin="round"/>
+  <polyline points="368,128 450,160 368,188" fill="none" stroke="#f08000" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="431" cy="72" r="7" fill="#111111"/>
+  <circle cx="361" cy="148" r="7" fill="#111111"/>
+  <circle cx="446" cy="205" r="7" fill="#111111"/>
+
+  <!-- ============ FLIPPERS (red) ============ -->
+  <g stroke="#e02020" stroke-width="18" stroke-linecap="round">
+    <line x1="188" y1="305" x2="260" y2="358"/>
+    <line x1="348" y1="305" x2="276" y2="358"/>
+  </g>
+  <circle cx="188" cy="305" r="7" fill="#111111"/>
+  <circle cx="348" cy="305" r="7" fill="#111111"/>
+
+  <!-- ============ SHOOTER LANE: launch arrow + ball/spring launcher ============ -->
+  <g fill="#f5d416" stroke="#f5d416">
+    <line x1="585" y1="212" x2="585" y2="96" stroke-width="9" stroke-linecap="round"/>
+    <polygon points="585,70 568,108 602,108" stroke="none"/>
+  </g>
+  <circle cx="585" cy="400" r="16" fill="#9aa7b5" stroke="#111111" stroke-width="2"/>
+  <line x1="585" y1="416" x2="585" y2="452" stroke="#9aa7b5" stroke-width="6"/>
+  <path d="M 585,452 q -9,9 -18,2" fill="none" stroke="#9aa7b5" stroke-width="5"/>
+
+  <!-- ============ LABELS ============ -->
+  <g font-size="15" fill="#1a1a1a">
+    <!-- left: slingshot -->
+    <line x1="-34" y1="96" x2="106" y2="80" stroke="#888888" stroke-width="1"/>
+    <text x="-40" y="100" text-anchor="end" font-weight="bold">SLINGSHOT</text>
+    <!-- left: kicker (orange) -->
+    <line x1="-34" y1="205" x2="100" y2="170" stroke="#d97000" stroke-width="1"/>
+    <text x="-40" y="200" text-anchor="end" fill="#d97000" font-weight="bold">KICKER</text>
+    <text x="-40" y="218" text-anchor="end" fill="#d97000" font-size="12">fires when ball hits</text>
+    <!-- left: outlane drain -->
+    <line x1="-34" y1="352" x2="104" y2="360" stroke="#888888" stroke-width="1"/>
+    <text x="-40" y="348" text-anchor="end" font-weight="bold">OUTLANE</text>
+    <text x="-40" y="366" text-anchor="end" font-weight="bold">DRAIN</text>
+    <text x="-40" y="384" text-anchor="end" font-size="12">(also on the right)</text>
+
+    <!-- centre main drain -->
+    <text x="268" y="500" text-anchor="middle" font-weight="bold">MAIN DRAIN</text>
+
+    <!-- right: ball travel direction -->
+    <line x1="648" y1="128" x2="586" y2="150" stroke="#caa000" stroke-width="1"/>
+    <text x="654" y="124" font-weight="bold">BALL TRAVEL</text>
+    <text x="654" y="142" font-size="12">direction of launch</text>
+    <!-- right: ball + spring launcher -->
+    <line x1="648" y1="402" x2="602" y2="400" stroke="#888888" stroke-width="1"/>
+    <text x="654" y="398" font-weight="bold">BALL + SPRING</text>
+    <text x="654" y="416" font-weight="bold">LAUNCHER</text>
+  </g>
+</svg>

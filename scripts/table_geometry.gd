@@ -1,63 +1,53 @@
 class_name TableGeometry
 extends RefCounted
-## TableGeometry - builds the STATIC gray-box geometry of the table (surface, walls, arch, lane).
+## TableGeometry - builds the STATIC geometry of the table.
 ##
-## OWNERSHIP: lead-programmer. This is the fixed shell the ball lives in. It is intentionally NOT a
-## behaviour script: it is a builder called by table.gd so the geometry math lives in one place and
-## reads every dimension from TableConfig (the world-scale contract). No game rules here.
+## RESET (2026-06-21): the previous table (procedural walls, arch, lane guides, and all furniture)
+## was thrown out at the developer's request - the generated objects overlapped and did not play.
+## This now builds ONLY a clean FLAT PLAY AREA plus the main BORDER lines, traced from the reference
+## render (docs/REFERENCE_LAYOUT.md). It is a deliberate blank slate: we build the table back up
+## from here, one verified piece at a time. No furniture, no arch - just the surface + the outline.
 ##
-## All collision bodies created are StaticBody3D on the STATIC_OBSTACLES layer (the flat surface is
-## on
-## the PLAYFIELD layer). Everything is added under the tilted Playfield node passed in by table.gd.
-##
-## DESIGN LAYOUT honored (DESIGN.md): upright frame, launch lane up the RIGHT side, a rounded top
-## ARCH that turns the launched ball into the playfield, perimeter walls, and an OPEN bottom for the
-## drain. The bottom edge is deliberately left WALL-LESS so the ball can fall into the drain volume
-## (scripts/drain.gd) that table.gd places at TableConfig.DRAIN_Z. Do not add a full-width bottom
-## wall here. The ONE exception is _build_lane_pocket: a short stop that closes ONLY the bottom of
-## the
-## launch lane (x in [LANE_INNER_X, HALF_WIDTH]) so the resting ball does not roll off the open lane
-## bottom, while the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) stays OPEN for the
-## drain.
+## OWNERSHIP: lead-programmer. Called by table.gd. Reads its dimensions from TableConfig.
 ##
 ## COORDINATE CONVENTION (local to the tilted Playfield, per TableConfig):
-##   +X = right, -X = left, -Z = up-table (toward the arch), +Z = down-table (toward the drain).
-##   Y = up off the surface. The surface sits at Y = 0; walls stand up to TableConfig.WALL_HEIGHT.
+##   +X = right, -X = left, -Z = up-table (top), +Z = down-table (drain). Y = up off the surface.
+##   The surface top sits at Y = 0; borders stand up to TableConfig.WALL_HEIGHT.
 
 ## Entry point. table.gd calls TableGeometry.build(playfield_node).
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
-	_build_perimeter_walls(playfield)
-	_build_lane_divider(playfield)
-	_build_lane_exit_deflector(playfield)
-	_build_lane_pocket(playfield)
-	_build_arch(playfield)
-	_build_lane_guides(playfield)
+	_build_borders(playfield)
 
 
-## A shared gray-box material so every static body reads as the same neutral surface. Built fresh
-## per
-## call (cheap) so there is no shared mutable global state.
+## A dark material for the flat surface so the white border lines read clearly against it.
 static func _gray_material() -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.55, 0.55, 0.58)
+	mat.albedo_color = Color(0.18, 0.19, 0.22)
 	return mat
 
 
-## Create one box StaticBody3D wall: a collision box + a matching gray mesh, on a given layer,
-## placed
-## at a local position. Centralizes the boilerplate so each wall is one readable call.
+## A bright material for the BORDER lines so the outline stands out against the dark surface.
+static func _line_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.90, 0.90, 0.93)
+	return mat
+
+
+## Create one box StaticBody3D: a collision box + a matching mesh, on a given layer, at a local
+## position, with a material. Centralizes the boilerplate so each piece is one readable call.
 static func _make_box_body(
 	parent: Node3D,
 	body_name: String,
 	size: Vector3,
 	local_pos: Vector3,
-	layer: int
+	layer: int,
+	material: StandardMaterial3D
 ) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = body_name
 	body.collision_layer = layer
-	# Static geometry detects nothing; it is only detected. Empty mask avoids needless broadphase work.
+	# Static geometry detects nothing; it is only detected. Empty mask avoids broadphase work.
 	body.collision_mask = 0
 	body.position = local_pos
 
@@ -70,7 +60,7 @@ static func _make_box_body(
 	var mesh_instance := MeshInstance3D.new()
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
-	box_mesh.material = _gray_material()
+	box_mesh.material = material
 	mesh_instance.mesh = box_mesh
 	body.add_child(mesh_instance)
 
@@ -79,276 +69,63 @@ static func _make_box_body(
 
 
 ## The flat table surface: a thin box on the PLAYFIELD layer the ball rolls on. Its top face sits at
-## Y = 0 so every element placed at Y = 0 (BALL_START etc.) sits ON the surface.
+## Y = 0 so elements placed at Y = 0 sit ON the surface. Sized a little past the borders so there
+## is no gap at the outline feet.
 static func _build_surface(parent: Node3D) -> void:
-	# The surface spans the full inner play area plus a little margin so it never has a gap at the
-	# wall feet. A small thickness keeps it solid without wasting collision volume.
 	var thickness: float = 1.0
 	var size := Vector3(
-		TableConfig.HALF_WIDTH * 2.0 + TableConfig.WALL_THICKNESS,
+		TableConfig.HALF_WIDTH * 2.0 + 3.0,
 		thickness,
-		TableConfig.HALF_LENGTH * 2.0 + TableConfig.WALL_THICKNESS
+		TableConfig.HALF_LENGTH * 2.0 + 3.0
 	)
 	# Centered at Y = -thickness/2 so the TOP face is at Y = 0.
 	_make_box_body(
-		parent,
-		"Surface",
-		size,
-		Vector3(0.0, -thickness * 0.5, 0.0),
-		PhysicsLayers.PLAYFIELD
+		parent, "Surface", size, Vector3(0.0, -thickness * 0.5, 0.0),
+		PhysicsLayers.PLAYFIELD, _gray_material()
 	)
 
 
-## The perimeter walls: LEFT, RIGHT, and TOP. The BOTTOM is intentionally OPEN (the drain lives
-## there).
-## Walls stand from the surface (Y = 0) up to WALL_HEIGHT, centered at WALL_HEIGHT/2.
-static func _build_perimeter_walls(parent: Node3D) -> void:
-	var t: float = TableConfig.WALL_THICKNESS
-	var h: float = TableConfig.WALL_HEIGHT
-	var hw: float = TableConfig.HALF_WIDTH
-	var hl: float = TableConfig.HALF_LENGTH
-	var wall_y: float = h * 0.5
-	var layer: int = PhysicsLayers.STATIC_OBSTACLES
+## The MAIN BORDER lines, traced from the reference (docs/REFERENCE_LAYOUT.md): left wall, a rounded
+## top-left corner, the top edge, the right wall, and the launch-lane divider. The bottom is OPEN
+## (the drain mouth). Each segment is a thin white wall: it contains the ball and reads as the
+## outline. Points are the wall CENTERLINE in table coords (X, _, Z).
+static func _build_borders(parent: Node3D) -> void:
+	# Outer outline, walked as a polyline: up the left wall, around the rounded top-left corner,
+	# across the top, and down the right wall. The bottom is left open for the drain.
+	var outline: Array[Vector3] = [
+		Vector3(-16.4, 0.0, 24.0),    ## bottom-left (left wall, near the drain)
+		Vector3(-16.4, 0.0, -17.0),   ## up the left wall to where the corner begins
+		Vector3(-15.2, 0.0, -21.0),   ## rounded top-left corner (3 short chords)
+		Vector3(-13.0, 0.0, -23.6),
+		Vector3(-10.6, 0.0, -25.0),   ## top edge begins
+		Vector3(16.4, 0.0, -25.0),    ## across the top to the top-right
+		Vector3(16.4, 0.0, 24.0),     ## down the right wall toward the drain
+	]
+	for i: int in range(outline.size() - 1):
+		_add_border_segment(parent, outline[i], outline[i + 1], "Border%d" % i)
 
-	# Side walls run the FULL length (top to bottom edge) so a ball can never escape sideways. Their
-	# length includes the thickness overlap at the top corner so there is no gap with the top wall.
-	var side_size := Vector3(t, h, hl * 2.0)
-	_make_box_body(parent, "WallLeft", side_size, Vector3(-hw, wall_y, 0.0), layer)
-	_make_box_body(parent, "WallRight", side_size, Vector3(hw, wall_y, 0.0), layer)
-
-	# Top wall closes the up-table end. It spans the width plus the corner overlap so the corners seal.
-	var top_size := Vector3(hw * 2.0 + t, h, t)
-	_make_box_body(parent, "WallTop", top_size, Vector3(0.0, wall_y, -hl), layer)
-
-	# NO bottom wall: the open bottom edge is where a missed ball drains. The drain Area3D (table.gd)
-	# sits just inside this edge so the ball is caught before it falls off the open end.
-
-
-## The lane divider: an inner wall that, with the right outer wall, forms the launch lane up the
-## right
-## side. It runs from the bottom up to where the arch takes over, so the launched ball is channeled
-## up
-## the lane and over the arch instead of leaking into the playfield early.
-static func _build_lane_divider(parent: Node3D) -> void:
-	var t: float = TableConfig.WALL_THICKNESS
-	var h: float = TableConfig.WALL_HEIGHT
-	var hl: float = TableConfig.HALF_LENGTH
-	# The divider's TOP end stops at the arch start so the ball can curve over the top into the field.
-	var top_z: float = TableConfig.ARCH_CENTER_Z + TableConfig.ARCH_RADIUS_Z
-	# The divider's BOTTOM end stops short of the drain so it does not block the open bottom.
-	var bottom_z: float = hl - 1.0
-	var length: float = bottom_z - top_z
-	var center_z: float = (top_z + bottom_z) * 0.5
-	_make_box_body(
-		parent,
-		"LaneDivider",
-		Vector3(t, h, length),
-		Vector3(TableConfig.LANE_INNER_X, h * 0.5, center_z),
-		PhysicsLayers.STATIC_OBSTACLES
+	# The launch-lane divider: the inner right wall forming the shooter lane (x ~ +14.5), parallel to
+	# the right wall. The lane is the channel between the two.
+	_add_border_segment(
+		parent, Vector3(14.5, 0.0, -25.0), Vector3(14.5, 0.0, 23.0), "LaneDivider"
 	)
 
 
-## The lane-exit DEFLECTOR: the mechanism that actually turns a launched ball INTO the playfield.
-## The LaneDivider walls the lane only up to z = ARCH_CENTER_Z + ARCH_RADIUS_Z (= -13); ABOVE that
-## the symmetric arch dome does NOT redirect a ball rising in the RIGHT lane (at x ~ lane center the
-## dome face is near-vertical, so the ball reflects straight back DOWN and settles in the cradle -
-## the reported launch bug, proven by test_launch_clears_lane). This ~45-degree wall sits at the lane
-## top: a ball rising up-table (-Z) at the lane center meets its face and is reflected toward LEFT
-## (-X), releasing it into the open field so it cannot fall back down the channel. WHY a flat
-## 45-degree wall: it gives a clean up->left reflection, and the steel ball's low restitution
-## (BALL_BOUNCE 0.15) keeps the bounce tame. The launch speeds only need to carry the ball UP TO this
-## deflector (z ~ -13.5), not all the way to the arch.
-static func _build_lane_exit_deflector(parent: Node3D) -> void:
+## One border line: a thin white wall box from a to b, standing WALL_HEIGHT tall, yawed along the
+## chord. Slightly longer than the chord (plus one thickness) so consecutive segments overlap at the
+## joints and leave no gap for the ball to slip through.
+static func _add_border_segment(
+	parent: Node3D, a: Vector3, b: Vector3, seg_name: String
+) -> void:
 	var h: float = TableConfig.WALL_HEIGHT
 	var t: float = TableConfig.WALL_THICKNESS
-	# From the right wall, angled DOWN-LEFT into the playfield. CRITICAL: the deflector face must sit
-	# UP-TABLE of the divider top (z < LaneDivider top = -13) so the ball turns left into OPEN space,
-	# not back against the divider (which would bounce it into the lane). A ball rising at the lane
-	# center (x ~ 15) meets this face around z = -14.4 - cleanly above the divider top - and is turned
-	# toward -X, crossing the (now-absent above z=-13) divider line into the field.
-	var a := Vector3(TableConfig.HALF_WIDTH, 0.0, -14.5)
-	var b := Vector3(TableConfig.LANE_INNER_X - 2.0, 0.0, -18.5)
 	var chord: Vector3 = b - a
-	var seg_length: float = chord.length() + t
+	var length: float = chord.length() + t
 	var mid: Vector3 = (a + b) * 0.5
 	mid.y = h * 0.5
 	var body: StaticBody3D = _make_box_body(
-		parent,
-		"LaneExitDeflector",
-		Vector3(seg_length, h, t),
-		mid,
-		PhysicsLayers.STATIC_OBSTACLES
+		parent, seg_name, Vector3(length, h, t), mid,
+		PhysicsLayers.STATIC_OBSTACLES, _line_material()
 	)
-	# Rotate about Y so the long (local X) axis lies along the chord in the XZ plane (same convention
-	# as the arch segments): atan2(-z, x) is the heading from +X toward -Z.
+	# Yaw the box so its local +X runs along the a->b chord about +Y.
 	body.rotation.y = atan2(-chord.z, chord.x)
-
-
-## The launch-lane bottom POCKET: a short static wall that closes ONLY the bottom of the launch lane
-## so the ball placed at BALL_START rests in the chute instead of rolling off the open bottom edge
-## (the table is tilted drain-end-down and there is deliberately NO bottom perimeter wall). It spans
-## ONLY the lane in X (from the lane divider at LANE_INNER_X out to the right wall at HALF_WIDTH);
-## the center drain region (x in [-HALF_WIDTH, LANE_INNER_X]) is left OPEN so a drained ball still
-## falls into the drain. The wall stands WALL_HEIGHT tall like the perimeter; its up-table face sits
-## at TableConfig.LANE_POCKET_FACE_Z, just down-table of the ball's rest, so the ball rests on it.
-##
-## ADOPTED from prototype/physical-plunger (see BACKLOG LEAD task / ARCHITECTURE.md 9.3). This
-## builder was the half dropped during the original slice integration (QA BUG-012); restored here so
-## the launch mechanic actually works in the integrated game, not just in the unit tests.
-static func _build_lane_pocket(parent: Node3D) -> void:
-	var h: float = TableConfig.WALL_HEIGHT
-	var t: float = TableConfig.LANE_POCKET_THICKNESS
-	var inner_x: float = TableConfig.LANE_INNER_X
-	var hw: float = TableConfig.HALF_WIDTH
-	# Width spans the lane (LANE_INNER_X .. HALF_WIDTH) plus HALF a wall thickness of seal slack on the
-	# +X (right-wall) side ONLY. We deliberately do NOT pad the -X (divider) side: padding both sides
-	# pushed the -X face to x=7.6, 0.4 units PAST LANE_INNER_X into the open center drain region, where
-	# a draining ball would clip the protruding corner before the drain plane (QA BUG-020). With the
-	# pad on the right side only, the -X face lands exactly at LANE_INNER_X and the seal against the
-	# right wall is preserved. The lane divider at LANE_INNER_X already closes the -X corner (no gap).
-	var width: float = (hw - inner_x) + t * 0.5
-	# Center so the -X face sits at LANE_INNER_X and the +X face overlaps the right wall by t*0.5.
-	var center_x: float = inner_x + width * 0.5
-	# Center the box in Z so its UP-TABLE face lands exactly at LANE_POCKET_FACE_Z.
-	var center_z: float = TableConfig.LANE_POCKET_FACE_Z + t * 0.5
-	_make_box_body(
-		parent,
-		"LanePocket",
-		Vector3(width, h, t),
-		Vector3(center_x, h * 0.5, center_z),
-		PhysicsLayers.STATIC_OBSTACLES
-	)
-
-
-## INLANE / OUTLANE GUIDES (SLICE "real pinball furniture"): minimal physical guide walls down BOTH
-## sides that funnel a ball past the flipper. Per side a short DIVIDER wall splits the side channel
-## into an OUTER lane (the outlane, between the divider and the side wall, feeds the drain = risk)
-## and
-## an INNER lane (the inlane, between the divider and the flipper, feeds back toward the flipper =
-## save). NO rollover scoring, lights, or ball-save (DESIGN cut list) - these are unlit STATIC guide
-## walls only, on STATIC_OBSTACLES like the perimeter. The divider X comes from TableConfig
-## (LANE_GUIDE_DIVIDER_X, mirrored for the right) and it runs from LANE_GUIDE_TOP_Z down to
-## LANE_GUIDE_BOTTOM_Z. Geometry validated by tools/table_viz.py (the feed-path plot).
-##
-## OWNERSHIP: lead (static geometry). The standup bank, pop bumpers, and slingshots are dynamic
-## elements built in table.gd; only these fixed guide walls live in the static geometry builder.
-static func _build_lane_guides(parent: Node3D) -> void:
-	var h: float = TableConfig.LANE_GUIDE_HEIGHT
-	var t: float = TableConfig.LANE_GUIDE_THICKNESS
-	var outer_x: float = TableConfig.LANE_GUIDE_OUTER_X
-
-	# FAITHFUL inlane/outlane (docs/REFERENCE_LAYOUT.md, measured from the reference top-down). Each
-	# side has TWO rails: an angled INLANE GUIDE sweeping from the sling-bottom (x ~ +/-10.5, z 12)
-	# down to near the flipper (x ~ +/-3.5, z 20), and a near-vertical OUTLANE OUTER rail at +/-outer_x
-	# that, with the side wall (left) or the lane divider (right), forms the drain channel. The body
-	# sits at the outer-rail X so layout tests find each guide there; rails are given in WORLD coords
-	# and made local in _add_rail_between. Symmetric now: outer_x stays clear of the launch-lane path.
-	for sgn: float in [-1.0, 1.0]:
-		var body := StaticBody3D.new()
-		body.name = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
-		body.collision_layer = PhysicsLayers.STATIC_OBSTACLES
-		body.collision_mask = 0
-		body.position = Vector3(sgn * outer_x, 0.0, 0.0)
-		# Inlane guide: angled sweep from near the sling down to the flipper.
-		_add_rail_between(
-			body, Vector3(sgn * 10.5, h * 0.5, 12.0), Vector3(sgn * 3.5, h * 0.5, 20.0), t, h
-		)
-		# Outlane outer: near-vertical rail outboard, forming the drain channel with the wall/lane.
-		_add_rail_between(
-			body, Vector3(sgn * outer_x, h * 0.5, 15.5), Vector3(sgn * outer_x, h * 0.5, 23.0), t, h
-		)
-		parent.add_child(body)
-
-
-## Add one straight rail (collision box + matching gray mesh) between two WORLD points on the
-## playfield. The points are made LOCAL to the body so the body origin can sit at a representative X
-## for layout tests. The box runs along its local +X and is yawed to point from a to b about +Y.
-static func _add_rail_between(
-	body: StaticBody3D, a_world: Vector3, b_world: Vector3, t: float, h: float
-) -> void:
-	var a: Vector3 = a_world - body.position
-	var b: Vector3 = b_world - body.position
-	var mid: Vector3 = (a + b) * 0.5
-	var d: Vector3 = b - a
-	var length: float = maxf(d.length(), t)
-	var yaw: float = atan2(-d.z, d.x)  ## align local +X with the a->b direction about +Y
-	var col := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(length, h, t)
-	col.shape = box
-	col.position = mid
-	col.rotation.y = yaw
-	body.add_child(col)
-	var mi := MeshInstance3D.new()
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = Vector3(length, h, t)
-	box_mesh.material = _gray_material()
-	mi.mesh = box_mesh
-	mi.position = mid
-	mi.rotation.y = yaw
-	body.add_child(mi)
-
-
-## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the
-## top
-## of the table. It turns the ball, launched up the right lane, back over and DOWN into the
-## playfield.
-## Built solid: adjacent segments OVERLAP at their joints so there is no gap a fast ball squeezes
-## through (DESIGN: the arch must actually redirect a full-speed launched ball, no leaks).
-static func _build_arch(parent: Node3D) -> void:
-	var h: float = TableConfig.WALL_HEIGHT
-	var t: float = TableConfig.WALL_THICKNESS
-	var cx: float = 0.0
-	var cz: float = TableConfig.ARCH_CENTER_Z
-	var rx: float = TableConfig.ARCH_RADIUS_X
-	var rz: float = TableConfig.ARCH_RADIUS_Z
-	var segments: int = TableConfig.ARCH_SEGMENTS
-
-	# The arch sweeps the UPPER half of an ellipse, EXTENDED past pi..0 by ARCH_SWEEP_EXTEND_RAD on each
-	# end so the ends curve DOWN the upper sides (the reference's big orbit rail, not a flat dome). We
-	# sample points along the ellipse and connect each adjacent pair with a thin box segment, oriented
-	# along the chord. The extend is capped so the right end lands at ~x=LANE_INNER_X (clear of the lane).
-	var extend: float = TableConfig.ARCH_SWEEP_EXTEND_RAD
-	var start_angle: float = PI + extend
-	var end_angle: float = -extend
-	var prev := _ellipse_point(cx, cz, rx, rz, start_angle)
-	for i in range(1, segments + 1):
-		var angle: float = lerpf(start_angle, end_angle, float(i) / float(segments))
-		var curr := _ellipse_point(cx, cz, rx, rz, angle)
-		_build_arch_segment(parent, prev, curr, h, t, i)
-		prev = curr
-
-
-## A point on the arch ellipse (top half) in local XZ at Y = 0. Up-table is -Z, so the arch curves
-## toward -Z at its apex (sin term is subtracted from cz).
-static func _ellipse_point(cx: float, cz: float, rx: float, rz: float, angle: float) -> Vector3:
-	return Vector3(cx + rx * cos(angle), 0.0, cz - rz * sin(angle))
-
-
-## One arch segment: a thin box spanning from point a to point b, standing WALL_HEIGHT tall. We make
-## it slightly LONGER than the chord (plus one thickness) so consecutive segments overlap at the
-## joints and leave no gap for the ball to slip through.
-static func _build_arch_segment(
-	parent: Node3D,
-	a: Vector3,
-	b: Vector3,
-	height: float,
-	thickness: float,
-	index: int
-) -> void:
-	var chord: Vector3 = b - a
-	var length: float = chord.length() + thickness
-	var mid: Vector3 = (a + b) * 0.5
-	mid.y = height * 0.5
-
-	var body := _make_box_body(
-		parent,
-		"ArchSeg%d" % index,
-		Vector3(length, height, thickness),
-		mid,
-		PhysicsLayers.STATIC_OBSTACLES
-	)
-	# Rotate the segment about Y so its long (local X) axis lies along the chord in the XZ plane.
-	# atan2(-z, x) gives the heading from +X toward -Z, matching Godot's left-handed Y rotation.
-	var heading: float = atan2(-chord.z, chord.x)
-	body.rotation = Vector3(0.0, heading, 0.0)

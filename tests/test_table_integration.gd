@@ -51,25 +51,6 @@ func _playfield() -> Node3D:
 	return _find_named("Playfield") as Node3D
 
 
-# ---- BUG-012: the lane pocket is actually built into the integrated table ----------------
-
-func test_table_builds_the_lane_pocket() -> void:
-	## table.gd -> TableGeometry.build() must produce the LanePocket static stop. Its absence is
-	## exactly BUG-012 (the ball rolls off the open lane bottom in the real game).
-	var pocket: Node = _find_named("LanePocket")
-	assert_not_null(pocket, "the built Table must contain a 'LanePocket' static stop (QA BUG-012)")
-	if pocket != null:
-		assert_true(
-			pocket is StaticBody3D,
-			"LanePocket must be a StaticBody3D, got %s" % pocket.get_class()
-		)
-		assert_eq(
-			(pocket as StaticBody3D).collision_layer,
-			PhysicsLayers.STATIC_OBSTACLES,
-			"LanePocket must sit on STATIC_OBSTACLES so the ball collides with it"
-		)
-
-
 # ---- BUG-013: the plunger face sits in the launch lane, not off the table ----------------
 
 func test_plunger_face_sits_in_the_launch_lane_next_to_ball_start() -> void:
