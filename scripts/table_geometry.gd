@@ -235,42 +235,57 @@ static func _build_lane_pocket(parent: Node3D) -> void:
 static func _build_lane_guides(parent: Node3D) -> void:
 	var h: float = TableConfig.LANE_GUIDE_HEIGHT
 	var t: float = TableConfig.LANE_GUIDE_THICKNESS
-	var layer: int = PhysicsLayers.STATIC_OBSTACLES
 	var spread: float = TableConfig.FLIPPER_PIVOT_SPREAD
 	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
 
-	# Each side gets a lane-guide RAIL shaped like the developer's CAD: a straight section that forms
-	# the outer wall of the INLANE (the channel between the rail and the flipper that feeds the ball
-	# onto the bat), plus an upswept HOOK at the top that catches a descending ball and steers it into
-	# the inlane. OUTBOARD of the rail is the OUTLANE, which drains off the open bottom (the risk lane).
-	# The inlane is OPEN at the bottom (the rail stops just up-table of the flipper pivot) so the ball
-	# rolls onto the flipper and is NEVER pocketed (the trap the removed aprons caused).
+	# The guide is the same rail + hook shape, but now ONE body that is FLIPPED and ROTATED into place
+	# (developer feedback: "flip and rotate"). GUIDE_ROT_DEG is the tunable lean (mirrored per side);
+	# HOOK_LOCAL_YAW_DEG flips the hook. Change these two numbers to dial the orientation - no rebuild.
+	var guide_rot_deg: float = 28.0
+	var hook_local_yaw_deg: float = 52.0
 	for sgn: float in [-1.0, 1.0]:
-		var guide_x: float = sgn * (spread + 3.0)  ## outer wall of the inlane, ~3 outboard of the pivot
-		var top_z: float = piv_z - 8.0  ## up near the slingshot row
-		var bot_z: float = piv_z - 1.0  ## stops just up-table of the flipper pivot (inlane stays open)
 		var nm: String = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
-		# Straight inlane rail (the inlane's outer wall, parallel to the flipper).
-		_make_box_body(
-			parent,
-			nm,
-			Vector3(t, h, bot_z - top_z),
-			Vector3(guide_x, h * 0.5, (top_z + bot_z) * 0.5),
-			layer
+		var body := StaticBody3D.new()
+		body.name = nm
+		body.collision_layer = PhysicsLayers.STATIC_OBSTACLES
+		body.collision_mask = 0
+		# Body origin at the representative rail X (~spread+3) so layout tests find the guide there; the
+		# whole body is then rotated to lean the guide into place.
+		body.position = Vector3(sgn * (spread + 3.0), h * 0.5, piv_z - 4.0)
+		body.rotation.y = deg_to_rad(sgn * guide_rot_deg)
+		# Rail (along local Z), centered on the body.
+		_add_guide_part(body, Vector3(t, h, 8.0), Vector3.ZERO, 0.0)
+		# Hook at the up-table end of the rail, angled toward center (flip via HOOK_LOCAL_YAW_DEG sign).
+		_add_guide_part(
+			body,
+			Vector3(t, h, 3.6),
+			Vector3(sgn * -1.0, 0.0, -4.6),
+			sgn * deg_to_rad(hook_local_yaw_deg)
 		)
-		# Upswept HOOK at the top: a short angled segment toward center-up that catches a descending
-		# ball and directs it into the inlane (the curved hook on the real guide rail).
-		var a := Vector3(guide_x, 0.0, top_z)
-		var b := Vector3(sgn * (spread + 0.8), 0.0, top_z - 3.0)
-		var chord: Vector3 = b - a
-		var hook: StaticBody3D = _make_box_body(
-			parent,
-			nm + "Hook",
-			Vector3(chord.length() + t, h, t),
-			(a + b) * 0.5 + Vector3(0.0, h * 0.5, 0.0),
-			layer
-		)
-		hook.rotation.y = atan2(-chord.z, chord.x)
+		parent.add_child(body)
+
+
+## Add one box part (collision shape + matching mesh) to a guide body at a LOCAL position/yaw, so the
+## body's own flip/rotation carries the part with it. Lets a guide be built from a few parts and then
+## flipped+rotated as a unit.
+static func _add_guide_part(
+	body: StaticBody3D, size: Vector3, local_pos: Vector3, local_yaw: float
+) -> void:
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	col.shape = box
+	col.position = local_pos
+	col.rotation.y = local_yaw
+	body.add_child(col)
+	var mi := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = size
+	box_mesh.material = _gray_material()
+	mi.mesh = box_mesh
+	mi.position = local_pos
+	mi.rotation.y = local_yaw
+	body.add_child(mi)
 
 
 ## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the
