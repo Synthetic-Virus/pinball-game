@@ -468,8 +468,11 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 ## WIDEN: slings move from +/-8.5 to +/-10.5 to stay just OUTBOARD of the widened flipper pivots
 ## (+/-7.2) and inside the side walls (+/-16), so a ball falling down the wider side channel grazes
 ## the sling and is kicked back into play. Z unchanged (off the unchanged flipper pivot row).
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-10.5, 0.0, FLIPPER_PIVOT_Z - 7.0)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(10.5, 0.0, FLIPPER_PIVOT_Z - 7.0)
+# MARKUP (docs/REFERENCE_LAYOUT.md): the developer's slingshot triangles flanking the flippers. The
+# LEFT mark measured cleanly to (-8.0, +11.4); the RIGHT came back inboard (homography error) so we
+# mirror the good left value. Symmetric at +/-8.0, just outboard of the flipper pivots (+/-7.2).
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.0, 0.0, 11.4)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.0, 0.0, 11.4)
 ## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
 ## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
 const SLINGSHOT_LENGTH: float = 7.0

@@ -234,9 +234,27 @@ func _build_dynamic_elements() -> void:
 
 	# --- Furniture: rebuilding from the developer's markup, ONE verified piece at a time ----------
 	# After the 2026-06-21 reset (flat play area + borders) we add furniture back per the hand-drawn
-	# plan (docs/REFERENCE_LAYOUT.md), checking each piece plays before the next. Slingshots still
-	# pending; their array stays empty so the wiring/HUD have nothing to iterate.
+	# plan (docs/REFERENCE_LAYOUT.md), checking each piece plays before the next.
+
+	# --- Slingshots (markup piece 3): one angled 3-post kicker outboard of each flipper ------------
 	slingshots.clear()
+	var left_sling: Area3D = SlingshotScene.instantiate()
+	left_sling.name = "LeftSlingshot"
+	left_sling.position = TableConfig.SLINGSHOT_LEFT_POS
+	if left_sling.has_method("configure"):
+		left_sling.configure(false)
+	playfield.add_child(left_sling)
+	left_sling.set_ball(ball)
+	slingshots.append(left_sling)
+
+	var right_sling: Area3D = SlingshotScene.instantiate()
+	right_sling.name = "RightSlingshot"
+	right_sling.position = TableConfig.SLINGSHOT_RIGHT_POS
+	if right_sling.has_method("configure"):
+		right_sling.configure(true)
+	playfield.add_child(right_sling)
+	right_sling.set_ball(ball)
+	slingshots.append(right_sling)
 
 	# --- Targets (markup piece 2): purple posts from STANDUP_BANK_POSITIONS ------------------------
 	targets.clear()
