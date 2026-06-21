@@ -123,10 +123,11 @@ func _triangle_outline() -> PackedVector2Array:
 	var half_l: float = _length * 0.5
 	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
 	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
-	# Apex X offset per handedness: a real slingshot's apex sits toward the OUTER (side-wall) end. The
-	# mirror flips which end. hand_sign is +1 for the left sling, -1 for the right (mirror).
+	# Apex X offset per handedness: the pointed corner must aim toward the GUTTER (the OUTER, side-wall
+	# end), per developer feedback. hand_sign is +1 for the left sling, -1 for the right (mirror); the
+	# leading minus aims the apex at the outer end so the corner points into the gutter, not the center.
 	var hand_sign: float = -1.0 if _mirrored else 1.0
-	var apex_x: float = half_l * hand_sign
+	var apex_x: float = -half_l * hand_sign
 	var pts := PackedVector2Array()
 	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
 	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
