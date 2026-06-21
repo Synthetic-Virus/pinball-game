@@ -438,10 +438,13 @@ const POP_BUMPER_SCORE: int = 100
 ## HALF_WIDTH - POP_BUMPER_RADIUS = 16 - 2 = 14, far outside +/-6, so the bigger bumpers do not foul
 ## a wall (asserted by test_shot_geometry + table_viz). Still up-table of the flippers and below the
 ## arch base, so a flipped ball can feed the cluster.
+# FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): the 3-bumper triangle is tighter and sits in the
+# upper-MIDDLE (two high at z-9.4, one low-center at z-4.4, apex pointing down toward the flippers),
+# below the standup row. Measured from the reference top-down.
 const POP_BUMPER_POSITIONS: Array[Vector3] = [
-	Vector3(-6.0, 0.0, -13.0),
-	Vector3(6.0, 0.0, -13.0),
-	Vector3(0.0, 0.0, -16.5),
+	Vector3(-4.2, 0.0, -9.4),
+	Vector3(4.0, 0.0, -9.4),
+	Vector3(0.0, 0.0, -4.4),
 ]
 
 ## ---- SLINGSHOTS (active kickers above each flipper) --------------------------------------------
@@ -498,10 +501,15 @@ const SLINGSHOT_SCORE: int = 50
 ## well"), while every target stays inside the makeable window (between the flipper-tip reach and
 ## arch base) - asserted by test_shot_geometry + table_viz. Z unchanged (the widen does not move the
 ## makeable window in Z). The individual target POST size is raised in scripts/target.gd (gameplay).
+# FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): FIVE standups in a row HIGH up-table (z-16.4, just
+# below the top orbit), measured from the reference top-down. Still inside the makeable window
+# (down-table of the arch base), so test_shot_geometry stays green; reached via the orbit/upper field.
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-4.5, 0.0, -7.0),
-	Vector3(0.0, 0.0, -7.5),
-	Vector3(4.5, 0.0, -7.0),
+	Vector3(-7.2, 0.0, -16.4),
+	Vector3(-3.6, 0.0, -16.4),
+	Vector3(0.0, 0.0, -16.4),
+	Vector3(3.5, 0.0, -16.4),
+	Vector3(7.1, 0.0, -16.4),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------
