@@ -235,32 +235,42 @@ static func _build_lane_pocket(parent: Node3D) -> void:
 static func _build_lane_guides(parent: Node3D) -> void:
 	var h: float = TableConfig.LANE_GUIDE_HEIGHT
 	var t: float = TableConfig.LANE_GUIDE_THICKNESS
-	var top_z: float = TableConfig.LANE_GUIDE_TOP_Z
-	var bottom_z: float = TableConfig.LANE_GUIDE_BOTTOM_Z
-	var length: float = bottom_z - top_z
-	var center_z: float = (top_z + bottom_z) * 0.5
 	var layer: int = PhysicsLayers.STATIC_OBSTACLES
+	var spread: float = TableConfig.FLIPPER_PIVOT_SPREAD
+	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
 
-	# One divider per side. The LEFT divider sits at -LANE_GUIDE_DIVIDER_X (open left field). The
-	# RIGHT divider is ASYMMETRIC: it sits at +LANE_GUIDE_RIGHT_DIVIDER_X, INBOARD of the launch lane,
-	# because the launch lane occupies the whole right edge after the WIDEN. A symmetric right guide at
-	# +13.0 landed inside the lane across the ball's spawn/launch path and pinned the ball so it could
-	# not be launched (see TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X). A simple vertical wall (thin in X,
-	# long in Z) is enough to separate the outer (outlane) and inner (inlane) channels on each side.
-	var divider_x_by_side := {
-		-1.0: -TableConfig.LANE_GUIDE_DIVIDER_X,        ## Left: open field, symmetric placement.
-		1.0: TableConfig.LANE_GUIDE_RIGHT_DIVIDER_X,    ## Right: inboard of the launch lane.
-	}
-	for sign: float in [-1.0, 1.0]:
-		var divider_x: float = divider_x_by_side[sign]
-		var guide_name: String = "LaneGuideLeft" if sign < 0.0 else "LaneGuideRight"
+	# Each side gets a lane-guide RAIL shaped like the developer's CAD: a straight section that forms
+	# the outer wall of the INLANE (the channel between the rail and the flipper that feeds the ball
+	# onto the bat), plus an upswept HOOK at the top that catches a descending ball and steers it into
+	# the inlane. OUTBOARD of the rail is the OUTLANE, which drains off the open bottom (the risk lane).
+	# The inlane is OPEN at the bottom (the rail stops just up-table of the flipper pivot) so the ball
+	# rolls onto the flipper and is NEVER pocketed (the trap the removed aprons caused).
+	for sgn: float in [-1.0, 1.0]:
+		var guide_x: float = sgn * (spread + 3.0)  ## outer wall of the inlane, ~3 outboard of the pivot
+		var top_z: float = piv_z - 8.0  ## up near the slingshot row
+		var bot_z: float = piv_z - 1.0  ## stops just up-table of the flipper pivot (inlane stays open)
+		var nm: String = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
+		# Straight inlane rail (the inlane's outer wall, parallel to the flipper).
 		_make_box_body(
 			parent,
-			guide_name,
-			Vector3(t, h, length),
-			Vector3(divider_x, h * 0.5, center_z),
+			nm,
+			Vector3(t, h, bot_z - top_z),
+			Vector3(guide_x, h * 0.5, (top_z + bot_z) * 0.5),
 			layer
 		)
+		# Upswept HOOK at the top: a short angled segment toward center-up that catches a descending
+		# ball and directs it into the inlane (the curved hook on the real guide rail).
+		var a := Vector3(guide_x, 0.0, top_z)
+		var b := Vector3(sgn * (spread + 0.8), 0.0, top_z - 3.0)
+		var chord: Vector3 = b - a
+		var hook: StaticBody3D = _make_box_body(
+			parent,
+			nm + "Hook",
+			Vector3(chord.length() + t, h, t),
+			(a + b) * 0.5 + Vector3(0.0, h * 0.5, 0.0),
+			layer
+		)
+		hook.rotation.y = atan2(-chord.z, chord.x)
 
 
 ## The rounded top arch: a polyline of short wall segments approximating a half-ellipse across the
