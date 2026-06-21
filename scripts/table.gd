@@ -234,10 +234,18 @@ func _build_dynamic_elements() -> void:
 
 	# --- Furniture: rebuilding from the developer's markup, ONE verified piece at a time ----------
 	# After the 2026-06-21 reset (flat play area + borders) we add furniture back per the hand-drawn
-	# plan (docs/REFERENCE_LAYOUT.md), checking each piece plays before the next. Targets and
-	# slingshots are still pending; their arrays stay empty so the wiring/HUD have nothing to iterate.
-	targets.clear()
+	# plan (docs/REFERENCE_LAYOUT.md), checking each piece plays before the next. Slingshots still
+	# pending; their array stays empty so the wiring/HUD have nothing to iterate.
 	slingshots.clear()
+
+	# --- Targets (markup piece 2): purple posts from STANDUP_BANK_POSITIONS ------------------------
+	targets.clear()
+	for pos: Vector3 in TableConfig.STANDUP_BANK_POSITIONS:
+		var target: Area3D = TargetScene.instantiate()
+		target.position = pos
+		playfield.add_child(target)
+		target.set_ball(ball)
+		targets.append(target)
 
 	# --- Pop bumpers (markup piece 1): 3-bumper triangle, positions from POP_BUMPER_POSITIONS -----
 	pop_bumpers.clear()

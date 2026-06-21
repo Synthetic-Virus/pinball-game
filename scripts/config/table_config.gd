@@ -511,12 +511,17 @@ const SLINGSHOT_SCORE: int = 50
 # FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): FIVE standups in a row HIGH up-table (z-16.4, just
 # below the top orbit), measured from the reference top-down. Still inside the makeable window
 # (down-table of the arch base), so test_shot_geometry stays green; reached via the orbit/upper field.
+# MARKUP (docs/REFERENCE_LAYOUT.md): the developer's purple target marks, homography-measured. An
+# upper PAIR beside the bumpers, a RIGHT vertical BANK of 4 (x ~ 8.5, tightly spaced), and a LEFT
+# single. Small posts (target.gd POST_RADIUS 0.7) so the bank does not overlap.
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-7.2, 0.0, -16.4),
-	Vector3(-3.6, 0.0, -16.4),
-	Vector3(0.0, 0.0, -16.4),
-	Vector3(3.5, 0.0, -16.4),
-	Vector3(7.1, 0.0, -16.4),
+	Vector3(-8.4, 0.0, -12.4),   ## upper-left, beside the bumpers
+	Vector3(5.7, 0.0, -12.4),    ## upper-right, beside the bumpers
+	Vector3(8.4, 0.0, -2.3),     ## right vertical bank (4)
+	Vector3(8.5, 0.0, -0.9),
+	Vector3(8.7, 0.0, 0.5),
+	Vector3(8.9, 0.0, 2.1),
+	Vector3(-11.4, 0.0, 2.1),    ## left single
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------

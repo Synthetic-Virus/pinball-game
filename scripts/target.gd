@@ -39,12 +39,12 @@ signal scored(points: int)
 ## before the ball center reaches the post surface. Physics-programmer may retune but must keep
 ## this constant in sync so the detector shell stays consistent with actual deflector geometry.
 ##
-## RESIZE (SLICE "Table reshape + playtest fixes", 2026-06-19): 1.5 -> 2.0. Developer playtest
-## feedback: the standup targets were too small to aim at on the wider table. A 2.0-radius post
-## reads clearly as a target on the wider field and stays inside the makeable-shot window
-## (asserted by test_shot_geometry.gd + tools/table_viz.py). The detector shell and the solid
-## deflector below both read from this constant, so they stay in sync automatically.
-const POST_RADIUS: float = 2.0
+## SIZE (MARKUP rebuild, 2026-06-21): 0.7. The developer's plan places targets in tight groups (a
+## right vertical BANK of 4 about 1.4 apart, plus an upper pair and a left single), so a small post
+## is needed - a 2.0-radius post would overlap its neighbours into one blob. Small standup posts also
+## read distinctly from the radius-2 pop bumpers. The detector shell and the solid deflector below
+## both read from this constant, so they stay in sync automatically.
+const POST_RADIUS: float = 0.7
 
 ## Re-trigger cooldown (seconds). After a hit, this target ignores further contacts briefly so a
 ## ball resting or grinding against the post on the tilted plane cannot score every physics frame
@@ -96,6 +96,10 @@ func _ready() -> void:
 	cylinder_mesh.top_radius = POST_RADIUS
 	cylinder_mesh.bottom_radius = POST_RADIUS
 	cylinder_mesh.height = TableConfig.WALL_HEIGHT
+	# Purple, matching the developer's markup and distinct from the red pop bumpers.
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.62, 0.24, 0.72)
+	cylinder_mesh.material = mat
 	mesh_instance.mesh = cylinder_mesh
 	add_child(mesh_instance)
 
