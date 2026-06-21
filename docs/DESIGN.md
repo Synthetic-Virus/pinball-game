@@ -554,6 +554,122 @@ ball 2 and ball 3 and knows how to restart. All gray-box; no art, no audio.
   then opens ONE PR and confirms GREEN on the homelab runner. Do NOT touch main. The producer requires
   green CI on the pushed sha to PASS; the human merges.
 
+## Slice design intent: "Fix the launch" (gray-box, physics-based, 2026-06-20)
+This slice fixes a CONFIRMED playability bug in the deployed build (main): the developer plunges and
+the ball climbs partway up the launch chute, stalls, and rolls back, so play cannot start reliably.
+It is a CORRECTNESS slice, not a feature slice: it adds NO new mechanics or element types, keeps every
+element count, and keeps every interaction physics-based. It does ONE thing - make the launch actually
+deliver the ball into the playfield on EVERY plunge across the WHOLE power meter - and closes the test
+gap that let a non-clearing launch ship. The designer confirms the intent below; the physics-programmer
+owns the measured diagnosis and the fix; the test-builder/QA own the behavioral lane-clear oracle.
+
+### Why this slice matters (the core-loop stakes)
+Gate 0 asks "does one ball make the player want the next ball." A launch that does not reach play
+fails that on a control problem before fun is ever in question. The launch is "the first small win of
+every ball" (core loop step 1): if the first beat of every ball is a dead dribble that rolls back, the
+player never reaches the loop at all. The prior slices made the launch FIRE (impart velocity) but never
+asserted the ball CLEARS THE LANE INTO PLAY - the test gap that let this ship. A green suite that proves
+the ball has speed but not that the ball arrives is exactly the gap this slice closes.
+
+### The diagnosis is geometry, confirmed before engineering (designer's read; physics MEASURES it)
+The numbers are not a guess; they fall out of the locked TableConfig geometry:
+- The ball rests at BALL_START.z = HALF_LENGTH - 2.0 = 23.0; the arch curves over at
+  ARCH_CENTER_Z = -HALF_LENGTH + 6.0 = -19.0. The up-table climb from rest to the arch is ~42 units.
+- The down-slope deceleration on the tilt is GRAVITY * sin(TILT_DEG) = 200 * sin(7 deg) = ~24.4 u/s^2.
+- Clearing 42 units from rest therefore needs ~sqrt(2 * 24.4 * 42) = ~45.3 u/s at the ball, BEFORE any
+  loss to wall rattle or friction.
+- But LAUNCH_SPEED_MIN = 30 and PLUNGER_STROKE_SPEED_MIN = 30: the entire LOWER HALF of the power
+  meter delivers a ball that physically cannot reach the arch. It climbs, stalls, and rolls back -
+  exactly the reported symptom. The bottom of the meter is a DEAD ZONE.
+This is primary cause (a): the speed FLOOR is below what the lane requires. The physics-programmer must
+still MEASURE (headless, on the real tilted geometry) the delivered ball speed at MIN/MID/MAX and the
+ball's apex (lowest Z reached before rollback) to confirm (a) and to size the fix, AND to rule in or
+out the two secondary causes: (b) impulse under-delivery (does a full strike actually land the ball in
+LAUNCH_SPEED_MIN..MAX?) and (c) the snug 2.0-unit lane (~1.7 ball diameters) bleeding energy to wall
+rattle and BALL_FRICTION (0.4) so even mid power stalls. Report the measured numbers in the deliverable.
+
+### Player-facing goal (what the player should be able to do and feel)
+- EVERY PLUNGE STARTS THE BALL. Hold the meter, release at ANY power, and the ball leaves the lane,
+  crosses the arch, and enters the playfield - every time. There is no dead bottom half of the meter
+  where the ball climbs and rolls back; the WHOLE meter is useful.
+- POWER STILL MEANS SOMETHING. A soft release is a gentle entry; a hard release is a punchy one. The
+  mapping stays monotonic (more meter => faster ball), and the spread between a soft and a hard launch
+  stays clearly readable - the launch-skill of releasing at a chosen moment is preserved. We are
+  raising the FLOOR so even a weak launch clears, not flattening the difference between weak and strong.
+- THE CHUTE STILL LOOKS RIGHT. The snug ball-width lane the developer liked is kept. The ball does not
+  rattle so hard it stalls; the launch reads as a clean, confident shot up the lane and over the arch.
+- THE SAFETY NET STAYS A SAFETY NET. The failed-launch watchdog (re-serve) remains for genuine edge
+  cases, but a NORMAL plunge at any power never trips it - a player should essentially never see a
+  re-serve in normal play once the floor is fixed.
+
+### Must-feel qualities (the bar the engineers hit, gray boxes only)
+1. THE WHOLE METER CLEARS THE LANE. A launch at MINIMUM power drives the ball's apex PAST the lane exit
+   / arch and into the open playfield, then the ball settles in the play area (not back in the lane).
+   A low/mid launch does the same with more margin. This is judged by the ball's MEASURED apex position
+   (lowest Z) and final resting region, never by a fired-signal counter. The floor is raised so even
+   the weakest plunge clears with a sensible margin (the climb needs ~45 u/s; the floor must exceed that
+   plus a margin for rattle/friction loss, the physics-programmer sizes the exact number from the
+   measurement).
+2. POWER YOU CAN STILL FEEL. A full plunge clearly out-throws a minimum plunge (the existing >= 1.5x
+   feel floor in test_plunger_launch.gd stays true), and the resulting ball speed lands in the (possibly
+   raised) LAUNCH_SPEED_MIN..MAX window. Raising the floor must not collapse the meter into one speed.
+3. THE CHUTE STAYS SNUG, THE BALL STILL FLOWS. The lane stays close to its current snug width (the
+   developer's preference); if rattle/friction is measured to rob enough energy that mid power stalls,
+   the preferred fixes are a LOW-FRICTION lane wall / lower ball-lane friction or a SMALL widen - never
+   a return to a bulky box. The plunger face still strikes the ball square and head-on with no gap.
+4. THE WATCHDOG STAYS QUIET IN NORMAL PLAY. The LAUNCH_SETTLE_TIME_S re-serve still recovers a genuine
+   failed launch, but a normal plunge at ANY power crosses LAUNCH_REACHED_PLAY_Z well before the timer
+   and never triggers it. (If raising the floor makes every normal plunge clear, the watchdog should
+   essentially never fire outside contrived edge cases - that is the correct outcome.)
+5. NOTHING TUNNELS, EVER. If LAUNCH_SPEED_MAX is raised, the no-tunnel stress tests must fire at
+   >= ~2x the NEW max and still show zero tunneling through the plunger face, lane pocket, walls, arch,
+   targets, bumpers, slings, lane guides, or flippers. Hard gate on the ball's REAL measured
+   position/velocity at 240 Hz with continuous_cd on, against real instanced bodies.
+
+### Design constraints the engineers must honor (do NOT re-litigate)
+- SCOPE: FIX THE LAUNCH ONLY. No new element types, ramps, modes, multiball, multipliers, rollover
+  scoring, art, or audio. Same element counts. The ONLY changes are: the launch SPEED tuning
+  (LAUNCH_SPEED_MIN/MAX and the PLUNGER_STROKE_SPEED_MIN/MAX that feed it), optionally the lane-wall /
+  ball-lane FRICTION or a SMALL lane widen if rattle is measured to be a real cause, and the NEW
+  behavioral lane-clear test. Do not re-shape the table, re-home furniture, or touch the flipper drive.
+- DIAGNOSE BY MEASUREMENT, NOT BY GUESS. Headless, on the REAL tilted Playfield with the REAL
+  TableGeometry (the same build tests/test_plunger_launch.gd uses), fire MIN/MID/MAX and MEASURE
+  (a) the delivered ball speed just after the strike and (b) the apex (lowest Z reached before
+  rollback). Determine which of (a) floor-too-low, (b) impulse-under-delivers, (c) rattle/friction-
+  stalls are actually true. Fix the MEASURED cause(s); report the numbers in the deliverable.
+- RAISE THE FLOOR SO THE WHOLE METER IS USEFUL. LAUNCH_SPEED_MIN (and PLUNGER_STROKE_SPEED_MIN feeding
+  it) must rise so EVEN A MINIMUM plunge clears the lane into play with margin over the ~45 u/s climb
+  requirement plus measured rattle/friction loss. Keep LAUNCH_SPEED_MAX a satisfying hard plunge,
+  clearly stronger than the new min (raise MAX too if needed to preserve a readable weak-vs-strong
+  spread). The power->speed mapping still lives off TableConfig.LAUNCH_SPEED_MIN/MAX; the contract
+  (power 0..1, monotonic) is unchanged.
+- KEEP THE CHUTE SNUG. The developer liked the ball-width look (LANE_WIDTH 2.0). Prefer a low-friction
+  lane wall / lower ball-lane friction, or a SMALL widen, over a fat lane, IF AND ONLY IF the
+  measurement shows rattle/friction is a real contributor. If the floor-raise alone makes the whole
+  meter clear cleanly, do not touch the lane geometry at all. The plunger face stays square to the ball.
+- PRESERVE EVERY EXISTING CONTRACT. The plunger contract (power_changed/ball_launched; arm/disarm/
+  set_ball/is_armed; power 0..1; the oscillating meter; impulse-on-contact launch, NOT a code velocity
+  set on the ball) is unchanged - this is a TUNING + TEST slice behind the same contract. The flipper
+  drive, the soft-lock watchdog, the lane pocket, the furniture, and the world scale are all unchanged.
+- CLOSE THE TEST GAP (this is why it shipped). ADD a BEHAVIORAL launch test that asserts the ball
+  actually CLEARS THE LANE INTO THE PLAYFIELD, not merely that it has speed. On the real tilted lane:
+  a launch at MIN power (and at a low/mid power) drives the ball's apex up-table PAST the lane exit /
+  arch and crosses into the play area (the ball center crosses up-table of LAUNCH_REACHED_PLAY_Z / the
+  lane-divider top), then settles in the OPEN playfield, NOT back in the lane. Use the ball's MEASURED
+  position as the oracle (position cannot lie). KEEP test_plunger_launch.gd (speed + no-fall-out-bottom)
+  and test_plunger_lane_size.gd GREEN. A speed-only green suite that never asserts lane-clear is a FAIL.
+- PHYSICS NORTH-STAR (do not regress). Ball continuous_cd at 240 Hz; the no-tunnel stress tests
+  (fire >= ~2x LAUNCH_SPEED_MAX at flippers/walls/furniture) stay green; if LAUNCH_SPEED_MAX rises, the
+  stress tests fire at >= 2x the NEW max and still show zero tunneling. Do not break the flipper/ball/
+  plunger asset visuals already on main (PR #12 flipper).
+- VALIDATE DETERMINISTICALLY. tools/table_viz.py side/projected view can sanity-check the lane-to-arch
+  path if helpful; the homelab CI is the source of truth for green.
+- House style: typed GDScript, snake_case, document the WHY (especially the MEASURED numbers behind any
+  tuning change), no emojis, no em-dash characters; lines <= 100 chars; gdlint clean (~/.local/bin/gdlint).
+- DELIVERY: the team's Setup phase creates the slice branch. Build/QA agents COMMIT but do NOT push.
+  Deliver verifies the FULL GUT suite GREEN locally (fetch headless Godot 4.x, run GUT) BEFORE pushing
+  ONE PR. Do NOT touch main. The producer requires green CI on the pushed sha to PASS; the human merges.
+
 ## Out of scope for v1 (the cut list - keep honest)
 v1 direction (producer + designer): ONE polished table before any others; defer extra worlds.
 
@@ -622,3 +738,20 @@ Why hold the line: a soft-lock that ends the session and a launch lane that does
 control failures that block Gate 0 outright. Fix the EXISTING table so a failed launch is always
 recoverable, every piece reads as what it is, and the controls/HUD are legible every ball - then judge
 the fun. One great table first.
+
+### Cut from the "Fix the launch" slice (2026-06-20) - defended:
+A single-bug correctness slice: the ball does not clear the launch chute into play. Explicitly held
+OUT (creep this one bug could pull in):
+- ANY new element types or counts, table re-shape, furniture re-home, or world rescale. This is a
+  launch SPEED tuning + a behavioral lane-clear TEST, plus a small friction/lane tweak ONLY IF the
+  measurement proves rattle is a real cause. Same table, same furniture.
+- A general re-tune of the FLIPPER feel, the meter sweep, the soft-lock watchdog, or the plunger
+  mechanism. The plunger contract and the impulse-on-contact launch stay; we change the speed FLOOR
+  (and ceiling if needed), not the launch MECHANISM.
+- Returning to a bulky launch lane. The developer liked the snug ball-width chute; the fix keeps it
+  (a low-friction lane wall or a small widen is the most we touch geometry, and only if measured).
+- Art/audio, rollover scoring, lights, ball-save, modes, multiball - still deferred (v1 cut list stands).
+Why hold the line: the player cannot start a ball today on a launch at low/mid power. The win is the
+narrowest possible: make EVERY plunge reach play and lock that with a test that asserts the ball
+ARRIVES, not just that it has speed. Fix the one bug, close the one gap, do not reopen the table. One
+great table first.

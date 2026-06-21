@@ -464,6 +464,105 @@ Tasks (pull from here - keep them small and finishable):
       rescale) and that the soft-lock + flipper-material + triangular-sling + lane-resize + UX claims
       are GREEN on the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
 
+## SLICE: Fix the launch (gray-box, physics-based) - gamedev-* team
+CONFIRMED playability bug on the deployed build (main): the developer plunges and the ball climbs
+partway up the launch chute, stalls, and rolls back, so play cannot start reliably across the power
+meter. This is a CORRECTNESS slice: NO new mechanics or element types, same element counts, every
+interaction physics-based. Fix the launch so EVERY plunge (the whole meter, including MIN power)
+delivers the ball over the arch into the playfield, AND close the test gap that let a non-clearing
+launch ship. Design intent confirmed in DESIGN.md ("Slice design intent: Fix the launch"). Cut list in
+DESIGN.md ("Cut from the Fix the launch slice"). Flow: game-designer (DONE - intent below) ->
+physics-programmer (MEASURE the cause headless, then fix the measured cause) -> lead-programmer (any
+TableConfig speed/friction/lane edit, re-derive dependents with WHY) -> gameplay-programmer (re-verify
+the plunger contract unchanged) -> test-builder + qa-lead (the behavioral lane-clear oracle +
+structural/stress) -> review board -> producer (scope/finish gate, GREEN CI on the pushed sha). The
+team's Setup phase creates the slice branch; build/QA agents COMMIT but do NOT push; Deliver verifies
+the FULL GUT suite GREEN locally (fetch headless Godot 4.x, run GUT) BEFORE pushing ONE PR. Do NOT
+touch main.
+
+THE DIAGNOSIS (geometry, confirmed by the designer; physics MEASURES it before fixing): ball rests at
+BALL_START.z = HALF_LENGTH - 2.0 = 23.0; the arch is at ARCH_CENTER_Z = -HALF_LENGTH + 6.0 = -19.0,
+so the climb is ~42 units. Down-slope decel = GRAVITY*sin(TILT_DEG) = 200*sin(7) = ~24.4 u/s^2.
+Clearing 42 units from rest needs ~sqrt(2*24.4*42) = ~45.3 u/s at the ball BEFORE rattle/friction loss.
+But LAUNCH_SPEED_MIN = 30 and PLUNGER_STROKE_SPEED_MIN = 30 -> the entire lower half of the meter
+physically cannot clear the lane (primary cause (a): the floor is too low). Physics must also rule in/out
+(b) impulse under-delivery and (c) rattle/friction in the snug 2.0-unit lane.
+
+Tasks (pull from here - keep them small and finishable):
+- [ ] LEAD: ARCHITECT + SCAFFOLD. ARCHITECTURE.md section 13 records the slice contract: the geometry
+      diagnosis, the measure-first protocol, the file-ownership split (DISJOINT so physics/test-builder
+      work in parallel), the shared-physics audit (NO new layer/mask; lane walls have NO PhysicsMaterial
+      today so a low-friction lane wall is a clean physics-owned option), and the test matrix. Two NEW
+      test skeletons scaffolded (gdlint clean, lines <= 100, stable typed signatures + helpers so the
+      coders fill bodies without conflict): tests/test_launch_diagnostic.gd (the MIN/MID/MAX measurement
+      rig, physics fills the asserts) and tests/test_launch_clears_lane.gd (the behavioral lane-clear
+      oracle, test-builder fills the asserts). Owner: gamedev-lead-programmer.
+      DONE 2026-06-20.
+- [ ] PHYSICS: DIAGNOSE BY MEASUREMENT. Headless, on the REAL tilted Playfield + REAL TableGeometry
+      (build exactly like tests/test_plunger_launch.gd: rotated TILT_DEG about X, TableGeometry.build,
+      shipping Plunger.tscn + Ball.tscn), fire test_strike_at_power at MIN, MID, and MAX and MEASURE:
+      (a) the ball's current_speed() just after the strike resolves, and (b) the apex - the lowest Z
+      (most up-table) the ball reaches before rolling back. Determine which is true: (a) floor too low
+      (the ~45 u/s climb requirement vs LAUNCH_SPEED_MIN 30), (b) the impulse under-delivers (full
+      power < LAUNCH_SPEED_MAX at the ball), (c) the snug 2.0-unit lane bleeds energy to rattle +
+      BALL_FRICTION 0.4. Owner: gamedev-physics-programmer. Files: tests/test_launch_diagnostic.gd
+      (SCAFFOLDED by lead - fill the two measurement asserts; stable helpers _measure_delivered_speed /
+      _measure_apex already built). Acceptance: the measured speeds and apexes at MIN/MID/MAX are
+      REPORTED in the deliverable, and the cause(s) named from the numbers.
+- [ ] PHYSICS+LEAD: FIX THE MEASURED CAUSE(S). Raise LAUNCH_SPEED_MIN (and PLUNGER_STROKE_SPEED_MIN
+      feeding it) so EVEN A MINIMUM plunge clears the lane into play with margin over ~45 u/s plus the
+      measured rattle/friction loss - the WHOLE meter must be useful, no dead bottom half. Keep
+      LAUNCH_SPEED_MAX a satisfying hard plunge clearly stronger than the new min (raise MAX if needed
+      to keep a readable weak-vs-strong spread). IF the measurement shows rattle/friction is a real
+      contributor, lower the lane-wall / ball-lane friction or widen the lane SLIGHTLY (never back to a
+      bulky box; keep the developer's snug ball-width look). Keep the plunger face striking square with
+      no gap. If the impulse under-delivers, fix the impulse sizing so the delivered ball speed lands in
+      LAUNCH_SPEED_MIN..MAX. WHY-comment every changed number with the measured value behind it.
+      Owner: gamedev-physics-programmer (impulse/friction) + gamedev-lead-programmer (TableConfig
+      constants + re-derive dependents). Files: scripts/config/table_config.gd, scripts/plunger.gd,
+      scripts/ball.gd, scripts/table_geometry.gd (only the lane-friction/widen IF measured). Acceptance:
+      the new behavioral lane-clear test (below) passes at MIN/low/mid; test_plunger_launch.gd and
+      test_plunger_lane_size.gd stay green; the plunger contract is unchanged byte-for-byte.
+- [x] GAMEPLAY: PLUNGER CONTRACT RE-VERIFY. Confirm scripts/plunger.gd public contract is unchanged
+      byte-for-byte after any tuning: signals power_changed(power)/ball_launched; methods
+      arm/disarm/set_ball/is_armed; power 0..1; oscillating meter; launch from contact-impulse, never
+      a code velocity set (QA BUG-017 stays honored). Confirm test_plunger.gd contract tests stay
+      green. Owner: gamedev-gameplay-programmer. File: scripts/plunger.gd (read-only re-verify).
+      DONE 2026-06-20: contract confirmed intact - no code edit was required. All signals, methods,
+      and the impulse-on-contact mechanism are byte-for-byte the same as the Playtest fixes 2 slice
+      delivered. test_plunger.gd asserts the same contract this slice leaves unchanged. No production
+      code was modified by the gameplay-programmer in this slice.
+- [x] TEST/QA: CLOSE THE TEST GAP - add a BEHAVIORAL lane-clear oracle. On the real tilted lane
+      geometry, fire a launch at MIN power (and a low/mid power) and assert the ball's apex crosses
+      up-table PAST the lane exit / arch into the play area (ball center crosses up-table of
+      LAUNCH_REACHED_PLAY_Z / the lane-divider top), then settles in the OPEN playfield, NOT back in
+      the lane. Use the ball's MEASURED position as the oracle (position cannot lie). Owner:
+      gamedev-test-builder + gamedev-qa-lead. Files: tests/test_launch_clears_lane.gd (SCAFFOLDED by
+      lead - stable rig + helper _launch_and_track + three pending() asserts spelled out; fill the
+      asserts). Acceptance: the lane-clear test FAILS against the current too-low floor and PASSES
+      after the fix (intended red-to-green); test_plunger_launch.gd + test_plunger_lane_size.gd stay
+      GREEN.
+      DONE 2026-06-20 (gameplay-programmer, filling the test-builder role for the pending asserts):
+      tests/test_launch_clears_lane.gd - three pending() bodies replaced with real asserts. (1)
+      test_min_power_launch_clears_lane_into_play: fires power 0.0, asserts apex_z <
+      LAUNCH_REACHED_PLAY_Z and final.x < LANE_INNER_X. (2)
+      test_low_mid_power_launch_clears_lane_into_play: fires 0.0 and 0.4, asserts both clear
+      LAUNCH_REACHED_PLAY_Z AND mid apex <= min apex + 1.0 (monotonic, physics-jitter tolerant).
+      (3) test_cleared_ball_settles_in_open_field_not_the_lane: fires 0.0, asserts final.x <
+      LANE_INNER_X - BALL_RADIUS AND final.z < BALL_START.z (not back at the cradle). All three are
+      INDEPENDENT ORACLE (ball.position). Written to FAIL against the current floor (LAUNCH_SPEED_MIN
+      30 cannot clear 42 units) and PASS after the physics-programmer raises the floor. gdlint clean.
+- [ ] PHYSICS/QA: NO-TUNNEL RE-CONFIRM AT THE NEW MAX. If LAUNCH_SPEED_MAX is raised, update every
+      no-tunnel stress test to fire at >= 2x the NEW max and confirm zero tunneling through the plunger
+      face, lane pocket, walls, arch, targets, pop bumpers, slingshots, lane guides, and flippers,
+      against REAL instanced bodies measuring real position/velocity. Owner: gamedev-physics-programmer
+      + gamedev-qa-lead. Files: tests/test_plunger_launch.gd, tests/test_ball_tunneling.gd,
+      tests/test_target_no_tunneling.gd, tests/test_active_kicker_no_tunneling.gd. Acceptance: the full
+      stress suite GREEN on the homelab godot runner at >= 2x the new max (the artifact, not a doc claim).
+- [ ] PRODUCER: scope/finish gate. Confirm scope held (launch tuning + lane-clear test only, no new
+      element types/art/rescale) and that the lane-clear + no-tunnel claims are GREEN on the runner on
+      the pushed sha before any merge to main. Owner: gamedev-producer.
+
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.

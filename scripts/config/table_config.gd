@@ -224,7 +224,32 @@ const BALL_START: Vector3 = Vector3(15.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
 ## target the physical plunger strike is calibrated against; the HUD/tests still read these bounds.
-const LAUNCH_SPEED_MIN: float = 30.0
+##
+## FIX (SLICE "Fix the launch", REVISED 2026-06-20): the first attempt mis-diagnosed this as a
+## speed-floor problem and raised MIN 30->60 / MAX 90->110. That was WRONG on both counts, proven by
+## the suite running locally:
+##
+## THE REAL BUG IS GEOMETRIC, not speed. The diagnostic harness (tests/test_launch_diagnostic.gd)
+## measured AMPLE delivered speed (MIN 60 -> apex z=-11, well up the lane) - the ball was never
+## starved. But test_launch_clears_lane proved the ball came to REST back in the cradle (x=15,
+## z=23): it rises up the lane, and ABOVE the LaneDivider top (z=-13) the symmetric arch dome does
+## NOT turn a ball rising in the RIGHT lane - at x ~ lane center the dome face is near-vertical, so
+## the ball reflects straight back DOWN and rolls home. No amount of speed fixes a missing turn.
+##
+## THE REAL FIX: a LaneExitDeflector (scripts/table_geometry.gd _build_lane_exit_deflector) - a
+## ~45-degree wall at the lane top that reflects the rising ball's up-velocity into LEFT velocity,
+## releasing it into the open playfield so it cannot fall back down the channel. The speeds now only
+## need to carry the ball UP TO the deflector (z ~ -13.5), a ~37-unit climb (~43 u/s frictionless).
+##
+## SPEED FLOOR/CEILING: MIN delivered 70 (clears the ~43 u/s climb to the deflector with margin for
+## the snug-lane friction loss the diagnostic measures). MAX 90 - REVERTED from the mistaken 110.
+## WHY NOT 110: every no-tunnel stress test fires at 2.0 * LAUNCH_SPEED_MAX (read LIVE), so MAX 110
+## fired the stress at 220 u/s, and a restitution bounce off an element returned ~141 u/s - ABOVE
+## the 120 KICK_MAX_OUTGOING_SPEED CCD-safe cap, a tunneling-safety regression the suite caught. MAX
+## 90 keeps the stress at 180 u/s (bounce ~115 < 120), the proven-safe band. Spread 90/70 = 1.29x is
+## modest; widen the FEEL later by lowering the deflector turn point, NOT by raising MAX past the
+## CCD-safe ceiling.
+const LAUNCH_SPEED_MIN: float = 70.0
 const LAUNCH_SPEED_MAX: float = 90.0
 
 ## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
@@ -241,8 +266,14 @@ const LAUNCH_SPEED_MAX: float = 90.0
 ## are the first on-device tuning knobs: verify in the browser build that a full strike clears the
 ## arch and a min strike dribbles, and nudge these two numbers (only) if needed. Tests assert the
 ## MAPPING is monotonic and meaningful and that the ball lands in-range, not an exact value.
-const PLUNGER_STROKE_SPEED_MIN: float = 30.0  ## Power 0.0: a gentle dribble out of the lane.
-const PLUNGER_STROKE_SPEED_MAX: float = 78.0  ## Power 1.0: a hard strike that clears the arch.
+## The stroke speeds FEED the delivered ball speed (the launch impulse is mass * stroke_speed applied
+## to a ball at rest, so the ball leaves at ~the stroke speed - see scripts/plunger.gd
+## _try_apply_launch_impulse), so these track LAUNCH_SPEED_MIN..MAX. REVISED with the launch fix:
+## MIN 70 so even the weakest plunge carries the ball up to the LaneExitDeflector and turns into the
+## field; MAX 88 (just under LAUNCH_SPEED_MAX 90) so a full strike stays inside the CCD-safe band
+## (see the LAUNCH_SPEED_MAX WHY note - 110 broke the no-tunnel cap). Spread is modest by design.
+const PLUNGER_STROKE_SPEED_MIN: float = 70.0   ## Power 0.0: carries the ball to the lane deflector.
+const PLUNGER_STROKE_SPEED_MAX: float = 88.0   ## Power 1.0: hard strike, just under LAUNCH_SPEED_MAX.
 
 ## How far (world units) the plunger face travels up-table on a full stroke before it returns home.
 ## It only needs to travel far enough to stay in solid contact with the ball through the strike; a

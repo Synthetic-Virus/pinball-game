@@ -29,6 +29,7 @@ static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_perimeter_walls(playfield)
 	_build_lane_divider(playfield)
+	_build_lane_exit_deflector(playfield)
 	_build_lane_pocket(playfield)
 	_build_arch(playfield)
 	_build_lane_guides(playfield)
@@ -145,6 +146,42 @@ static func _build_lane_divider(parent: Node3D) -> void:
 		Vector3(TableConfig.LANE_INNER_X, h * 0.5, center_z),
 		PhysicsLayers.STATIC_OBSTACLES
 	)
+
+
+## The lane-exit DEFLECTOR: the mechanism that actually turns a launched ball INTO the playfield.
+## The LaneDivider walls the lane only up to z = ARCH_CENTER_Z + ARCH_RADIUS_Z (= -13); ABOVE that
+## the symmetric arch dome does NOT redirect a ball rising in the RIGHT lane (at x ~ lane center the
+## dome face is near-vertical, so the ball reflects straight back DOWN and settles in the cradle -
+## the reported launch bug, proven by test_launch_clears_lane). This ~45-degree wall sits at the lane
+## top: a ball rising up-table (-Z) at the lane center meets its face and is reflected toward LEFT
+## (-X), releasing it into the open field so it cannot fall back down the channel. WHY a flat
+## 45-degree wall: it gives a clean up->left reflection, and the steel ball's low restitution
+## (BALL_BOUNCE 0.15) keeps the bounce tame. The launch speeds only need to carry the ball UP TO this
+## deflector (z ~ -13.5), not all the way to the arch.
+static func _build_lane_exit_deflector(parent: Node3D) -> void:
+	var h: float = TableConfig.WALL_HEIGHT
+	var t: float = TableConfig.WALL_THICKNESS
+	# From the right wall, angled DOWN-LEFT into the playfield. CRITICAL: the deflector face must sit
+	# UP-TABLE of the divider top (z < LaneDivider top = -13) so the ball turns left into OPEN space,
+	# not back against the divider (which would bounce it into the lane). A ball rising at the lane
+	# center (x ~ 15) meets this face around z = -14.4 - cleanly above the divider top - and is turned
+	# toward -X, crossing the (now-absent above z=-13) divider line into the field.
+	var a := Vector3(TableConfig.HALF_WIDTH, 0.0, -14.5)
+	var b := Vector3(TableConfig.LANE_INNER_X - 2.0, 0.0, -18.5)
+	var chord: Vector3 = b - a
+	var seg_length: float = chord.length() + t
+	var mid: Vector3 = (a + b) * 0.5
+	mid.y = h * 0.5
+	var body: StaticBody3D = _make_box_body(
+		parent,
+		"LaneExitDeflector",
+		Vector3(seg_length, h, t),
+		mid,
+		PhysicsLayers.STATIC_OBSTACLES
+	)
+	# Rotate about Y so the long (local X) axis lies along the chord in the XZ plane (same convention
+	# as the arch segments): atan2(-z, x) is the heading from +X toward -Z.
+	body.rotation.y = atan2(-chord.z, chord.x)
 
 
 ## The launch-lane bottom POCKET: a short static wall that closes ONLY the bottom of the launch lane

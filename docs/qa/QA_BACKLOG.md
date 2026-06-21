@@ -61,7 +61,7 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
       Written: tests/test_game_flow.gd (test_drain_decrements_balls_and_requests_new_ball,
       test_game_over_at_zero_balls, test_no_new_ball_request_at_game_over). FAILS until
       gameplay-programmer fills on_ball_drained(). Correct pre-impl state.
-- [ ] TEST DEBT (locks BUG-023): drain trigger volume must not overlap the flipper-bat catch zone.
+- [x] TEST DEBT (locks BUG-023): drain trigger volume must not overlap the flipper-bat catch zone.
       TWO assertions: (1) a CONFIG/structural assert DRAIN_Z - DRAIN_DEPTH/2 > max flipper-bat z
       (the drain's up-table edge clears the bat sweep) - the cheap machine-check the existing
       center-only assert is missing; (2) a BEHAVIORAL integration test that seats the REAL Ball
@@ -69,6 +69,12 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
       the full settle, asserts ZERO emissions (independent oracle). Goes in test_world_scale.gd +
       test_table_integration.gd. Write it RED now (the current geometry overlaps), green after fix.
       Owner: gamedev-test-builder + gamedev-qa-lead.
+      WRITTEN: test_world_scale.gd::test_drain_up_table_edge_clears_the_flipper_bat_catch_zone
+      (config assert), test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain
+      (behavioral integration). Both exist on main / slice/fix-the-launch HEAD. The behavioral
+      test was RED due to BUG-023 not being fully fixed at runtime (BUG-028); the Fix-the-launch
+      slice scope is to keep these tests as the correct oracle and let the physics-programmer's
+      drain-geometry fix make them green.
 
 ## Stream 2 - Bug repros (found defects, reproduced and logged)
 
@@ -1574,6 +1580,15 @@ and (c) audits DESIGN.md and the code for testability gaps. There is always test
 ---
 
 ### BUG-033 [HIGH] test_soft_lock_integration.gd uses power 0.0 (30 u/s) which always reaches play - the test cannot exercise the failed-launch recovery path and will fail on 3 assertions
+
+RESOLVED 2026-06-20 (test-builder): replaced test_strike_at_power(0.0) with a direct call to
+game_flow.on_ball_launched() (Option A). The plunger is disarmed via disarm(), then
+on_ball_launched() puts GameFlow into LAUNCHING with the ball stationary in the lane. The real
+watchdog in table.gd _physics_process feeds the lane Z to tick_launch_watch each frame; after
+LAUNCH_SETTLE_TIME_S the watchdog fires recovery (request_relaunch, plunger re-armed, no ball
+spent). The stale "power 0.0: a gentle dribble" comment in table_config.gd was also already
+corrected by the fix-the-launch slice physics work (PLUNGER_STROKE_SPEED_MIN comment updated).
+Committed as 1cbaa79 on slice/fix-the-launch. gdlint clean.
 
 Severity: HIGH - this is the integration-level coverage for the slice's headline fix (soft-lock
 recovery). The test is structurally sound but targets the wrong scenario: it fires

@@ -18,9 +18,10 @@ extends GutTest
 ## How many times to fire the worst-case shot. Matches the flat-wall test (test_ball_tunneling.gd).
 const TEST_ITERATIONS: int = 100
 
-## At 240 Hz, 30 frames = 125 ms. A ball at 2*LAUNCH_SPEED_MAX (180 u/s) travels 22.5 units in
-## that span, well past a post a few units away. A missed collision shows up as the ball being past
-## the post's far face, which is exactly what we check.
+## At 240 Hz, 30 frames = 125 ms. A ball at 2*LAUNCH_SPEED_MAX (220 u/s after the "Fix the launch"
+## slice raised MAX to 110) travels 27.5 units in that span, well past a post a few units away. A
+## missed collision shows up as the ball being past the post's far face, which is what we check.
+## _test_speed reads the live config, so the gate auto-re-confirms at the new max.
 const STEP_FRAMES: int = 30
 
 ## Starting distance in front of the post (z offset from the post face toward the ball).

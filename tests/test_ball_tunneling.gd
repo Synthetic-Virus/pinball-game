@@ -26,8 +26,9 @@ extends GutTest
 
 const TEST_ITERATIONS: int = 100
 ## Number of 240 Hz physics frames to simulate per shot. At 240 Hz, 30 frames = 125 ms.
-## A ball at 2*LAUNCH_SPEED_MAX = 180 u/s travels 22.5 u in that time, well past a wall
-## set 5 units away.
+## A ball at 2*LAUNCH_SPEED_MAX = 220 u/s (LAUNCH_SPEED_MAX raised to 110 in the "Fix the launch"
+## slice, 2026-06-20) travels 27.5 u in that time, well past a wall set 5 units away. _test_speed
+## reads the live config, so this gate auto-re-confirms at the new max with no edit to the logic.
 const STEP_FRAMES: int = 30
 
 ## Wall plane: the wall face sits at this Z in world space. The ball starts in front of it
