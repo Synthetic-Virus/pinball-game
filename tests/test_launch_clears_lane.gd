@@ -170,12 +170,17 @@ func test_cleared_ball_settles_in_open_field_not_the_lane() -> void:
 		("cleared ball's final x (%.2f) must be in the open field (< LANE_INNER_X - BALL_RADIUS"
 			+ " = %.2f), not back in the lane") % [result.final.x, clear_x]
 	)
-	# Also confirm the ball is not back at the cradle Z (did not roll all the way back down the lane).
-	# A ball in the open field may be anywhere in Z; the key is it is not in the lane at all.
-	# We assert x first (the primary check); the Z guard is defensive belt-and-suspenders.
-	assert_lt(
-		result.final.z,
-		TableConfig.BALL_START.z,
-		("cleared ball's final z (%.2f) must be up-table of the cradle z (%.2f)"
-			+ " - it must not have rolled back") % [result.final.z, TableConfig.BALL_START.z]
+	# A successfully launched ball legitimately DRAINS when no flipper catches it (this is headless,
+	# so nothing holds it), and a drained ball's final z runs PAST the table bottom - "anywhere in Z"
+	# as the header says. So we do NOT require z < cradle. The real failure is rolling BACK to the
+	# cradle: coming to rest IN the lane (x >= LANE_INNER_X) at ~cradle Z. Assert it is not in that
+	# state (the x check above already excludes it; this names the precise failure for clarity).
+	var rolled_back_to_cradle: bool = (
+		result.final.x >= TableConfig.LANE_INNER_X
+		and absf(result.final.z - TableConfig.BALL_START.z) < 3.0
+	)
+	assert_false(
+		rolled_back_to_cradle,
+		("ball must not have rolled back to the cradle (final x=%.2f z=%.2f vs cradle x>=%.2f z~%.2f)"
+			% [result.final.x, result.final.z, TableConfig.LANE_INNER_X, TableConfig.BALL_START.z])
 	)
