@@ -42,6 +42,12 @@ const TRIANGLE_BACK_DEPTH: float = TableConfig.SLINGSHOT_LENGTH * 0.55
 const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
 const CORNER_SEGMENTS: int = 4
 
+## Extra rotation applied to the whole sling (its kick direction, and therefore its visible triangle
+## and collision, all follow this). Tuning knob for "rotate the slings more" - mirrored per side, so
+## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the other
+## way. The kick still points INTO play (a modest rotation keeps the up-table component).
+const EXTRA_KICK_ROT_DEG: float = 25.0
+
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
 var _thickness: float = TableConfig.SLINGSHOT_THICKNESS
@@ -66,7 +72,10 @@ func configure(mirrored: bool) -> void:
 	var raw_dir: Vector3 = (
 		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
 	)
-	_kick_dir = raw_dir.normalized()
+	# Rotate the whole sling by EXTRA_KICK_ROT_DEG (mirrored per side) - the mesh, collision and kick
+	# all follow _kick_dir, so this turns the triangle. Tunable; flip the sign to rotate the other way.
+	var extra: float = deg_to_rad(EXTRA_KICK_ROT_DEG) * (-1.0 if _mirrored else 1.0)
+	_kick_dir = raw_dir.normalized().rotated(Vector3.UP, extra)
 
 
 ## FIXED kick: always the face normal into play, independent of the contact point (ball_pos unused).
