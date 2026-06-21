@@ -7,7 +7,7 @@
 ARG RUNNER_BASE=myoung34/github-runner:latest
 FROM ${RUNNER_BASE}
 
-ARG GODOT_VERSION=4.6.3
+ARG GODOT_VERSION=4.7
 ENV GODOT_VERSION=${GODOT_VERSION}
 
 RUN apt-get update && apt-get install -y --no-install-recommends       wget unzip rsync ca-certificates python3 python3-pip  && pip3 install --no-cache-dir "gdtoolkit==4.*"  && rm -rf /var/lib/apt/lists/*

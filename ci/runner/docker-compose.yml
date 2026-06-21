@@ -4,7 +4,7 @@ services:
     build:
       context: .
       args:
-        GODOT_VERSION: "4.6.3"
+        GODOT_VERSION: "4.7"
     image: pinball-godot-runner:local
     container_name: pinball-godot-runner
     restart: unless-stopped
