@@ -53,3 +53,18 @@ Each slingshot is a 3-POST rubber triangle (posts = red rubber cylinders, rubber
 
 Each region: build to the numbers above, run the full GUT suite on Godot 4.7 locally, push to main,
 deploy, screenshot, and let the developer react before the next region.
+
+## Markup measurements (2026-06-21, developer's hand-drawn plan)
+
+Andrew marked up the bottom-up render (legend: black=borders, orange=inlane walls, purple=targets,
+grey=ball, yellow=bumpers, 2 black blobs=flippers, blue dots=pins with black fill between=guides).
+Measured via a 4-corner homography from that perspective view to table coords (not eyeballed):
+
+- Bumpers (3, triangle apex-down): (-4.8, -8.3), (2.1, -8.3), (-1.4, -4.0)
+- Targets: upper pair (-8.4, -12.4) & (5.7, -12.4); RIGHT vertical bank of 4 at x~8.5, z -2.3..+2.1;
+  LEFT single (-11.4, +2.1)
+- Inlane walls (orange): (-9.9, +13.3) and (+7.2, +13.4)
+- Guides (blue pins + black fill): top-left return (-8.5, -16), top-right return (+6.4, -13.6);
+  mid side rails (~ +/-11, z+1); slingshot triangles (-8.0, +11.4) & (+5.4, +11.3); wall-hugging
+  pins near x +/-14..15 (z +5..+7).
+- Build back onto the flat play area one verified piece at a time (no overlap). See [[rapid-layout-loop]].

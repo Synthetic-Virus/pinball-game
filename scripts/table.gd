@@ -232,14 +232,23 @@ func _build_dynamic_elements() -> void:
 	playfield.add_child(right_flipper)
 	right_flipper.configure("right_flipper", true)
 
-	# --- Furniture: REMOVED in the 2026-06-21 reset ----------------------------------------------
-	# The standup bank, pop bumpers, and slingshots were thrown out with the old table (the generated
-	# objects overlapped and did not play). The arrays stay (empty) so the signal wiring and HUD have
-	# nothing to iterate, and we add furniture back one verified piece at a time onto the new flat
-	# play area + borders (TableGeometry). See docs/REFERENCE_LAYOUT.md.
+	# --- Furniture: rebuilding from the developer's markup, ONE verified piece at a time ----------
+	# After the 2026-06-21 reset (flat play area + borders) we add furniture back per the hand-drawn
+	# plan (docs/REFERENCE_LAYOUT.md), checking each piece plays before the next. Targets and
+	# slingshots are still pending; their arrays stay empty so the wiring/HUD have nothing to iterate.
 	targets.clear()
-	pop_bumpers.clear()
 	slingshots.clear()
+
+	# --- Pop bumpers (markup piece 1): 3-bumper triangle, positions from POP_BUMPER_POSITIONS -----
+	pop_bumpers.clear()
+	for pos: Vector3 in TableConfig.POP_BUMPER_POSITIONS:
+		var bumper: Area3D = PopBumperScene.instantiate()
+		bumper.position = pos
+		if bumper.has_method("configure"):
+			bumper.configure()
+		playfield.add_child(bumper)
+		bumper.set_ball(ball)
+		pop_bumpers.append(bumper)
 
 	# --- Plunger ----------------------------------------------------------------------------------
 	# CONTRACT (QA BUG-013): the Plunger node MUST sit at the playfield origin (Vector3.ZERO). Its

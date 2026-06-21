@@ -445,13 +445,13 @@ const POP_BUMPER_SCORE: int = 100
 ## HALF_WIDTH - POP_BUMPER_RADIUS = 16 - 2 = 14, far outside +/-6, so the bigger bumpers do not foul
 ## a wall (asserted by test_shot_geometry + table_viz). Still up-table of the flippers and below the
 ## arch base, so a flipped ball can feed the cluster.
-# FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): the 3-bumper triangle is tighter and sits in the
-# upper-MIDDLE (two high at z-9.4, one low-center at z-4.4, apex pointing down toward the flippers),
-# below the standup row. Measured from the reference top-down.
+# MARKUP (docs/REFERENCE_LAYOUT.md): 3-bumper triangle from the developer's hand-drawn plan,
+# homography-measured from the bottom-up render. Two high (z-8.3), one low-center (z-4.0), apex down.
+# First furniture piece re-added onto the post-reset flat play area.
 const POP_BUMPER_POSITIONS: Array[Vector3] = [
-	Vector3(-4.2, 0.0, -9.4),
-	Vector3(4.0, 0.0, -9.4),
-	Vector3(0.0, 0.0, -4.4),
+	Vector3(-4.8, 0.0, -8.3),
+	Vector3(2.1, 0.0, -8.3),
+	Vector3(-1.4, 0.0, -4.0),
 ]
 
 ## ---- SLINGSHOTS (active kickers above each flipper) --------------------------------------------
