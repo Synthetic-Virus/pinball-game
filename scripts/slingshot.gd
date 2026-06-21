@@ -35,6 +35,13 @@ extends "res://scripts/active_kicker.gd"
 ## placement number, so it lives with the shape it describes (no TableConfig edit needed for fix 3).
 const TRIANGLE_BACK_DEPTH: float = TableConfig.SLINGSHOT_LENGTH * 0.55
 
+## Corner rounding: a real slingshot's corners are rubber-wrapped posts, ROUNDED, not sharp triangle
+## points. We replace each of the 3 sharp corners with a small arc. CORNER_RADIUS is how far the
+## round trims in along each edge; CORNER_SEGMENTS is the arc resolution. Both the collider hull and
+## the visible mesh are built from the rounded outline, so they stay in agreement.
+const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
+const CORNER_SEGMENTS: int = 4
+
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
 var _thickness: float = TableConfig.SLINGSHOT_THICKNESS
@@ -124,7 +131,36 @@ func _triangle_outline() -> PackedVector2Array:
 	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
 	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
 	pts.append(Vector2(apex_x, apex_z))  ## C: apex (back, offset per side)
-	return pts
+	# Round the three sharp corners into small arcs (rubber-wrapped posts are round, not pointed).
+	# Both the collider hull and the visible mesh consume this outline, so this rounds both at once.
+	return _round_corners(pts, CORNER_RADIUS, CORNER_SEGMENTS)
+
+
+## Replace each sharp corner of a CCW (x, z) polygon with a rounded arc. For each vertex we trim in
+## along both adjacent edges by `radius` (clamped so we never overrun a short edge) and sweep a
+## quadratic-Bezier arc through the original corner. Winding (CCW/CW) is preserved, so the cap-orient
+## and signed-area logic still work. Returns the expanded outline (more points, same convex shape).
+func _round_corners(poly: PackedVector2Array, radius: float, seg: int) -> PackedVector2Array:
+	var n: int = poly.size()
+	var out := PackedVector2Array()
+	for i in range(n):
+		var prev: Vector2 = poly[(i - 1 + n) % n]
+		var cur: Vector2 = poly[i]
+		var nxt: Vector2 = poly[(i + 1) % n]
+		var to_prev: Vector2 = prev - cur
+		var to_next: Vector2 = nxt - cur
+		# Clamp the trim so a short edge can't be overrun (keeps the rounded shape valid + convex).
+		var d: float = minf(radius, minf(to_prev.length() * 0.49, to_next.length() * 0.49))
+		var p_start: Vector2 = cur + to_prev.normalized() * d
+		var p_end: Vector2 = cur + to_next.normalized() * d
+		out.append(p_start)
+		for s in range(1, seg):
+			var t: float = float(s) / float(seg)
+			var u: float = 1.0 - t
+			# Quadratic Bezier with the sharp corner as the control point = a smooth rounded corner.
+			out.append(p_start * (u * u) + cur * (2.0 * u * t) + p_end * (t * t))
+		out.append(p_end)
+	return out
 
 
 ## The triangle outline expanded OUTWARD by `pad` (world units) for the detector, so the detector is
@@ -133,8 +169,13 @@ func _triangle_outline() -> PackedVector2Array:
 ## shape a uniform margin larger, which is all the corner-contact detector needs.
 func _padded_triangle_outline(pad: float) -> PackedVector2Array:
 	var base: PackedVector2Array = _triangle_outline()
-	var cx: float = (base[0].x + base[1].x + base[2].x) / 3.0
-	var cz: float = (base[0].y + base[1].y + base[2].y) / 3.0
+	var cx: float = 0.0
+	var cz: float = 0.0
+	for p: Vector2 in base:
+		cx += p.x
+		cz += p.y
+	cx /= float(base.size())
+	cz /= float(base.size())
 	var out := PackedVector2Array()
 	for p: Vector2 in base:
 		var dir := Vector2(p.x - cx, p.y - cz)
@@ -194,25 +235,32 @@ func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMe
 	# fan normal (via (v1-v0)x(v2-v0)) points -Y, so a CCW outline needs the top cap REVERSED to face
 	# +Y; a CW outline (the mirrored sling) needs it forward. _signed_area_xz < 0 means CW.
 	var top_forward: bool = _signed_area_xz(outline) < 0.0
-	var i0: int = 0
-	var i1: int = 1
-	var i2: int = 2
-	# Top cap (+Y).
-	st.add_vertex(Vector3(outline[i0].x, half_h, outline[i0].y))
-	if top_forward:
-		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
-		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
-	else:
-		st.add_vertex(Vector3(outline[i2].x, half_h, outline[i2].y))
-		st.add_vertex(Vector3(outline[i1].x, half_h, outline[i1].y))
-	# Bottom cap (-Y): the opposite winding of the top cap.
-	st.add_vertex(Vector3(outline[i0].x, -half_h, outline[i0].y))
-	if top_forward:
-		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
-		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
-	else:
-		st.add_vertex(Vector3(outline[i1].x, -half_h, outline[i1].y))
-		st.add_vertex(Vector3(outline[i2].x, -half_h, outline[i2].y))
+	# Caps as a triangle FAN from vertex 0 over the FULL outline (now rounded, so N > 3 points). The
+	# old code fanned only the first 3 points, which left a rounded cap unfilled. Winding per the
+	# signed area so TOP faces +Y and BOTTOM faces -Y for both the left (CCW) and mirrored (CW) slings.
+	for i in range(1, n - 1):
+		var a_t := Vector3(outline[0].x, half_h, outline[0].y)
+		var i_t := Vector3(outline[i].x, half_h, outline[i].y)
+		var j_t := Vector3(outline[i + 1].x, half_h, outline[i + 1].y)
+		# Top cap (+Y).
+		st.add_vertex(a_t)
+		if top_forward:
+			st.add_vertex(i_t)
+			st.add_vertex(j_t)
+		else:
+			st.add_vertex(j_t)
+			st.add_vertex(i_t)
+		# Bottom cap (-Y): opposite winding of the top cap.
+		var a_b := Vector3(outline[0].x, -half_h, outline[0].y)
+		var i_b := Vector3(outline[i].x, -half_h, outline[i].y)
+		var j_b := Vector3(outline[i + 1].x, -half_h, outline[i + 1].y)
+		st.add_vertex(a_b)
+		if top_forward:
+			st.add_vertex(j_b)
+			st.add_vertex(i_b)
+		else:
+			st.add_vertex(i_b)
+			st.add_vertex(j_b)
 	st.generate_normals()
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.55, 0.55, 0.58)

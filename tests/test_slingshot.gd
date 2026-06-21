@@ -129,8 +129,8 @@ func test_left_and_right_slings_are_mirrored() -> void:
 	## ORACLE: the apex X offset sign flips between the two configured slings. We read the convex hull
 	## point clouds and compare the apex (the vertex furthest BACK on -Z in the local pre-yaw frame is
 	## the one whose X offset encodes handedness). Simpler robust check: the two hulls are not
-	## identical point sets (the mirror produced a different triangle), and each is a valid 3-point
-	## prism (6 extruded points).
+	## identical point sets (the mirror produced a different triangle), and each is a valid rounded
+	## prism (its corners are rounded into arcs, so more than the old 6 sharp-triangle points).
 	await _setup_sling(false)
 	var left_body: Node = _sling.find_child("KickerBody", true, false)
 	var left_pts: PackedVector3Array = _hull_points(left_body)
@@ -144,8 +144,12 @@ func test_left_and_right_slings_are_mirrored() -> void:
 	await wait_frames(2)
 	var right_pts: PackedVector3Array = _hull_points(right.find_child("KickerBody", true, false))
 
-	assert_eq(left_pts.size(), 6, "a triangular prism hull has 6 extruded points (3 x top/bottom)")
-	assert_eq(right_pts.size(), 6, "the mirrored prism hull also has 6 points")
+	# The sling corners are now ROUNDED (rubber-wrapped posts, not sharp points), so the hull has well
+	# MORE than the old sharp-triangle 6 points (2 x the rounded outline). Assert it's rounded (> 6),
+	# even (top/bottom extrusion pairs), and that both slings share the same point count (same shape).
+	assert_gt(left_pts.size(), 6, "rounded sling prism has more than the old 6 sharp-triangle points")
+	assert_eq(left_pts.size() % 2, 0, "prism hull points come in top/bottom pairs (even count)")
+	assert_eq(right_pts.size(), left_pts.size(), "the mirrored sling has the same hull point count")
 	assert_false(
 		_same_point_cloud(left_pts, right_pts),
 		"the left and right slingshots must be MIRRORED (different triangle footprints), not identical"
