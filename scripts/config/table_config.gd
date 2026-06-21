@@ -77,7 +77,14 @@ const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the di
 const ARCH_CENTER_Z: float = -HALF_LENGTH + 6.0  ## How far down from the very top the arch curves.
 const ARCH_RADIUS_X: float = HALF_WIDTH          ## Spans the table width.
 const ARCH_RADIUS_Z: float = 6.0
-const ARCH_SEGMENTS: int = 16                    ## Polyline segments approximating the curve.
+const ARCH_SEGMENTS: int = 28                    ## Polyline segments approximating the curve (smooth).
+## FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): sweep the arch PAST the half-ellipse so its ends
+## curve DOWN the upper sides, reading as the reference's big orbit rail rather than a flat dome. 0.5
+## rad is the MINIMUM extend that brings the right end in to x = RADIUS_X*cos(0.5) ~= 14 = LANE_INNER_X
+## (the lane divider) so the orbit end stays CLEAR of the launch-lane ball path (smaller extends would
+## leave the right end inside x[14,16] and could block the launch). ARCH_CENTER_Z is unchanged, so the
+## makeable-window tests and the launch redirect (deflector) are untouched.
+const ARCH_SWEEP_EXTEND_RAD: float = 0.5
 
 ## ---- FLIPPERS ----------------------------------------------------------------------------------
 ## Two flippers form an inverted V near the drain end. Pivot positions are on the playfield plane.

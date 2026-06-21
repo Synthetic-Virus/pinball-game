@@ -304,12 +304,16 @@ static func _build_arch(parent: Node3D) -> void:
 	var rz: float = TableConfig.ARCH_RADIUS_Z
 	var segments: int = TableConfig.ARCH_SEGMENTS
 
-	# The arch is the UPPER half of an ellipse (angle pi..0 sweeps the top), so it spans the full width
-	# at its base and curves up to the top center. We sample points along the ellipse and connect each
-	# adjacent pair with a thin box segment, oriented to lie along the chord between them.
-	var prev := _ellipse_point(cx, cz, rx, rz, PI)
+	# The arch sweeps the UPPER half of an ellipse, EXTENDED past pi..0 by ARCH_SWEEP_EXTEND_RAD on each
+	# end so the ends curve DOWN the upper sides (the reference's big orbit rail, not a flat dome). We
+	# sample points along the ellipse and connect each adjacent pair with a thin box segment, oriented
+	# along the chord. The extend is capped so the right end lands at ~x=LANE_INNER_X (clear of the lane).
+	var extend: float = TableConfig.ARCH_SWEEP_EXTEND_RAD
+	var start_angle: float = PI + extend
+	var end_angle: float = -extend
+	var prev := _ellipse_point(cx, cz, rx, rz, start_angle)
 	for i in range(1, segments + 1):
-		var angle: float = lerpf(PI, 0.0, float(i) / float(segments))
+		var angle: float = lerpf(start_angle, end_angle, float(i) / float(segments))
 		var curr := _ellipse_point(cx, cz, rx, rz, angle)
 		_build_arch_segment(parent, prev, curr, h, t, i)
 		prev = curr
