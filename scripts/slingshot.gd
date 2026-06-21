@@ -42,11 +42,11 @@ const TRIANGLE_BACK_DEPTH: float = TableConfig.SLINGSHOT_LENGTH * 0.55
 const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
 const CORNER_SEGMENTS: int = 4
 
-## Extra rotation applied to the whole sling (its kick direction, and therefore its visible triangle
-## and collision, all follow this). Tuning knob for "rotate the slings more" - mirrored per side, so
-## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the other
-## way. The kick still points INTO play (a modest rotation keeps the up-table component).
-const EXTRA_KICK_ROT_DEG: float = 25.0
+## Extra VISUAL rotation of the sling triangle (mesh + collision, via _body_yaw), DECOUPLED from the
+## kick: the active kick always fires toward center (_kick_dir), so this can rotate the triangle as
+## far as wanted WITHOUT skewing the kick (40deg of kick rotation aimed the ball at the gutter). Tuning
+## knob for "rotate the slings more" - mirrored per side; change this number, flip its sign to reverse.
+const EXTRA_VISUAL_ROT_DEG: float = 40.0
 
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
@@ -72,10 +72,10 @@ func configure(mirrored: bool) -> void:
 	var raw_dir: Vector3 = (
 		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
 	)
-	# Rotate the whole sling by EXTRA_KICK_ROT_DEG (mirrored per side) - the mesh, collision and kick
-	# all follow _kick_dir, so this turns the triangle. Tunable; flip the sign to rotate the other way.
-	var extra: float = deg_to_rad(EXTRA_KICK_ROT_DEG) * (-1.0 if _mirrored else 1.0)
-	_kick_dir = raw_dir.normalized().rotated(Vector3.UP, extra)
+	# Kick stays aimed INTO PLAY (toward center). The triangle's visual/collision rotation is decoupled
+	# (see _body_yaw + EXTRA_VISUAL_ROT_DEG), so we can rotate the triangle freely without skewing the
+	# kick - rotating the kick itself far enough aimed the ball at the gutter (a test caught it).
+	_kick_dir = raw_dir.normalized()
 
 
 ## FIXED kick: always the face normal into play, independent of the contact point (ball_pos unused).
@@ -118,8 +118,13 @@ func _make_detector_shape() -> Shape3D:
 func _make_mesh() -> MeshInstance3D:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = _build_triangle_mesh(_triangle_outline(), _height)
-	# The solid body is yawed by _body_yaw() in the base; yaw the visible mesh the same so they agree.
-	mesh_instance.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
+	# The visible triangle gets the body yaw PLUS the extra visual rotation (mirrored), so it turns
+	# further than the collision. The collision stays kick-aligned (so it can't intrude into the launch
+	# lane); the visible mesh is what the developer is orienting here. Active kick still fires to center.
+	var extra: float = deg_to_rad(EXTRA_VISUAL_ROT_DEG) * (-1.0 if _mirrored else 1.0)
+	mesh_instance.transform = Transform3D(
+		Basis(Vector3(0.0, 1.0, 0.0), _body_yaw() + extra), Vector3.ZERO
+	)
 	return mesh_instance
 
 
@@ -309,5 +314,8 @@ func _signed_area_xz(outline: PackedVector2Array) -> float:
 ## heading convention). For the left kick (0.6, 0, -0.8) this yaw maps local +Z -> (0.6, 0, -0.8)
 ## exactly; the previous formula mapped it to (0.6, 0, +0.8), into the drain.
 func _body_yaw() -> float:
-	# Heading that rotates the face normal (body-local +Z) onto the kick direction about +Y.
+	# Heading that rotates the face normal (body-local +Z) onto the kick direction about +Y. The EXTRA
+	# visual rotation is applied to the MESH only (see _make_mesh), NOT to the collision: rotating the
+	# COLLISION that far swung the right sling into the launch lane and blocked the ball (tests caught
+	# it). Collision stays compact + kick-aligned; only the visible triangle turns.
 	return atan2(_kick_dir.x, _kick_dir.z)

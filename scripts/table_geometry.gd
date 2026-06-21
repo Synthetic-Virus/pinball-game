@@ -243,6 +243,10 @@ static func _build_lane_guides(parent: Node3D) -> void:
 	# HOOK_LOCAL_YAW_DEG flips the hook. Change these two numbers to dial the orientation - no rebuild.
 	var guide_rot_deg: float = 28.0
 	var hook_local_yaw_deg: float = 52.0
+	# FLIP_H mirrors each guide horizontally (developer: "flip the inline guides horizontally"). -1.0
+	# negates the lean + the hook's X-offset and yaw, mirroring the rail across its vertical axis; 1.0
+	# is the un-flipped original. One knob; set to 1.0 to flip back.
+	var flip_h: float = 1.0
 	for sgn: float in [-1.0, 1.0]:
 		var nm: String = "LaneGuideLeft" if sgn < 0.0 else "LaneGuideRight"
 		var body := StaticBody3D.new()
@@ -252,15 +256,15 @@ static func _build_lane_guides(parent: Node3D) -> void:
 		# Body origin at the representative rail X (~spread+3) so layout tests find the guide there; the
 		# whole body is then rotated to lean the guide into place.
 		body.position = Vector3(sgn * (spread + 3.0), h * 0.5, piv_z - 4.0)
-		body.rotation.y = deg_to_rad(sgn * guide_rot_deg)
+		body.rotation.y = deg_to_rad(sgn * flip_h * guide_rot_deg)
 		# Rail (along local Z), centered on the body.
 		_add_guide_part(body, Vector3(t, h, 8.0), Vector3.ZERO, 0.0)
 		# Hook at the up-table end of the rail, angled toward center (flip via HOOK_LOCAL_YAW_DEG sign).
 		_add_guide_part(
 			body,
 			Vector3(t, h, 3.6),
-			Vector3(sgn * -1.0, 0.0, -4.6),
-			sgn * deg_to_rad(hook_local_yaw_deg)
+			Vector3(sgn * flip_h * -1.0, 0.0, -4.6),
+			sgn * flip_h * deg_to_rad(hook_local_yaw_deg)
 		)
 		parent.add_child(body)
 
