@@ -475,7 +475,10 @@ const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.0, 0.0, 11.4)
 const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.0, 0.0, 11.4)
 ## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
 ## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
-const SLINGSHOT_LENGTH: float = 7.0
+# SIZE (2026-06-21): 7.0 -> 4.0. Developer: the slings took up too much of the board (7 was ~22% of
+# the 32-wide table; a real sling is ~15%). 4.0 reads as a compact triangle nearer the reference. The
+# back depth and corner radius scale off this in slingshot.gd, so the whole triangle shrinks together.
+const SLINGSHOT_LENGTH: float = 4.0
 const SLINGSHOT_THICKNESS: float = 0.8
 const SLINGSHOT_HEIGHT: float = WALL_HEIGHT
 ## Kick direction per side, as a UNIT vector in playfield-local XZ (Y = 0, on the surface plane).
