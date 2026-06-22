@@ -89,6 +89,13 @@ func _on_body_entered(body: Node) -> void:
 	var now_ms: float = float(Time.get_ticks_msec())
 	if now_ms < _cooldown_until_ms:
 		return
+
+	# CONTACT GATE: the detector is now the EXACT body shape (no proximity padding), so body_entered
+	# fires at real contact. A subclass may still REJECT a contact by where it landed - a slingshot
+	# only kicks off its band, not its posts/back (developer: "it should be a true contact point").
+	if not _contact_should_kick(_ball.global_position):
+		return
+
 	_cooldown_until_ms = now_ms + TableConfig.KICK_COOLDOWN_S * 1000.0
 
 	# Direction is the ONLY thing that differs between a pop bumper and a slingshot.
@@ -96,6 +103,14 @@ func _on_body_entered(body: Node) -> void:
 	_apply_kick(direction)
 	kicked.emit(direction)
 	scored.emit(points)
+
+
+## SUBCLASS OVERRIDE: given where the ball is at contact (global), should this contact fire a kick?
+## The base accepts every contact (a pop bumper kicks off any point of its round body). The slingshot
+## overrides this to accept only contacts on its kicking BAND, so a ball touching the posts or the
+## back of the triangle bounces passively instead of triggering the solenoid.
+func _contact_should_kick(_ball_pos: Vector3) -> bool:
+	return true
 
 
 ## SUBCLASS OVERRIDE: the unit kick direction for a contact at ball_pos (playfield-local or world

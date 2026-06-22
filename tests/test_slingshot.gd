@@ -263,27 +263,22 @@ func test_sling_corner_contact_still_kicks_and_scores() -> void:
 	await _setup_sling(false)
 	watch_signals(_sling)
 
-	# Compute a point just off a CORNER of the LEFT slingshot's angled face, then fire the ball into
-	# that corner. The solid body is a BoxShape3D rotated about Y by _body_yaw(), so we derive the
-	# face axes from THAT SAME rotation (not a hand-written sin/cos, which previously had a sign error
-	# on the long axis and aimed the ball at empty space PAST the face - it then only ever got a
-	# passive glancing bounce, never a real corner contact, masking the behavior under test).
-	#   along       = the face LONG axis  = Basis(Y, yaw) * +X  (one end is a corner).
-	#   face_normal = the face THIN axis  = Basis(Y, yaw) * +Z  (the direction the ball stands off on).
-	# Using the real rotated basis guarantees `corner` lies on the actual angled face the ball strikes.
-	var yaw: float = _sling._body_yaw()
-	var body_basis := Basis(Vector3(0.0, 1.0, 0.0), yaw)
-	var along: Vector3 = body_basis * Vector3(1.0, 0.0, 0.0)       # face long axis (rotated +X).
-	var face_normal: Vector3 = body_basis * Vector3(0.0, 0.0, 1.0)  # face thin axis (rotated +Z).
-	# Corner = the end of the long axis, out on the face surface (+half thickness along the thin axis).
-	var corner: Vector3 = (
-		along * (TableConfig.SLINGSHOT_LENGTH * 0.5)
-		+ face_normal * (TableConfig.SLINGSHOT_THICKNESS * 0.5)
-	)
+	# Fire the ball into a real END of the kicking BAND (near a post), not the centre. The sling is now
+	# an explicit-corner triangle (not the old rotated box), and the active kick is gated to the band by
+	# slingshot._contact_should_kick, so this guards that an END-of-band contact still kicks (its halo
+	# margin includes the post end) - the corner-contact guarantee, restated for the real geometry.
+	# We read the actual kicking face [a, b, outward-normal] and aim a touch inside the `a` end.
+	var face: Array = _sling._kicking_face()
+	var fa: Vector2 = face[0]
+	var fb: Vector2 = face[1]
+	var fn: Vector2 = face[2]
+	var band_end: Vector2 = fa + (fb - fa).normalized() * (TableConfig.BALL_RADIUS * 0.5)
+	var corner := Vector3(band_end.x, 0.0, band_end.y)
+	var face_normal := Vector3(fn.x, 0.0, fn.y)  # outward (toward play), the stand-off direction.
 	var standoff: float = TableConfig.BALL_RADIUS + 1.5
 	_ball.position = corner + face_normal * standoff
 	_ball.position.y = 0.0  # strike the face edge-on at body mid-height, not over/under it.
-	_ball.linear_velocity = -face_normal * SLOW_FIRE_SPEED  # fire into the corner of the face.
+	_ball.linear_velocity = -face_normal * SLOW_FIRE_SPEED  # fire into the end of the band.
 	_ball.angular_velocity = Vector3.ZERO
 	_ball.sleeping = false
 	await wait_physics_frames(APPROACH_FRAMES)

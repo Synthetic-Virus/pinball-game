@@ -103,30 +103,37 @@ func _make_body_shape() -> Shape3D:
 	return hull
 
 
-## Detector shape: a thin slab ONLY in front of the KICKING FACE, not the whole triangle (developer:
-## the sling fired when the ball merely reached the top post). The kicking face is the edge whose
-## OUTWARD normal points along the kick direction - the band a ball strikes to be fired into play. The
-## slab spans that face from post to post, a little behind it (to catch contact) out to ~one ball-
-## diameter in front. A ball touching the BACK, the apex, or the top post is now outside the detector,
-## so it just bounces off the solid triangle body (which is unchanged) WITHOUT triggering an active
-## kick. The behavioral + no-tunnel tests fire INTO this face from the front, so they still trip it.
+## Detector = the EXACT triangle body (same hull as _make_body_shape), so body_entered fires at real
+## contact anywhere on the triangle. WHERE the contact landed is then judged by _contact_should_kick:
+## only a contact on the kicking BAND fires the solenoid; the posts/back bounce passively. This is the
+## "true contact point" behavior the developer asked for, with no proximity padding to cause an early
+## cone of triggering.
 func _make_detector_shape() -> Shape3D:
+	return _make_body_shape()
+
+
+## CONTACT GATE: kick ONLY when the ball contacts the kicking BAND (the face edge), not the posts or
+## the back of the triangle. We judge from the ball's contact position in the sling's local X-Z: it
+## must be on the FRONT (play) side of the face line AND projected within the face span (post to post),
+## allowing ~half a ball past each end so a genuine end-of-band hit still kicks (QA BUG-018) while a
+## ball out past a post (the top post the developer circled) does not.
+func _contact_should_kick(ball_pos: Vector3) -> bool:
 	var face: Array = _kicking_face()
 	var a: Vector2 = face[0]
 	var b: Vector2 = face[1]
 	var n: Vector2 = face[2]
-	# The Area-vs-ball overlap ALREADY adds the ball's radius, so the Area fires when the ball SURFACE
-	# reaches the Area edge. Put the front edge exactly AT the face (front = 0): the kick then fires at
-	# true surface contact, with no forward cone of early triggering (developer: "triggering in a cone
-	# before it hits"). `back` runs into the solid body (unreachable from the front) so a fast ball
-	# still trips the thin Area between physics frames. The slab spans the full face post-to-post so a
-	# corner contact still kicks (QA BUG-018).
-	var back: float = TableConfig.BALL_RADIUS  ## depth into the body (catches fast contact)
-	var front: float = 0.0                     ## exactly at the face: kick fires on contact, not before
-	var quad := PackedVector2Array([a - n * back, b - n * back, b + n * front, a + n * front])
-	var hull := ConvexPolygonShape3D.new()
-	hull.points = _extrude_triangle_to_hull(quad, _height)
-	return hull
+	var local: Vector3 = to_local(ball_pos)
+	var p := Vector2(local.x, local.z)
+	var mid: Vector2 = (a + b) * 0.5
+	if (p - mid).dot(n) < -0.1:
+		return false  ## behind the face (apex / back) - passive bounce only
+	var edge: Vector2 = b - a
+	var elen: float = edge.length()
+	if elen < 0.0001:
+		return true
+	var t: float = (p - a).dot(edge / elen)
+	var margin: float = TableConfig.BALL_RADIUS * 0.5
+	return t >= -margin and t <= elen + margin
 
 
 ## The KICKING FACE among the three corner posts: the edge whose OUTWARD normal best aligns with the
