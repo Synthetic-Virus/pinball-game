@@ -22,8 +22,7 @@ const SHOW_COORD_GRID: bool = true
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
-	# _build_lane_guides: temporarily OFF during the NARROW - the old wide-table guide coords foul the
-	# narrowed lane. Rebuilt at narrow/detected coords in the furniture stage.
+	_build_lane_guides(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
 
@@ -32,11 +31,12 @@ static func build(playfield: Node3D) -> void:
 ## off the grid): steep at the top, then angling toward the flipper. Given as an absolute-coord
 ## POLYLINE for the LEFT; the right is the mirror (x negated). Built as white wall segments.
 static func _build_lane_guides(parent: Node3D) -> void:
+	# NARROW: kept INBOARD of the launch lane (max |x| = 9, since the lane is +11..+13 on the right and
+	# the mirror must clear the ball at x +12). Down the outer side, then in to the flipper.
 	var left_path: Array[Vector3] = [
-		Vector3(-13.0, 0.0, 12.0),   ## top (near the sling, out by the wall)
-		Vector3(-14.0, 0.0, 15.0),   ## slight outward bulge
-		Vector3(-13.0, 0.0, 18.0),   ## back in, still down the outer side
-		Vector3(-9.0, 0.0, 20.0),    ## cut in toward the flipper
+		Vector3(-9.0, 0.0, 11.0),    ## top (below the sling)
+		Vector3(-9.0, 0.0, 17.0),    ## down the outer side
+		Vector3(-6.0, 0.0, 19.5),    ## cut in toward the flipper
 	]
 	for i: int in range(left_path.size() - 1):
 		var a: Vector3 = left_path[i]

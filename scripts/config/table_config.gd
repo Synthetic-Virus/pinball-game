@@ -88,8 +88,8 @@ const ARCH_SWEEP_EXTEND_RAD: float = 0.5
 
 ## ---- FLIPPERS ----------------------------------------------------------------------------------
 ## Two flippers form an inverted V near the drain end. Pivot positions are on the playfield plane.
-const FLIPPER_LENGTH: float = 7.0   ## Pivot to tip. Drives reach and the momentum it can impart.
-const FLIPPER_WIDTH: float = 1.4
+const FLIPPER_LENGTH: float = 5.0   ## NARROW (2026-06-21): 7 -> 5, the bats were massive on the
+const FLIPPER_WIDTH: float = 1.1    ## narrowed table. 1.4 -> 1.1 width to match.
 const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BALL_RADIUS overlap).
 ## Half-distance between the two pivots (so pivots sit at +/-FLIPPER_PIVOT_SPREAD on X).
 ## CONSTRAINT (verified by tests/test_world_scale.gd test_flippers_do_not_overlap_at_pivots):
@@ -106,7 +106,7 @@ const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BA
 ## 7.2. This nudges the flippers slightly outward on the wider field (so the lower field is not a
 ## tiny island in the middle) while the drain mouth stays the proven-playable size. Pivots at +/-7.2
 ## stay well inside the +/-16 side walls, leaving the wider side channels for the lane guides.
-const FLIPPER_PIVOT_SPREAD: float = 7.2
+const FLIPPER_PIVOT_SPREAD: float = 5.5  ## NARROW: 7.2 -> 5.5 so the shorter bats keep a ~2.5 gap.
 const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain the pivots sit.
 ## Resting and energized angles (radians) of the flipper about its pivot, measured on the playfield
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
@@ -451,9 +451,9 @@ const POP_BUMPER_SCORE: int = 100
 # homography-measured from the bottom-up render. Two high (z-8.3), one low-center (z-4.0), apex down.
 # First furniture piece re-added onto the post-reset flat play area.
 const POP_BUMPER_POSITIONS: Array[Vector3] = [
-	Vector3(-4.8, 0.0, -8.3),
-	Vector3(2.1, 0.0, -8.3),
-	Vector3(-1.4, 0.0, -4.0),
+	Vector3(-3.3, 0.0, -9.7),
+	Vector3(2.5, 0.0, -9.7),
+	Vector3(-0.4, 0.0, -5.3),
 ]
 
 ## ---- SLINGSHOTS (active kickers above each flipper) --------------------------------------------
@@ -474,8 +474,9 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
 # corners relative means placing the node moves the whole triangle (the tests place it at the origin
 # and fire a ball at it). POS = centroid of the absolute corners.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-9.4, 0.0, 12.1)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(9.4, 0.0, 12.1)
+# NARROW: slings move inward to the pink-markup position (center ~ +/-6, z 11) on the narrowed table.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-6.0, 0.0, 11.0)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(6.0, 0.0, 11.0)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
