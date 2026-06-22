@@ -115,8 +115,12 @@ func _make_detector_shape() -> Shape3D:
 	var a: Vector2 = face[0]
 	var b: Vector2 = face[1]
 	var n: Vector2 = face[2]
-	var back: float = TableConfig.BALL_RADIUS * 0.5    ## a touch behind the face line
-	var front: float = TableConfig.BALL_RADIUS * 2.0   ## out to ~one ball-diameter in front
+	# The Area-vs-ball overlap ALREADY accounts for the ball's radius, so the slab's front edge sits
+	# essentially AT the face: the kick then fires when the ball actually touches the band, not a ball-
+	# diameter early (developer: "triggering too early, the ball doesn't make contact"). `back` gives
+	# the slab depth into the body so a fast ball can't skip the thin Area between physics frames.
+	var back: float = TableConfig.BALL_RADIUS * 1.5    ## depth into the body (catches fast contact)
+	var front: float = 0.1                             ## barely proud of the face
 	var quad := PackedVector2Array([a - n * back, b - n * back, b + n * front, a + n * front])
 	var hull := ConvexPolygonShape3D.new()
 	hull.points = _extrude_triangle_to_hull(quad, _height)
