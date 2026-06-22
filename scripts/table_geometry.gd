@@ -23,7 +23,8 @@ static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
 	_build_lane_guides(playfield)
-	_build_return_guides(playfield)
+	# _build_return_guides: REMOVED - the curved walls overlapped the bumpers/chutes and were wrong
+	# (developer: "shouldn't be that way at all"). The real side details get re-marked next.
 	_build_top_lanes(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
@@ -68,11 +69,14 @@ static func _build_curved_rail(parent: Node3D, control: Array[Vector3], pre: Str
 ## rail per side curving from below the sling down to the flipper. Control points (LEFT) are smoothed
 ## by _build_curved_rail; the right is the mirror (x negated). Stays clear of the lane (|x| < 11).
 static func _build_lane_guides(parent: Node3D) -> void:
+	# Sits BELOW the sling (not crowding it) and curves down so its end lines up with the flipper's
+	# outer end (the pivot at -FLIPPER_PIVOT_SPREAD, FLIPPER_PIVOT_Z) - developer feedback.
+	var piv_x: float = -TableConfig.FLIPPER_PIVOT_SPREAD
+	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
 	var left_control: Array[Vector3] = [
-		Vector3(-8.9, 0.0, 9.5),     ## top (below the sling)
-		Vector3(-8.7, 0.0, 13.0),
-		Vector3(-7.6, 0.0, 16.0),
-		Vector3(-5.0, 0.0, 18.0),    ## curving in toward the flipper
+		Vector3(-8.0, 0.0, 13.5),    ## below the sling, outboard
+		Vector3(-6.8, 0.0, 16.5),
+		Vector3(piv_x, 0.0, piv_z - 0.5),  ## line up with the flipper's outer end
 	]
 	var right_control: Array[Vector3] = []
 	for p: Vector3 in left_control:
@@ -84,8 +88,8 @@ static func _build_lane_guides(parent: Node3D) -> void:
 ## Top ROLLOVER LANES (chutes) - narrow channels the ball drops through (developer: "these are chutes
 ## not targets"). Vertical guide rails near the top form the channels; 4 rails => 3 chutes, centred.
 static func _build_top_lanes(parent: Node3D) -> void:
-	var z_top: float = -18.5
-	var z_bot: float = -13.0
+	var z_top: float = -17.5
+	var z_bot: float = -14.5  ## SHORT chutes (developer: too long); well above the bumpers
 	for rx: float in [-3.6, -1.2, 1.2, 3.6]:
 		_add_border_segment(
 			parent, Vector3(rx, 0.0, z_top), Vector3(rx, 0.0, z_bot), "LaneRail%d" % int(rx * 10)
