@@ -468,11 +468,28 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 ## WIDEN: slings move from +/-8.5 to +/-10.5 to stay just OUTBOARD of the widened flipper pivots
 ## (+/-7.2) and inside the side walls (+/-16), so a ball falling down the wider side channel grazes
 ## the sling and is kicked back into play. Z unchanged (off the unchanged flipper pivot row).
-# MARKUP (docs/REFERENCE_LAYOUT.md): the developer's slingshot triangles flanking the flippers. The
-# LEFT mark measured cleanly to (-8.0, +11.4); the RIGHT came back inboard (homography error) so we
-# mirror the good left value. Symmetric at +/-8.0, just outboard of the flipper pivots (+/-7.2).
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.0, 0.0, 11.4)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.0, 0.0, 11.4)
+# The sling node sits at its triangle's CENTER (centroid); its three corner posts are given RELATIVE
+# to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
+# corners relative means placing the node moves the whole triangle (the tests place it at the origin
+# and fire a ball at it). POS = centroid of the absolute corners.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-7.67, 0.0, 11.67)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(7.67, 0.0, 11.67)
+
+## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
+## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
+## POS + corner - read the ABSOLUTE post off the in-game grid, and I set POS = their average and these
+## = each minus that average. RIGHT mirrors LEFT (x negated). Placeholders near the flippers for now.
+## (Absolute: left top (-7,9), bottom-outer (-9.5,13), bottom-inner (-6.5,13); centroid (-7.67,11.67).)
+const SLINGSHOT_LEFT_CORNERS: Array[Vector2] = [
+	Vector2(0.67, -2.67),    ## top post
+	Vector2(-1.83, 1.33),    ## bottom-outer post
+	Vector2(1.17, 1.33),     ## bottom-inner post
+]
+const SLINGSHOT_RIGHT_CORNERS: Array[Vector2] = [
+	Vector2(-0.67, -2.67),
+	Vector2(1.83, 1.33),
+	Vector2(-1.17, 1.33),
+]
 ## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
 ## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
 # SIZE (2026-06-21): 7.0 -> 4.0. Developer: the slings took up too much of the board (7 was ~22% of

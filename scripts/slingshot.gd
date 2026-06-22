@@ -55,8 +55,12 @@ var _height: float = TableConfig.SLINGSHOT_HEIGHT
 ## The FIXED kick direction (unit, playfield-local XZ). Set per side in configure(): the left sling
 ## kicks toward +X/-Z, the right toward -X/-Z. Both point INTO play (positive up-table component).
 var _kick_dir: Vector3 = TableConfig.SLINGSHOT_LEFT_KICK_DIR
-## Handedness, for the face angle and the kick direction. table.gd sets it via configure().
+## Handedness, for the kick direction. table.gd sets it via configure().
 var _mirrored: bool = false
+## The THREE triangle corners in ABSOLUTE table coords (x, z), from TableConfig. The sling node sits
+## at the origin, so these place the triangle exactly where specified - read straight off the in-game
+## grid. This REPLACES the old parametric length/angle/apex shape (which could not honor exact coords).
+var _corners: PackedVector2Array = PackedVector2Array()
 
 
 ## Configure this slingshot's side. table.gd calls configure(false) for the left, configure(true)
@@ -64,18 +68,19 @@ var _mirrored: bool = false
 ## the right, after instancing and before adding to the tree. STABLE SIGNATURE.
 func configure(mirrored: bool) -> void:
 	_mirrored = mirrored
-	_length = TableConfig.SLINGSHOT_LENGTH
 	_thickness = TableConfig.SLINGSHOT_THICKNESS
 	_height = TableConfig.SLINGSHOT_HEIGHT
 	points = TableConfig.SLINGSHOT_SCORE
-	# The kick direction is the load-bearing "into play, never the drain" guarantee. Pick per side.
+	# SHAPE: the three corner posts at EXACT coords (no parametric approximation).
+	var src: Array[Vector2] = (
+		TableConfig.SLINGSHOT_RIGHT_CORNERS if _mirrored else TableConfig.SLINGSHOT_LEFT_CORNERS
+	)
+	_corners = PackedVector2Array(src)
+	# KICK direction (separate from the shape): the load-bearing "into play, never the drain" guarantee.
 	var raw_dir: Vector3 = (
 		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
 	)
-	# Rotate the whole sling by EXTRA_KICK_ROT_DEG (mirrored per side) - the mesh, collision and kick
-	# all follow _kick_dir, so this turns the triangle. Tunable; flip the sign to rotate the other way.
-	var extra: float = deg_to_rad(EXTRA_KICK_ROT_DEG) * (-1.0 if _mirrored else 1.0)
-	_kick_dir = raw_dir.normalized().rotated(Vector3.UP, extra)
+	_kick_dir = raw_dir.normalized()
 
 
 ## FIXED kick: always the face normal into play, independent of the contact point (ball_pos unused).
@@ -179,18 +184,9 @@ func _triangle_outline() -> PackedVector2Array:
 ## posts share one definition. Apex X is offset per handedness so the pointed corner aims at the
 ## GUTTER (outer end): hand_sign +1 for the left sling, -1 for the right (mirror).
 func _raw_corners() -> PackedVector2Array:
-	var half_l: float = _length * 0.5
-	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
-	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
-	# Developer: the slings were mirrored the wrong way - FLIP the apex to the other end so each
-	# triangle's handedness matches the reference (was -half_l * hand_sign).
-	var hand_sign: float = -1.0 if _mirrored else 1.0
-	var apex_x: float = half_l * hand_sign
-	var pts := PackedVector2Array()
-	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
-	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
-	pts.append(Vector2(apex_x, apex_z))  ## C: apex (back, offset per side)
-	return pts
+	# The three corner posts exactly as specified in TableConfig (absolute table coords). No parametric
+	# length/angle/apex - what the developer gives is what gets built.
+	return _corners
 
 
 ## Replace each sharp corner of a CCW (x, z) polygon with a rounded arc. For each vertex we trim in
@@ -356,9 +352,7 @@ func _signed_area_xz(outline: PackedVector2Array) -> float:
 ## heading convention). For the left kick (0.6, 0, -0.8) this yaw maps local +Z -> (0.6, 0, -0.8)
 ## exactly; the previous formula mapped it to (0.6, 0, +0.8), into the drain.
 func _body_yaw() -> float:
-	# The visible/collision kicking FACE must face the BALL: down-and-toward-center (where the ball
-	# rolls into the gap between the sling and the flipper), while the active kick fires the ball the
-	# OPPOSITE way (up-and-toward-center, into play). So orient the face toward (kick.x, +|kick.z|) by
-	# NEGATING z here; _kick_direction_for still returns the real up-table kick. (Developer blue
-	# correction: the bouncy face belongs on the center side, not facing out/up-table.)
-	return atan2(_kick_dir.x, -_kick_dir.z)
+	# ZERO: the triangle is now defined by EXACT corner coords in absolute table space (see
+	# _raw_corners), so no extra rotation is applied - the shape is exactly what was specified. The
+	# kick direction (_kick_direction_for) is separate and still fires into play.
+	return 0.0
