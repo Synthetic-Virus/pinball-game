@@ -34,25 +34,27 @@ static func _build_coord_grid(parent: Node3D) -> void:
 	var hw: float = TableConfig.HALF_WIDTH
 	var hl: float = TableConfig.HALF_LENGTH
 	var y: float = 0.06  ## just above the surface top (y=0)
-	var faint := StandardMaterial3D.new()
-	faint.albedo_color = Color(0.40, 0.42, 0.50)
+	var minor := StandardMaterial3D.new()
+	minor.albedo_color = Color(0.30, 0.32, 0.40)  ## very faint, the every-2 lines
+	var major := StandardMaterial3D.new()
+	major.albedo_color = Color(0.45, 0.48, 0.58)  ## brighter, the every-4 lines
 	var axis := StandardMaterial3D.new()
 	axis.albedo_color = Color(0.20, 0.65, 1.0)  ## bright blue for the x=0 / z=0 axes
 
-	# Vertical grid lines (constant x, running in z) and the x=0 axis.
+	# Vertical grid lines (constant x, running in z), every 2 units; every-4 brighter; x=0 is the axis.
 	var x: int = -16
 	while x <= 16:
-		var mat: StandardMaterial3D = axis if x == 0 else faint
-		var w: float = 0.18 if x == 0 else 0.08
+		var mat: StandardMaterial3D = axis if x == 0 else (major if x % 4 == 0 else minor)
+		var w: float = 0.18 if x == 0 else (0.08 if x % 4 == 0 else 0.05)
 		_grid_strip(parent, Vector3(float(x), y, 0.0), Vector3(w, 0.04, hl * 2.0), mat)
-		x += 4
-	# Horizontal grid lines (constant z, running in x) and the z=0 axis.
+		x += 2
+	# Horizontal grid lines (constant z, running in x), every 2 units; every-4 brighter; z=0 is axis.
 	var z: int = -24
 	while z <= 24:
-		var mat2: StandardMaterial3D = axis if z == 0 else faint
-		var t: float = 0.18 if z == 0 else 0.08
+		var mat2: StandardMaterial3D = axis if z == 0 else (major if z % 4 == 0 else minor)
+		var t: float = 0.18 if z == 0 else (0.08 if z % 4 == 0 else 0.05)
 		_grid_strip(parent, Vector3(0.0, y, float(z)), Vector3(hw * 2.0, 0.04, t), mat2)
-		z += 4
+		z += 2
 
 	# Number labels: x values along the bottom edge, z values along the left edge.
 	var xl: int = -16
