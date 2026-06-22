@@ -16,9 +16,10 @@ extends "res://scripts/active_kicker.gd"
 ## at +Z (the face whose normal _body_yaw rotates to the kick direction), so the EXISTING kick is
 ## UNCHANGED: same SLINGSHOT_LEFT/RIGHT_KICK_DIR, same score, same cooldown, same CCD-safe cap (all
 ## owned by the ActiveKicker base). Only the SHAPE the ball bounces off and the visible mesh change
-## from a box to the triangle; both AGREE (same outline points). The DETECTOR keeps the BUG-018
-## corner-contact guarantee (it stays padded + yawed to match the body so a ball striking near a
-## corner of the angled face still trips body_entered and gets the active kick + score).
+## from a box to the triangle; both AGREE (same outline points). The DETECTOR is a thin slab in front
+## of the KICKING FACE only (the edge whose outward normal points along the kick direction), so the
+## active kick fires when a ball strikes that band - NOT when it merely touches the back, the apex, or
+## the top post (developer fix). The solid triangle body still bounces those passive contacts.
 ##
 ## OWNERSHIP: lead scaffolds the triangle outline + the shape/mesh hooks; physics-programmer fills
 ## _build_body/_apply_kick in the BASE (shared) and owns the no-tunnel gate on the triangular face;
@@ -102,18 +103,53 @@ func _make_body_shape() -> Shape3D:
 	return hull
 
 
-## Detector shape: a triangle outline PADDED by one BALL_RADIUS so body_entered fires as the ball
-## arrives anywhere on the face, including near the CORNERS of the angled face (QA BUG-018). The
-## base yaws this detector by _detector_yaw() (== _body_yaw) to stay concentric with the body, so a
-## corner contact still trips body_entered (no silent "limp bounce"). We pad by inflating the tri
-## outline outward (a simple uniform expand: scale each point away from the triangle centroid by one
-## BALL_RADIUS-worth), keeping the same triangular footprint a ball-radius larger.
+## Detector shape: a thin slab ONLY in front of the KICKING FACE, not the whole triangle (developer:
+## the sling fired when the ball merely reached the top post). The kicking face is the edge whose
+## OUTWARD normal points along the kick direction - the band a ball strikes to be fired into play. The
+## slab spans that face from post to post, a little behind it (to catch contact) out to ~one ball-
+## diameter in front. A ball touching the BACK, the apex, or the top post is now outside the detector,
+## so it just bounces off the solid triangle body (which is unchanged) WITHOUT triggering an active
+## kick. The behavioral + no-tunnel tests fire INTO this face from the front, so they still trip it.
 func _make_detector_shape() -> Shape3D:
+	var face: Array = _kicking_face()
+	var a: Vector2 = face[0]
+	var b: Vector2 = face[1]
+	var n: Vector2 = face[2]
+	var back: float = TableConfig.BALL_RADIUS * 0.5    ## a touch behind the face line
+	var front: float = TableConfig.BALL_RADIUS * 2.0   ## out to ~one ball-diameter in front
+	var quad := PackedVector2Array([a - n * back, b - n * back, b + n * front, a + n * front])
 	var hull := ConvexPolygonShape3D.new()
-	hull.points = _extrude_triangle_to_hull(
-		_padded_triangle_outline(TableConfig.BALL_RADIUS), _height
-	)
+	hull.points = _extrude_triangle_to_hull(quad, _height)
 	return hull
+
+
+## The KICKING FACE among the three corner posts: the edge whose OUTWARD normal best aligns with the
+## kick direction. Returns [a, b, normal] in local X-Z, the normal a unit vector pointing toward play.
+## This is the band the ball strikes; the apex/back edges are not active.
+func _kicking_face() -> Array:
+	var c: PackedVector2Array = _raw_corners()
+	var centroid := Vector2.ZERO
+	for p: Vector2 in c:
+		centroid += p
+	centroid /= float(c.size())
+	var kick2 := Vector2(_kick_dir.x, _kick_dir.z)
+	var best_dot: float = -1.0e20
+	var result: Array = [c[0], c[1], Vector2(0.0, 1.0)]
+	for i: int in range(c.size()):
+		var a: Vector2 = c[i]
+		var b: Vector2 = c[(i + 1) % c.size()]
+		var edge: Vector2 = b - a
+		if edge.length() < 0.0001:
+			continue
+		var nrm := Vector2(edge.y, -edge.x).normalized()  ## perpendicular to the edge
+		var mid: Vector2 = (a + b) * 0.5
+		if (mid - centroid).dot(nrm) < 0.0:
+			nrm = -nrm  ## ensure the normal points OUTWARD (away from the triangle centre)
+		var d: float = nrm.dot(kick2)
+		if d > best_dot:
+			best_dot = d
+			result = [a, b, nrm]
+	return result
 
 
 ## The TRIANGULAR visible mesh (fix 3: was a box), built from the SAME outline as the collider so
@@ -213,28 +249,6 @@ func _round_corners(poly: PackedVector2Array, radius: float, seg: int) -> Packed
 			# Quadratic Bezier with the sharp corner as the control point = a smooth rounded corner.
 			out.append(p_start * (u * u) + cur * (2.0 * u * t) + p_end * (t * t))
 		out.append(p_end)
-	return out
-
-
-## The triangle outline expanded OUTWARD by `pad` (world units) for the detector, so the detector is
-## one ball-radius larger than the solid body on every side + corner (QA BUG-018 corner guarantee).
-## We push each vertex away from the centroid by `pad`; for a compact triangle this keeps the same
-## shape a uniform margin larger, which is all the corner-contact detector needs.
-func _padded_triangle_outline(pad: float) -> PackedVector2Array:
-	var base: PackedVector2Array = _triangle_outline()
-	var cx: float = 0.0
-	var cz: float = 0.0
-	for p: Vector2 in base:
-		cx += p.x
-		cz += p.y
-	cx /= float(base.size())
-	cz /= float(base.size())
-	var out := PackedVector2Array()
-	for p: Vector2 in base:
-		var dir := Vector2(p.x - cx, p.y - cz)
-		if dir.length() > 0.0001:
-			dir = dir.normalized()
-		out.append(Vector2(p.x + dir.x * pad, p.y + dir.y * pad))
 	return out
 
 
