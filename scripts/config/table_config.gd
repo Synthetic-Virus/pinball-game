@@ -46,7 +46,7 @@ const BALL_FRICTION: float = 0.4
 ## (BALL_START.x, the furniture position arrays, the slingshot X) are re-derived by hand below with
 ## a WHY-comment on each. The rescale is re-validated by tools/table_viz.py + test_world_scale.gd
 ## + test_furniture_layout.gd + test_shot_geometry.gd before the slice ships.
-const HALF_WIDTH: float = 11.5      ## REAL-SCALE (2026-06-22): ~19 ball-diameters wide (ball dia 1.2).
+const HALF_WIDTH: float = 13.0      ## MATCH PINK: right edge +13 (was over-narrowed to 11.5).
 const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
 const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
 const WALL_THICKNESS: float = 0.35  ## REAL-SCALE: thin rails, not fat slabs (was 0.8). Guides follow.
@@ -69,7 +69,7 @@ const WALL_THICKNESS: float = 0.35  ## REAL-SCALE: thin rails, not fat slabs (wa
 ## HALF_W) follows automatically. The right lane-guide divider (LANE_GUIDE_RIGHT_DIVIDER_X = 9.0)
 ## still sits inboard of the new lane (between flipper pivot 7.2 and the divider 14.0), so it needs
 ## no change. Re-validated by tools/table_viz.py + test_world_scale/test_furniture_layout.
-const LANE_INNER_X: float = 9.5     ## REAL-SCALE: lane 9.5..11.5 (~1.7 ball-widths), divider follows.
+const LANE_INNER_X: float = 11.0    ## MATCH PINK: lane 11..13.
 const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 2.0).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
@@ -550,13 +550,13 @@ const SLINGSHOT_SCORE: int = 50
 # +/-11.5 wall and the right lane (x < ~9): a TOP standup bank, a LEFT vertical target, and a RIGHT
 # vertical bank.
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-2.8, 0.0, -15.8),   ## top bank
+	Vector3(-2.8, 0.0, -15.8),   ## top bank (pink regions 11-13)
 	Vector3(-0.3, 0.0, -15.8),
 	Vector3(2.3, 0.0, -15.8),
-	Vector3(-7.9, 0.0, -8.4),    ## left vertical target
-	Vector3(8.5, 0.0, -6.0),     ## right vertical bank (clears the lane)
-	Vector3(8.5, 0.0, -4.0),
-	Vector3(8.5, 0.0, -2.0),
+	Vector3(-7.9, 0.0, -8.4),    ## left vertical target (pink region 5)
+	Vector3(9.0, 0.0, -6.0),     ## right vertical bank (pink column at x~9), clears the lane (x<11)
+	Vector3(9.0, 0.0, -4.0),
+	Vector3(9.0, 0.0, -2.0),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------

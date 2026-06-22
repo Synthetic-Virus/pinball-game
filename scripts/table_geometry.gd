@@ -32,12 +32,12 @@ static func build(playfield: Node3D) -> void:
 ## off the grid): steep at the top, then angling toward the flipper. Given as an absolute-coord
 ## POLYLINE for the LEFT; the right is the mirror (x negated). Built as white wall segments.
 static func _build_lane_guides(parent: Node3D) -> void:
-	# NARROW: kept INBOARD of the launch lane (max |x| = 9, since the lane is +11..+13 on the right and
-	# the mirror must clear the ball at x +12). Down the outer side, then in to the flipper.
+	# MATCH PINK (region 7): traces the lower-side guide x[-8.9..-4.4] z[8.6..16.2], down the outer
+	# side then in toward the flipper. Right mirror stays clear of the lane (|x| < 11).
 	var left_path: Array[Vector3] = [
-		Vector3(-9.0, 0.0, 11.0),    ## top (below the sling)
-		Vector3(-9.0, 0.0, 17.0),    ## down the outer side
-		Vector3(-6.0, 0.0, 19.5),    ## cut in toward the flipper
+		Vector3(-8.9, 0.0, 9.5),     ## top (below the sling)
+		Vector3(-8.5, 0.0, 14.0),    ## down the outer side
+		Vector3(-5.0, 0.0, 17.5),    ## cut in toward the flipper
 	]
 	for i: int in range(left_path.size() - 1):
 		var a: Vector3 = left_path[i]
@@ -220,9 +220,9 @@ static func _build_borders(parent: Node3D) -> void:
 ## sweeping from the mid-field up-and-out toward the top corner. Right path; left mirrors (x negated).
 static func _build_return_guides(parent: Node3D) -> void:
 	var right_path: Array[Vector3] = [
-		Vector3(4.0, 0.0, -8.5),     ## inner-low (mid-field)
-		Vector3(6.0, 0.0, -13.0),    ## curving up-and-out
-		Vector3(7.5, 0.0, -17.5),    ## toward the top corner
+		Vector3(4.0, 0.0, -8.5),     ## inner-low (pink region 2: x[4..7.8] z[-19..-8.5])
+		Vector3(6.5, 0.0, -13.0),    ## curving up-and-out
+		Vector3(7.8, 0.0, -18.0),    ## toward the top corner
 	]
 	for i: int in range(right_path.size() - 1):
 		var a: Vector3 = right_path[i]
