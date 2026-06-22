@@ -182,8 +182,10 @@ func _raw_corners() -> PackedVector2Array:
 	var half_l: float = _length * 0.5
 	var face_z: float = _thickness * 0.5  ## the kicking face sits at +Z (its normal is +Z).
 	var apex_z: float = -TRIANGLE_BACK_DEPTH  ## the apex points back, away from play.
+	# Developer: the slings were mirrored the wrong way - FLIP the apex to the other end so each
+	# triangle's handedness matches the reference (was -half_l * hand_sign).
 	var hand_sign: float = -1.0 if _mirrored else 1.0
-	var apex_x: float = -half_l * hand_sign
+	var apex_x: float = half_l * hand_sign
 	var pts := PackedVector2Array()
 	pts.append(Vector2(-half_l, face_z))  ## A: kicking-face end 1
 	pts.append(Vector2(half_l, face_z))  ## B: kicking-face end 2
