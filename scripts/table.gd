@@ -76,6 +76,7 @@ var targets: Array[Area3D] = []
 ## family.
 var pop_bumpers: Array[Area3D] = []
 var slingshots: Array[Area3D] = []
+var rails: Array = []  ## editor-managed EditRail nodes (guides/walls/chutes); see layout_editor.gd
 var _camera: Camera3D
 
 
@@ -322,7 +323,8 @@ func _build_dynamic_elements() -> void:
 # furniture above is what tests see. WHY: the describe-and-rebuild loop kept misreading hand-drawn
 # markups; the developer now drags the furniture into place themselves and saves it.
 
-## Tag the built-in furniture with its editor type, then create the editor and hand it the live refs.
+## Tag the built-in furniture with its editor type, seed the default rails (guides/walls/chutes), then
+## create the editor and hand it the live refs.
 func _build_layout_editor() -> void:
 	for b: Area3D in pop_bumpers:
 		b.set_meta("etype", "bumper")
@@ -336,13 +338,16 @@ func _build_layout_editor() -> void:
 		left_flipper.set_meta("etype", "flipper_left")
 	if right_flipper != null:
 		right_flipper.set_meta("etype", "flipper_right")
+	for spec: Dictionary in TableConfig.default_rails():
+		editor_spawn_rail(String(spec["kind"]), bool(spec["smooth"]), spec["points"])
 	var editor: Node = preload("res://scripts/layout_editor.gd").new()
 	editor.name = "LayoutEditor"
 	add_child(editor)
 	editor.setup(self, _camera, playfield)
 
 
-## Every element the editor may move/delete, in one list. Used to pick on click and to serialise.
+## Every element the editor may pick / move on the grid: the point furniture, the flippers, and every
+## rail's draggable point-handles.
 func editor_editables() -> Array:
 	var arr: Array = []
 	arr.append_array(pop_bumpers)
@@ -352,13 +357,19 @@ func editor_editables() -> Array:
 		arr.append(left_flipper)
 	if right_flipper != null:
 		arr.append(right_flipper)
+	for rail: Node in rails:
+		if is_instance_valid(rail):
+			arr.append_array(rail.handles())
 	return arr
 
 
-## Spawn one editable element of the given type at a playfield-local position. Mirrors the built-in
-## furniture construction so an editor-placed piece behaves exactly like a default one. rot_y radians
-## is applied to furniture (flippers manage their own orientation via configure, so rot_y is ignored
-## for them). Returns the new node (or null for an unknown type).
+## The editor-managed rail nodes (for serialising their points).
+func editor_rails() -> Array:
+	return rails
+
+
+## Spawn one POINT element (bumper/target/sling) at a playfield-local position. Mirrors the built-in
+## furniture construction so an editor-placed piece behaves like a default one. Returns it, or null.
 func editor_spawn(etype: String, pos: Vector3, rot_y: float) -> Node3D:
 	var node: Node3D = null
 	match etype:
@@ -380,24 +391,6 @@ func editor_spawn(etype: String, pos: Vector3, rot_y: float) -> Node3D:
 			if node.has_method("configure"):
 				node.configure(true)
 			slingshots.append(node)
-		"flipper_left":
-			node = FlipperScene.instantiate()
-			node.name = "LeftFlipper"
-			node.position = pos
-			playfield.add_child(node)
-			node.configure("left_flipper", false)
-			left_flipper = node
-			node.set_meta("etype", etype)
-			return node
-		"flipper_right":
-			node = FlipperScene.instantiate()
-			node.name = "RightFlipper"
-			node.position = pos
-			playfield.add_child(node)
-			node.configure("right_flipper", true)
-			right_flipper = node
-			node.set_meta("etype", etype)
-			return node
 		_:
 			return null
 	node.position = pos
@@ -409,17 +402,63 @@ func editor_spawn(etype: String, pos: Vector3, rot_y: float) -> Node3D:
 	return node
 
 
-## Remove an editor-managed element from its array and free it.
+## Spawn a rail (a wall or guide) from a list of playfield-local points. An empty list makes an empty
+## rail the editor's draw tool then adds points to. Returns the EditRail node.
+func editor_spawn_rail(kind: String, smooth: bool, points: Array) -> Node3D:
+	var rail: Node3D = preload("res://scripts/edit_rail.gd").new()
+	rail.name = "Rail"
+	playfield.add_child(rail)
+	rail.configure(points, smooth, kind)
+	rails.append(rail)
+	return rail
+
+
+## Move an existing flipper (the editor repositions the fixed pair rather than recreating them).
+func editor_set_flipper(side: String, pos: Vector3) -> void:
+	if side == "flipper_left" and left_flipper != null:
+		left_flipper.position = pos
+	elif side == "flipper_right" and right_flipper != null:
+		right_flipper.position = pos
+
+
+## Show / hide every rail's point-handles (handles only show in edit mode so they do not clutter play).
+func editor_set_rail_handles_visible(v: bool) -> void:
+	for rail: Node in rails:
+		if is_instance_valid(rail):
+			rail.set_handles_visible(v)
+
+
+## Free all editor-managed point furniture and rails (NOT the flippers, which are repositioned). Used
+## before applying a saved layout.
+func editor_clear() -> void:
+	for n: Node in pop_bumpers + targets + slingshots:
+		if is_instance_valid(n):
+			n.queue_free()
+	pop_bumpers.clear()
+	targets.clear()
+	slingshots.clear()
+	for rail: Node in rails:
+		if is_instance_valid(rail):
+			rail.queue_free()
+	rails.clear()
+
+
+## Remove one editor element. A rail point-handle removes its whole rail; furniture removes itself.
+## Flippers are not removable (the table always needs its pair).
 func editor_remove(node: Node3D) -> void:
 	if node == null:
+		return
+	if node.has_meta("etype") and String(node.get_meta("etype")) == "rail_handle":
+		var rail: Node = node.get_meta("rail")
+		if is_instance_valid(rail):
+			rails.erase(rail)
+			rail.queue_free()
+		return
+	if node == left_flipper or node == right_flipper:
 		return
 	pop_bumpers.erase(node)
 	targets.erase(node)
 	slingshots.erase(node)
-	if node == left_flipper:
-		left_flipper = null
-	if node == right_flipper:
-		right_flipper = null
 	node.queue_free()
 
 

@@ -22,9 +22,11 @@ const SHOW_COORD_GRID: bool = true
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
-	_build_lane_guides(playfield)
-	_build_return_guides(playfield)
-	_build_top_lanes(playfield)
+	# The inlane/return GUIDES and top CHUTES are NOT built here anymore - they are editor-managed
+	# EditRail elements (scripts/edit_rail.gd) created by table.gd so the developer can draw/reshape
+	# them. table.gd seeds the same default shapes via TableConfig.DEFAULT_RAILS. The surface, outer
+	# borders, and launch-lane divider stay here because the plunger-lane tests build TableGeometry
+	# directly and depend on them.
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
 
@@ -55,44 +57,6 @@ static func _smooth_curve(pts: Array[Vector3], per_seg: int) -> Array[Vector3]:
 			)
 	out.append(pts[n - 1])
 	return out
-
-
-## Build a SMOOTH curved rail through control points (rounded; many short overlapping wall segments).
-static func _build_curved_rail(parent: Node3D, control: Array[Vector3], pre: String) -> void:
-	var curve: Array[Vector3] = _smooth_curve(control, 6)
-	for i: int in range(curve.size() - 1):
-		_add_border_segment(parent, curve[i], curve[i + 1], "%s%d" % [pre, i])
-
-
-## Inlane guide rails (markup piece 4) - SMOOTH CURVES (developer: not angular/"3 lines"). A rounded
-## rail per side curving from below the sling down to the flipper. Control points (LEFT) are smoothed
-## by _build_curved_rail; the right is the mirror (x negated). Stays clear of the lane (|x| < 11).
-static func _build_lane_guides(parent: Node3D) -> void:
-	# Sits BELOW the sling (not crowding it) and curves down so its end lines up with the flipper's
-	# outer end (the pivot at -FLIPPER_PIVOT_SPREAD, FLIPPER_PIVOT_Z) - developer feedback.
-	var piv_x: float = -TableConfig.FLIPPER_PIVOT_SPREAD
-	var piv_z: float = TableConfig.FLIPPER_PIVOT_Z
-	var left_control: Array[Vector3] = [
-		Vector3(-8.0, 0.0, 13.5),    ## below the sling, outboard
-		Vector3(-6.8, 0.0, 16.5),
-		Vector3(piv_x, 0.0, piv_z - 0.5),  ## line up with the flipper's outer end
-	]
-	var right_control: Array[Vector3] = []
-	for p: Vector3 in left_control:
-		right_control.append(Vector3(-p.x, 0.0, p.z))
-	_build_curved_rail(parent, left_control, "InlaneGuideL")
-	_build_curved_rail(parent, right_control, "InlaneGuideR")
-
-
-## Top ROLLOVER LANES (chutes) - narrow channels the ball drops through (developer: "these are chutes
-## not targets"). Vertical guide rails near the top form the channels; 4 rails => 3 chutes, centred.
-static func _build_top_lanes(parent: Node3D) -> void:
-	var z_top: float = -17.5
-	var z_bot: float = -14.5  ## SHORT chutes (developer: too long); well above the bumpers
-	for rx: float in [-3.6, -1.2, 1.2, 3.6]:
-		_add_border_segment(
-			parent, Vector3(rx, 0.0, z_top), Vector3(rx, 0.0, z_bot), "LaneRail%d" % int(rx * 10)
-		)
 
 
 ## Draw a faint coordinate grid on the surface, brighter axis lines through (0,0), and floating number
@@ -260,25 +224,6 @@ static func _build_borders(parent: Node3D) -> void:
 	_add_border_segment(
 		parent, Vector3(li, 0.0, -hl + 9.0), Vector3(li, 0.0, hl - 2.0), "LaneDivider"
 	)
-
-
-## Upper RETURN GUIDES (markup piece): the big curved guide rails by the top corners that bring a
-## ball down from the orbit into the field. From the developer's pink guide: a curved rail per side
-## sweeping from the mid-field up-and-out toward the top corner. Right path; left mirrors (x negated).
-static func _build_return_guides(parent: Node3D) -> void:
-	# SMOOTH CURVE, positioned OUTBOARD so it does NOT overlap the bumpers (x~3) or chutes (x~3.6):
-	# starts above the bumpers and hugs the upper side toward the top corner (developer: keep the
-	# walls, but no overlap).
-	var right_control: Array[Vector3] = [
-		Vector3(6.0, 0.0, -11.0),    ## above the bumpers, outboard of the chutes
-		Vector3(7.3, 0.0, -14.5),
-		Vector3(8.5, 0.0, -18.0),    ## toward the top corner
-	]
-	var left_control: Array[Vector3] = []
-	for p: Vector3 in right_control:
-		left_control.append(Vector3(-p.x, 0.0, p.z))
-	_build_curved_rail(parent, right_control, "ReturnGuideR")
-	_build_curved_rail(parent, left_control, "ReturnGuideL")
 
 
 ## One border line: a thin white wall box from a to b, standing WALL_HEIGHT tall, yawed along the

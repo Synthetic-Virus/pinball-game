@@ -32,6 +32,9 @@ var _selected: Node3D = null
 var _selected_base_y: float = 0.0
 var _dragging: bool = false
 
+var _drawing: bool = false        ## true while laying down a new rail point-by-point
+var _draw_rail: Node3D = null     ## the rail being drawn
+
 var _hud: CanvasLayer = null
 var _status: Label = null
 var _palette: Control = null
@@ -68,11 +71,22 @@ func _unhandled_input(event: InputEvent) -> void:
 		if hit != null:
 			_selected.position.x = hit.x
 			_selected.position.z = hit.z
+			# Moving a rail's point-handle reshapes that rail live.
+			if _selected.has_meta("rail"):
+				var rail: Node = _selected.get_meta("rail")
+				if is_instance_valid(rail):
+					rail.rebuild()
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
+			# While drawing a rail, each click DROPS A POINT instead of selecting/dragging.
+			if _drawing and _draw_rail != null:
+				var hit: Variant = _ray_to_field(event.position)
+				if hit != null:
+					_draw_rail.add_point(Vector3(hit.x, 0.0, hit.z))
+				return
 			_select(_pick(event.position))
 			_dragging = _selected != null
 		else:
@@ -162,11 +176,15 @@ func _add(etype: String) -> void:
 
 # --- Persistence (browser only) ------------------------------------------------------------------
 
-## Serialise every editable element to a plain array of {type, x, z, rot_deg} dictionaries.
+## Serialise the layout: point furniture + flippers as {type, x, z, rot_deg}, and each rail as
+## {type:"rail", kind, smooth, points:[[x,z],...]}. Rail point-handles are skipped (the rail carries
+## the points). The result round-trips through _apply_layout.
 func _serialize() -> Array:
 	var out: Array = []
 	for node: Node3D in _editables():
 		if not node.has_meta("etype"):
+			continue
+		if String(node.get_meta("etype")) == "rail_handle":
 			continue
 		out.append({
 			"type": node.get_meta("etype"),
@@ -174,6 +192,14 @@ func _serialize() -> Array:
 			"z": snappedf(node.position.z, 0.01),
 			"rot_deg": snappedf(rad_to_deg(node.rotation.y), 0.1),
 		})
+	if _table != null and _table.has_method("editor_rails"):
+		for rail: Node in _table.editor_rails():
+			if not is_instance_valid(rail):
+				continue
+			var pts: Array = []
+			for p: Vector3 in rail.points():
+				pts.append([snappedf(p.x, 0.01), snappedf(p.z, 0.01)])
+			out.append({"type": "rail", "kind": rail.kind, "smooth": rail.smooth, "points": pts})
 	return out
 
 
@@ -216,18 +242,29 @@ func _load_saved() -> void:
 	_apply_layout(parsed)
 
 
-## Replace the current furniture with a saved layout: clear every editable, then respawn each entry.
+## Replace the current furniture/rails with a saved layout: clear the editor-managed elements, then
+## respawn each entry. Flippers are repositioned (the table keeps its fixed pair); rails are rebuilt
+## from their points; everything else is a point element.
 func _apply_layout(entries: Array) -> void:
-	if _table == null or not _table.has_method("editor_spawn"):
+	if _table == null or not _table.has_method("editor_clear"):
 		return
-	for node: Node3D in _editables().duplicate():
-		if _table.has_method("editor_remove"):
-			_table.editor_remove(node)
+	_table.editor_clear()
 	for entry: Variant in entries:
 		if not (entry is Dictionary) or not entry.has("type"):
 			continue
-		var pos := Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
-		_table.editor_spawn(String(entry["type"]), pos, deg_to_rad(float(entry.get("rot_deg", 0.0))))
+		var etype: String = String(entry["type"])
+		if etype == "rail":
+			var pts: Array = []
+			for p: Variant in entry.get("points", []):
+				pts.append(Vector2(float(p[0]), float(p[1])))
+			_table.editor_spawn_rail(String(entry.get("kind", "guide")), bool(entry.get("smooth", true)), pts)
+		elif etype == "flipper_left" or etype == "flipper_right":
+			_table.editor_set_flipper(
+				etype, Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
+			)
+		else:
+			var pos := Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
+			_table.editor_spawn(etype, pos, deg_to_rad(float(entry.get("rot_deg", 0.0))))
 
 
 # --- HUD -----------------------------------------------------------------------------------------
@@ -273,6 +310,9 @@ func _build_hud() -> void:
 	_add_palette_button("+ Target", func() -> void: _add("target"))
 	_add_palette_button("+ Sling L", func() -> void: _add("sling_left"))
 	_add_palette_button("+ Sling R", func() -> void: _add("sling_right"))
+	_add_palette_button("Draw GUIDE", func() -> void: _begin_draw("guide", true))
+	_add_palette_button("Draw WALL", func() -> void: _begin_draw("wall", false))
+	_add_palette_button("DONE drawing", _finish_draw)
 	_add_palette_button("Delete sel", _delete_selected)
 	_add_palette_button("SAVE", _save)
 	_add_palette_button("RESET saved", _reset_saved)
@@ -291,10 +331,41 @@ func _set_edit_mode(on: bool) -> void:
 	if not on:
 		_select(null)
 		_dragging = false
+		_finish_draw()
+	if _table != null and _table.has_method("editor_set_rail_handles_visible"):
+		_table.editor_set_rail_handles_visible(on)
 	if _palette != null:
 		_palette.visible = on
 	if _status != null:
 		_status.visible = on
+	_refresh_status()
+
+
+# --- Drawing rails (walls / guides) --------------------------------------------------------------
+
+## Start laying down a new rail. Each grid click adds a point; "DONE" finishes it. kind "guide" draws
+## a smooth curve, "wall" draws straight segments.
+func _begin_draw(kind: String, smooth: bool) -> void:
+	if _table == null or not _table.has_method("editor_spawn_rail"):
+		return
+	_finish_draw()
+	_select(null)
+	_draw_rail = _table.editor_spawn_rail(kind, smooth, [])
+	if _table.has_method("editor_set_rail_handles_visible"):
+		_table.editor_set_rail_handles_visible(true)  ## so the points we drop are visible as we draw
+	_drawing = true
+	_refresh_status()
+
+
+## Finish the in-progress rail. A rail with fewer than 2 points is discarded.
+func _finish_draw() -> void:
+	if _draw_rail != null and is_instance_valid(_draw_rail):
+		if _draw_rail.points().size() < 2:
+			if _table.has_method("editor_rails"):
+				_table.editor_rails().erase(_draw_rail)
+			_draw_rail.queue_free()
+	_draw_rail = null
+	_drawing = false
 	_refresh_status()
 
 
@@ -303,6 +374,9 @@ func _refresh_status() -> void:
 		return
 	if not _edit_mode:
 		_status.text = ""
+		return
+	if _drawing:
+		_status.text = "DRAWING\nclick = add point\nDONE = finish"
 		return
 	var sel: String = "none"
 	if _selected != null and _selected.has_meta("etype"):

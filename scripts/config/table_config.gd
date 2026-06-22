@@ -642,3 +642,24 @@ func up_table_local() -> Vector3:
 ## playfield node, not by tilting gravity, so callers that need world-down gravity use this.
 func gravity_vector_world() -> Vector3:
 	return Vector3(0.0, -GRAVITY, 0.0)
+
+
+## DEFAULT editor RAILS (the guides/walls/chutes the table starts with). Each entry is one EditRail:
+## kind "guide" draws a SMOOTH curve through its points, "wall" draws STRAIGHT segments. points are
+## playfield-local (x, z). table.gd seeds these as editable EditRail nodes; the developer can drag,
+## add, or delete them and SAVE a new layout that overrides this default. Returned by a function (not
+## a const) so each call hands back fresh, independent data. See [[in-game-layout-editor]].
+func default_rails() -> Array:
+	return [
+		# Inlane guides: curve from below the sling down to the flipper's outer end. Right mirrors X.
+		{"kind": "guide", "smooth": true, "points": [Vector2(-8.0, 13.5), Vector2(-6.8, 16.5), Vector2(-4.5, 19.5)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(8.0, 13.5), Vector2(6.8, 16.5), Vector2(4.5, 19.5)]},
+		# Return guides: hug the upper sides toward the top corners, outboard of the bumpers/chutes.
+		{"kind": "guide", "smooth": true, "points": [Vector2(6.0, -11.0), Vector2(7.3, -14.5), Vector2(8.5, -18.0)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(-6.0, -11.0), Vector2(-7.3, -14.5), Vector2(-8.5, -18.0)]},
+		# Top chutes: 4 short straight rails forming 3 rollover lanes.
+		{"kind": "wall", "smooth": false, "points": [Vector2(-3.6, -17.5), Vector2(-3.6, -14.5)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(-1.2, -17.5), Vector2(-1.2, -14.5)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(1.2, -17.5), Vector2(1.2, -14.5)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(3.6, -17.5), Vector2(3.6, -14.5)]},
+	]
