@@ -474,10 +474,11 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
 # corners relative means placing the node moves the whole triangle (the tests place it at the origin
 # and fire a ball at it). POS = centroid of the absolute corners.
-# CLEARANCE (developer: lower third too cramped): slings out to +/-8 so there is room for the inlane
-# channel between the sling and the flipper (pivot +/-4.5) and the outlane outboard.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.0, 0.0, 11.0)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.0, 0.0, 11.0)
+# DEVELOPER'S FIRST DRAFT (2026-06-22, dragged in the in-game editor, pinball_layout.json): slings
+# placed by hand. Still outboard of the flipper pivots (+/-4.5) and inside the walls, so the world-
+# scale pins hold. Asymmetric on purpose - it is a rough first pass to iterate from in the editor.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-7.08, 0.0, 13.97)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(4.77, 0.0, 14.41)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
@@ -649,17 +650,18 @@ func gravity_vector_world() -> Vector3:
 ## playfield-local (x, z). table.gd seeds these as editable EditRail nodes; the developer can drag,
 ## add, or delete them and SAVE a new layout that overrides this default. Returned by a function (not
 ## a const) so each call hands back fresh, independent data. See [[in-game-layout-editor]].
+## DEVELOPER'S FIRST DRAFT rails (2026-06-22, dragged in the in-game editor, pinball_layout.json).
 func default_rails() -> Array:
 	return [
-		# Inlane guides: curve from below the sling down to the flipper's outer end. Right mirrors X.
-		{"kind": "guide", "smooth": true, "points": [Vector2(-8.0, 13.5), Vector2(-6.8, 16.5), Vector2(-4.5, 19.5)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(8.0, 13.5), Vector2(6.8, 16.5), Vector2(4.5, 19.5)]},
-		# Return guides: hug the upper sides toward the top corners, outboard of the bumpers/chutes.
-		{"kind": "guide", "smooth": true, "points": [Vector2(6.0, -11.0), Vector2(7.3, -14.5), Vector2(8.5, -18.0)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(-6.0, -11.0), Vector2(-7.3, -14.5), Vector2(-8.5, -18.0)]},
-		# Top chutes: 4 short straight rails forming 3 rollover lanes.
+		# Inlane guides (curved), reshaped by hand.
+		{"kind": "guide", "smooth": true, "points": [Vector2(-10.42, 13.8), Vector2(-9.82, 18.57), Vector2(-5.25, 19.8)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(8.69, 13.68), Vector2(8.71, 18.77), Vector2(5.22, 20.04)]},
+		# Return guides (curved), reshaped by hand.
+		{"kind": "guide", "smooth": true, "points": [Vector2(10.12, -4.57), Vector2(9.05, -7.6), Vector2(7.38, -10.53)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(-8.88, -8.32), Vector2(-7.55, -10.91), Vector2(-8.03, -15.78)]},
+		# Top chutes / a longer right-side wall (straight).
 		{"kind": "wall", "smooth": false, "points": [Vector2(-3.6, -17.5), Vector2(-3.6, -14.5)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(-1.2, -17.5), Vector2(-1.2, -14.5)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(1.2, -17.5), Vector2(1.2, -14.5)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(3.6, -17.5), Vector2(3.6, -14.5)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(-0.96, -17.14), Vector2(-0.8, -14.04)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(1.7, -17.04), Vector2(1.65, -13.94)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(10.48, -16.3), Vector2(6.99, -10.44)]},
 	]

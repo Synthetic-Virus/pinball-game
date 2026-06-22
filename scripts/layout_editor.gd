@@ -36,6 +36,9 @@ var _drawing: bool = false        ## true while laying down a new rail point-by-
 var _draw_rail: Node3D = null     ## the rail being drawn
 
 var _hud: CanvasLayer = null
+var _panel: PanelContainer = null
+var _header: Label = null
+var _hud_dragging: bool = false
 var _status: Label = null
 var _palette: Control = null
 
@@ -288,9 +291,20 @@ func _build_hud() -> void:
 	bg.content_margin_bottom = 6.0
 	panel.add_theme_stylebox_override("panel", bg)
 	_hud.add_child(panel)
+	_panel = panel
 
 	var column := VBoxContainer.new()
 	panel.add_child(column)
+
+	# Drag handle: grab this strip to move the whole editor panel off the playfield.
+	_header = Label.new()
+	_header.text = "= = =  drag to move  = = ="
+	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_header.mouse_filter = Control.MOUSE_FILTER_STOP
+	_header.add_theme_color_override("font_color", Color(0.55, 0.8, 1.0))
+	_header.gui_input.connect(_on_header_input)
+	_header.visible = false
+	column.add_child(_header)
 
 	var toggle := Button.new()
 	toggle.text = "EDIT"
@@ -338,7 +352,17 @@ func _set_edit_mode(on: bool) -> void:
 		_palette.visible = on
 	if _status != null:
 		_status.visible = on
+	if _header != null:
+		_header.visible = on
 	_refresh_status()
+
+
+## Drag the whole editor panel by its header strip, so it can be moved off the playfield.
+func _on_header_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_hud_dragging = event.pressed
+	elif event is InputEventMouseMotion and _hud_dragging and _panel != null:
+		_panel.position += event.relative
 
 
 # --- Drawing rails (walls / guides) --------------------------------------------------------------
