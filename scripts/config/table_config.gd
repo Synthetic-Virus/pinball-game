@@ -49,7 +49,7 @@ const BALL_FRICTION: float = 0.4
 const HALF_WIDTH: float = 11.5      ## REAL-SCALE (2026-06-22): ~19 ball-diameters wide (ball dia 1.2).
 const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
 const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
-const WALL_THICKNESS: float = 0.8
+const WALL_THICKNESS: float = 0.35  ## REAL-SCALE: thin rails, not fat slabs (was 0.8). Guides follow.
 
 ## Launch lane up the RIGHT side. The lane is a narrow channel between the right outer wall and an
 ## inner divider; the plunger sits at its bottom and shoots the ball up into the arch.
