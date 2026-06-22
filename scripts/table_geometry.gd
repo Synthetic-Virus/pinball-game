@@ -14,10 +14,80 @@ extends RefCounted
 ##   +X = right, -X = left, -Z = up-table (top), +Z = down-table (drain). Y = up off the surface.
 ##   The surface top sits at Y = 0; borders stand up to TableConfig.WALL_HEIGHT.
 
+## DEV AID: draw the coordinate grid + axis numbers ON the playfield so positions can be read
+## straight off the running 3D table (developer: "idk where those coords are"). Set false to hide.
+const SHOW_COORD_GRID: bool = true
+
 ## Entry point. table.gd calls TableGeometry.build(playfield_node).
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
+	if SHOW_COORD_GRID:
+		_build_coord_grid(playfield)
+
+
+## Draw a faint coordinate grid on the surface, brighter axis lines through (0,0), and floating number
+## labels along the edges, so the developer can read (x, z) straight off the 3D board. Visual only -
+## no collision, no gameplay effect. Lines sit a hair above the surface (y) so they show on the dark
+## top. Grid step is 4 world units; labels every 4 along the bottom (x) and left (z) edges.
+static func _build_coord_grid(parent: Node3D) -> void:
+	var hw: float = TableConfig.HALF_WIDTH
+	var hl: float = TableConfig.HALF_LENGTH
+	var y: float = 0.06  ## just above the surface top (y=0)
+	var faint := StandardMaterial3D.new()
+	faint.albedo_color = Color(0.40, 0.42, 0.50)
+	var axis := StandardMaterial3D.new()
+	axis.albedo_color = Color(0.20, 0.65, 1.0)  ## bright blue for the x=0 / z=0 axes
+
+	# Vertical grid lines (constant x, running in z) and the x=0 axis.
+	var x: int = -16
+	while x <= 16:
+		var mat: StandardMaterial3D = axis if x == 0 else faint
+		var w: float = 0.18 if x == 0 else 0.08
+		_grid_strip(parent, Vector3(float(x), y, 0.0), Vector3(w, 0.04, hl * 2.0), mat)
+		x += 4
+	# Horizontal grid lines (constant z, running in x) and the z=0 axis.
+	var z: int = -24
+	while z <= 24:
+		var mat2: StandardMaterial3D = axis if z == 0 else faint
+		var t: float = 0.18 if z == 0 else 0.08
+		_grid_strip(parent, Vector3(0.0, y, float(z)), Vector3(hw * 2.0, 0.04, t), mat2)
+		z += 4
+
+	# Number labels: x values along the bottom edge, z values along the left edge.
+	var xl: int = -16
+	while xl <= 16:
+		_grid_label(parent, "%d" % xl, Vector3(float(xl), y, hl - 1.0))
+		xl += 4
+	var zl: int = -24
+	while zl <= 24:
+		_grid_label(parent, "%d" % zl, Vector3(-hw + 1.0, y, float(zl)))
+		zl += 4
+	_grid_label(parent, "0,0", Vector3(1.2, y, 1.2))
+
+
+## One thin flat grid strip (a flat box, no collision) centred at pos with the given size + material.
+static func _grid_strip(parent: Node3D, pos: Vector3, size: Vector3, mat: StandardMaterial3D) -> void:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	bm.material = mat
+	mi.mesh = bm
+	mi.position = pos
+	parent.add_child(mi)
+
+
+## One floating number label that always faces the camera (billboard), for reading coords off the 3D.
+static func _grid_label(parent: Node3D, text: String, pos: Vector3) -> void:
+	var label := Label3D.new()
+	label.text = text
+	label.position = pos + Vector3(0.0, 0.4, 0.0)
+	label.font_size = 96
+	label.pixel_size = 0.012
+	label.modulate = Color(0.30, 0.75, 1.0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	parent.add_child(label)
 
 
 ## A dark material for the flat surface so the white border lines read clearly against it.

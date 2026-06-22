@@ -256,8 +256,8 @@ const BALL_START: Vector3 = Vector3(15.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
 ## 90 keeps the stress at 180 u/s (bounce ~115 < 120), the proven-safe band. Spread 90/70 = 1.29x is
 ## modest; widen the FEEL later by lowering the deflector turn point, NOT by raising MAX past the
 ## CCD-safe ceiling.
-const LAUNCH_SPEED_MIN: float = 80.0
-const LAUNCH_SPEED_MAX: float = 100.0
+const LAUNCH_SPEED_MIN: float = 70.0
+const LAUNCH_SPEED_MAX: float = 90.0
 
 ## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
 ## The plunger is now a PHYSICAL body (AnimatableBody3D on KINEMATIC_OBSTACLES, like the flippers)
