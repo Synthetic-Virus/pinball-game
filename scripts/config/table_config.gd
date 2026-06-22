@@ -546,14 +546,17 @@ const SLINGSHOT_SCORE: int = 50
 # MARKUP (docs/REFERENCE_LAYOUT.md): the developer's purple target marks, homography-measured. An
 # upper PAIR beside the bumpers, a RIGHT vertical BANK of 4 (x ~ 8.5, tightly spaced), and a LEFT
 # single. Small posts (target.gd POST_RADIUS 0.7) so the bank does not overlap.
+# From the developer's PINK guide (homography-measured off the calibrated grid), kept clear of the
+# +/-11.5 wall and the right lane (x < ~9): a TOP standup bank, a LEFT vertical target, and a RIGHT
+# vertical bank.
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-8.4, 0.0, -12.4),   ## upper-left, beside the bumpers
-	Vector3(5.7, 0.0, -12.4),    ## upper-right, beside the bumpers
-	Vector3(8.0, 0.0, -2.3),     ## right vertical bank (4) - capped at x8 to clear the narrowed lane
-	Vector3(8.0, 0.0, -0.9),
-	Vector3(8.0, 0.0, 0.5),
-	Vector3(8.0, 0.0, 2.1),
-	Vector3(-10.0, 0.0, 2.1),    ## left single - pulled in off the narrowed wall
+	Vector3(-2.8, 0.0, -15.8),   ## top bank
+	Vector3(-0.3, 0.0, -15.8),
+	Vector3(2.3, 0.0, -15.8),
+	Vector3(-7.9, 0.0, -8.4),    ## left vertical target
+	Vector3(8.5, 0.0, -6.0),     ## right vertical bank (clears the lane)
+	Vector3(8.5, 0.0, -4.0),
+	Vector3(8.5, 0.0, -2.0),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------

@@ -23,6 +23,7 @@ static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
 	_build_lane_guides(playfield)
+	_build_return_guides(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
 
@@ -212,6 +213,24 @@ static func _build_borders(parent: Node3D) -> void:
 	_add_border_segment(
 		parent, Vector3(li, 0.0, -hl + 9.0), Vector3(li, 0.0, hl - 2.0), "LaneDivider"
 	)
+
+
+## Upper RETURN GUIDES (markup piece): the big curved guide rails by the top corners that bring a
+## ball down from the orbit into the field. From the developer's pink guide: a curved rail per side
+## sweeping from the mid-field up-and-out toward the top corner. Right path; left mirrors (x negated).
+static func _build_return_guides(parent: Node3D) -> void:
+	var right_path: Array[Vector3] = [
+		Vector3(4.0, 0.0, -8.5),     ## inner-low (mid-field)
+		Vector3(6.0, 0.0, -13.0),    ## curving up-and-out
+		Vector3(7.5, 0.0, -17.5),    ## toward the top corner
+	]
+	for i: int in range(right_path.size() - 1):
+		var a: Vector3 = right_path[i]
+		var b: Vector3 = right_path[i + 1]
+		_add_border_segment(parent, a, b, "ReturnGuideR%d" % i)
+		_add_border_segment(
+			parent, Vector3(-a.x, 0.0, a.z), Vector3(-b.x, 0.0, b.z), "ReturnGuideL%d" % i
+		)
 
 
 ## One border line: a thin white wall box from a to b, standing WALL_HEIGHT tall, yawed along the
