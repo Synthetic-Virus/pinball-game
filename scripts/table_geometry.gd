@@ -22,8 +22,19 @@ const SHOW_COORD_GRID: bool = true
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
+	_build_lane_guides(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
+
+
+## Inlane guide rails (markup piece 4, FIRST PASS for the developer to refine off the grid). One rail
+## per side, angling in from below the slingshot toward the flipper, forming the return inlane. Given
+## as start/end coords in absolute table space (read straight off the grid); replace with the exact
+## line the developer marks. Built as white wall segments via _add_border_segment.
+static func _build_lane_guides(parent: Node3D) -> void:
+	# Left rail then right (mirror). a = top (near sling bottom), b = down toward the flipper.
+	_add_border_segment(parent, Vector3(-10.0, 0.0, 13.0), Vector3(-8.0, 0.0, 20.5), "InlaneGuideL")
+	_add_border_segment(parent, Vector3(10.0, 0.0, 13.0), Vector3(8.0, 0.0, 20.5), "InlaneGuideR")
 
 
 ## Draw a faint coordinate grid on the surface, brighter axis lines through (0,0), and floating number
