@@ -46,7 +46,7 @@ const CORNER_SEGMENTS: int = 4
 ## and collision, all follow this). Tuning knob for "rotate the slings more" - mirrored per side, so
 ## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the other
 ## way. The kick still points INTO play (a modest rotation keeps the up-table component).
-const EXTRA_KICK_ROT_DEG: float = 25.0
+const EXTRA_KICK_ROT_DEG: float = 0.0
 
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH

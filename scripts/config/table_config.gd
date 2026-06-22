@@ -486,8 +486,12 @@ const SLINGSHOT_HEIGHT: float = WALL_HEIGHT
 ## component and a toward-center X component, which is exactly what the behavioral test asserts.
 ## (These are stored as the kick direction the body imparts; the visual angle of the face mirrors
 ## it.)
-const SLINGSHOT_LEFT_KICK_DIR: Vector3 = Vector3(0.6, 0.0, -0.8)
-const SLINGSHOT_RIGHT_KICK_DIR: Vector3 = Vector3(-0.6, 0.0, -0.8)
+# MARKUP fix (2026-06-21): the kicking face must face CENTER and stand UPRIGHT (developer: the bouncy
+# side was facing out and laid back). The face normal = this kick dir, so aim it mostly toward center
+# (x) with a smaller up-table (z) component => a more horizontal normal => a more upright face facing
+# inward. Still has a negative z (into play, never the drain) so test_shot_geometry stays green.
+const SLINGSHOT_LEFT_KICK_DIR: Vector3 = Vector3(0.85, 0.0, -0.5)
+const SLINGSHOT_RIGHT_KICK_DIR: Vector3 = Vector3(-0.85, 0.0, -0.5)
 ## SLINGSHOT_SCORE: flat points per kick (placeholder).
 const SLINGSHOT_SCORE: int = 50
 
