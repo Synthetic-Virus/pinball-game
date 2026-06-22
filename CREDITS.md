@@ -14,6 +14,14 @@ goes into assets/ without a line in this file.
   further-modified derivative of THIS model is itself licensed CC BY-SA 4.0. The two embedded
   materials ("Bat - Plastic White" body, "Bat - Rubber Blue" rubber) ship with the model.
 
+### Pop bumper (assets/models/bumper_body.glb, assets/models/bumper_ring.glb)
+- Derived from: github.com/vbousquet/pinball-parts (Bumpers.blend)
+- License: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0)
+- Modified: yes (selected the cap + simplified Gottlieb body + ring, stacked at origin, exported to
+  glTF 2.0 .glb in two pieces: the mushroom body+cap, and the metal ring that pops down on a hit)
+- Terms honored: commercial use is permitted; attribution is given here; ShareAlike means any
+  further-modified derivative of THESE models is itself licensed CC BY-SA 4.0.
+
 ## Notes
 - CC BY-SA 4.0 license text: https://creativecommons.org/licenses/by-sa/4.0/
 - ShareAlike applies to the derived MODEL, not to the rest of the game's original code/content.

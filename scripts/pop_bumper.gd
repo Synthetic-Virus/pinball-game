@@ -23,8 +23,19 @@ extends "res://scripts/active_kicker.gd"
 ## and _build_detector_and_mesh can read a single resolved value. The detector is built one
 ## BALL_RADIUS
 ## larger than this so body_entered fires as the ball arrives.
+## Imported MUSHROOM art (vbousquet/pinball-parts, CC BY-SA 4.0, see CREDITS.md). The body+cap is the
+## visible mushroom; the ring is the metal skirt that pops DOWN on a hit. Both scale by the SAME
+## factor, DERIVED from the collider radius (never a magic number), so the art follows the physics.
+## If the .glb fails to import, the gray-box cylinder (_make_mesh) stays - the bumper never vanishes.
+const BODY_ASSET_PATH: String = "res://assets/models/bumper_body.glb"
+const RING_ASSET_PATH: String = "res://assets/models/bumper_ring.glb"
+
 var _radius: float = TableConfig.POP_BUMPER_RADIUS
 var _height: float = TableConfig.POP_BUMPER_HEIGHT
+
+var _ring_visual: Node3D = null    ## the metal skirt; null if the ring art failed to load
+var _ring_rest_y: float = 0.0      ## the skirt's resting height; it dips below this on a pop
+var _asset_path_override: String = ""  ## test seam: force a bad path to drive the fallback branch
 
 
 ## Pull this bumper's geometry + score from TableConfig. table.gd calls this after instancing,
@@ -81,3 +92,84 @@ func _make_mesh() -> MeshInstance3D:
 	cyl.material = mat
 	mesh_instance.mesh = cyl
 	return mesh_instance
+
+
+## After the base builds the body/detector/gray-box mesh, swap in the imported mushroom art and the
+## ring. super._ready() must run first so KickerMesh exists to hide and the kicked signal exists.
+func _ready() -> void:
+	super._ready()
+	_install_art()
+
+
+## Load the mushroom body+cap as the visible art (scaled to the collider), the ring as the animatable
+## skirt, hide the gray-box cylinder, and arm the ring pop. Any load failure leaves the gray-box mesh.
+func _install_art() -> void:
+	var body_path: String = BODY_ASSET_PATH if _asset_path_override == "" else _asset_path_override
+	var body_scene: Resource = load(body_path)
+	if body_scene == null or not (body_scene is PackedScene):
+		return  ## fallback: the gray-box cylinder from _make_mesh stays visible
+	var visual: Node3D = body_scene.instantiate()
+	visual.name = "BumperVisual"
+	add_child(visual)
+	var factor: float = _derive_scale(visual)
+	visual.scale = Vector3(factor, factor, factor)
+	var gray_box: Node = get_node_or_null("KickerMesh")
+	if gray_box != null:
+		gray_box.visible = false  ## the real mushroom replaces the placeholder cylinder
+
+	var ring_scene: Resource = load(RING_ASSET_PATH)
+	if ring_scene is PackedScene:
+		_ring_visual = ring_scene.instantiate()
+		_ring_visual.name = "BumperRing"
+		add_child(_ring_visual)
+		_ring_visual.scale = Vector3(factor, factor, factor)  ## same factor keeps the ring proportional
+		_ring_rest_y = _ring_visual.position.y
+	if not kicked.is_connected(_on_kicked):
+		kicked.connect(_on_kicked)
+
+
+## Uniform scale so the art's footprint matches the collider diameter (2 * radius). Measured from the
+## merged mesh AABB, not hardcoded - an independent oracle on the scale (see test_flipper_asset_visual
+## for the same discipline).
+func _derive_scale(visual: Node3D) -> float:
+	var box: AABB = _merged_aabb(visual)
+	var width: float = maxf(box.size.x, box.size.z)
+	if width < 0.0001:
+		return 1.0
+	return (_radius * 2.0) / width
+
+
+## Merge every descendant MeshInstance3D's AABB into the visual root's local space.
+func _merged_aabb(root: Node3D) -> AABB:
+	var out := AABB()
+	var first: bool = true
+	for mi: MeshInstance3D in _mesh_instances(root):
+		var local: Transform3D = root.global_transform.affine_inverse() * mi.global_transform
+		var a: AABB = local * mi.get_aabb()
+		if first:
+			out = a
+			first = false
+		else:
+			out = out.merge(a)
+	return out
+
+
+func _mesh_instances(node: Node) -> Array:
+	var found: Array = []
+	if node is MeshInstance3D:
+		found.append(node)
+	for c: Node in node.get_children():
+		found.append_array(_mesh_instances(c))
+	return found
+
+
+## The "pop": on every kick, snap the metal ring DOWN sharply then let it spring back - the visual of
+## the skirt slapping the ball away. Physics is unchanged (the base's capped radial impulse does the
+## real work); this is pure juice tied to the kicked signal.
+func _on_kicked(_direction: Vector3) -> void:
+	if _ring_visual == null or not is_inside_tree():
+		return
+	var drop: float = _radius * 0.35
+	var pop: Tween = create_tween()
+	pop.tween_property(_ring_visual, "position:y", _ring_rest_y - drop, 0.04)
+	pop.tween_property(_ring_visual, "position:y", _ring_rest_y, 0.12)
