@@ -354,5 +354,9 @@ func _signed_area_xz(outline: PackedVector2Array) -> float:
 ## heading convention). For the left kick (0.6, 0, -0.8) this yaw maps local +Z -> (0.6, 0, -0.8)
 ## exactly; the previous formula mapped it to (0.6, 0, +0.8), into the drain.
 func _body_yaw() -> float:
-	# Heading that rotates the face normal (body-local +Z) onto the kick direction about +Y.
-	return atan2(_kick_dir.x, _kick_dir.z)
+	# The visible/collision kicking FACE must face the BALL: down-and-toward-center (where the ball
+	# rolls into the gap between the sling and the flipper), while the active kick fires the ball the
+	# OPPOSITE way (up-and-toward-center, into play). So orient the face toward (kick.x, +|kick.z|) by
+	# NEGATING z here; _kick_direction_for still returns the real up-table kick. (Developer blue
+	# correction: the bouncy face belongs on the center side, not facing out/up-table.)
+	return atan2(_kick_dir.x, -_kick_dir.z)
