@@ -27,14 +27,22 @@ static func build(playfield: Node3D) -> void:
 		_build_coord_grid(playfield)
 
 
-## Inlane guide rails (markup piece 4, FIRST PASS for the developer to refine off the grid). One rail
-## per side, angling in from below the slingshot toward the flipper, forming the return inlane. Given
-## as start/end coords in absolute table space (read straight off the grid); replace with the exact
-## line the developer marks. Built as white wall segments via _add_border_segment.
+## Inlane guide rails (markup piece 4). A bent rail per side tracing the developer's red line (read
+## off the grid): steep at the top, then angling toward the flipper. Given as an absolute-coord
+## POLYLINE for the LEFT; the right is the mirror (x negated). Built as white wall segments.
 static func _build_lane_guides(parent: Node3D) -> void:
-	# Left rail then right (mirror). a = top (near sling bottom), b = down toward the flipper.
-	_add_border_segment(parent, Vector3(-10.0, 0.0, 13.0), Vector3(-8.0, 0.0, 20.5), "InlaneGuideL")
-	_add_border_segment(parent, Vector3(10.0, 0.0, 13.0), Vector3(8.0, 0.0, 20.5), "InlaneGuideR")
+	var left_path: Array[Vector3] = [
+		Vector3(-13.0, 0.0, 11.5),   ## top (near the sling, out by the wall)
+		Vector3(-12.0, 0.0, 16.0),   ## bend
+		Vector3(-9.5, 0.0, 19.5),    ## down toward the flipper
+	]
+	for i: int in range(left_path.size() - 1):
+		var a: Vector3 = left_path[i]
+		var b: Vector3 = left_path[i + 1]
+		_add_border_segment(parent, a, b, "InlaneGuideL%d" % i)
+		_add_border_segment(
+			parent, Vector3(-a.x, 0.0, a.z), Vector3(-b.x, 0.0, b.z), "InlaneGuideR%d" % i
+		)
 
 
 ## Draw a faint coordinate grid on the surface, brighter axis lines through (0,0), and floating number
