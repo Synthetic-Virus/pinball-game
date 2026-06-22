@@ -24,27 +24,71 @@ static func build(playfield: Node3D) -> void:
 	_build_borders(playfield)
 	_build_lane_guides(playfield)
 	_build_return_guides(playfield)
+	_build_top_lanes(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
 
 
-## Inlane guide rails (markup piece 4). A bent rail per side tracing the developer's red line (read
-## off the grid): steep at the top, then angling toward the flipper. Given as an absolute-coord
-## POLYLINE for the LEFT; the right is the mirror (x negated). Built as white wall segments.
+## Sample a SMOOTH curve (Catmull-Rom) through the control points -> a denser polyline so a guide
+## reads as a ROUNDED curve, not a few straight segments joined at hard corners (developer: the guides
+## were "3 lines connected", "not rounded"). per_seg = samples between each pair of control points.
+static func _smooth_curve(pts: Array[Vector3], per_seg: int) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var n: int = pts.size()
+	if n < 3:
+		return pts
+	for i: int in range(n - 1):
+		var p0: Vector3 = pts[maxi(i - 1, 0)]
+		var p1: Vector3 = pts[i]
+		var p2: Vector3 = pts[i + 1]
+		var p3: Vector3 = pts[mini(i + 2, n - 1)]
+		for s: int in range(per_seg):
+			var t: float = float(s) / float(per_seg)
+			var t2: float = t * t
+			var t3: float = t2 * t
+			out.append(
+				0.5 * (
+					2.0 * p1 + (p2 - p0) * t
+					+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+					+ (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3
+				)
+			)
+	out.append(pts[n - 1])
+	return out
+
+
+## Build a SMOOTH curved rail through control points (rounded; many short overlapping wall segments).
+static func _build_curved_rail(parent: Node3D, control: Array[Vector3], pre: String) -> void:
+	var curve: Array[Vector3] = _smooth_curve(control, 6)
+	for i: int in range(curve.size() - 1):
+		_add_border_segment(parent, curve[i], curve[i + 1], "%s%d" % [pre, i])
+
+
+## Inlane guide rails (markup piece 4) - SMOOTH CURVES (developer: not angular/"3 lines"). A rounded
+## rail per side curving from below the sling down to the flipper. Control points (LEFT) are smoothed
+## by _build_curved_rail; the right is the mirror (x negated). Stays clear of the lane (|x| < 11).
 static func _build_lane_guides(parent: Node3D) -> void:
-	# MATCH PINK (region 7): traces the lower-side guide x[-8.9..-4.4] z[8.6..16.2], down the outer
-	# side then in toward the flipper. Right mirror stays clear of the lane (|x| < 11).
-	var left_path: Array[Vector3] = [
+	var left_control: Array[Vector3] = [
 		Vector3(-8.9, 0.0, 9.5),     ## top (below the sling)
-		Vector3(-8.5, 0.0, 14.0),    ## down the outer side
-		Vector3(-5.0, 0.0, 17.5),    ## cut in toward the flipper
+		Vector3(-8.7, 0.0, 13.0),
+		Vector3(-7.6, 0.0, 16.0),
+		Vector3(-5.0, 0.0, 18.0),    ## curving in toward the flipper
 	]
-	for i: int in range(left_path.size() - 1):
-		var a: Vector3 = left_path[i]
-		var b: Vector3 = left_path[i + 1]
-		_add_border_segment(parent, a, b, "InlaneGuideL%d" % i)
+	var right_control: Array[Vector3] = []
+	for p: Vector3 in left_control:
+		right_control.append(Vector3(-p.x, 0.0, p.z))
+	_build_curved_rail(parent, left_control, "InlaneGuideL")
+	_build_curved_rail(parent, right_control, "InlaneGuideR")
+
+
+## Top ROLLOVER LANES (chutes) - narrow channels the ball drops through (developer: "these are chutes
+## not targets"). Vertical guide rails near the top form the channels; 4 rails => 3 chutes, centred.
+static func _build_top_lanes(parent: Node3D) -> void:
+	var z_top: float = -18.5
+	var z_bot: float = -13.0
+	for rx: float in [-3.6, -1.2, 1.2, 3.6]:
 		_add_border_segment(
-			parent, Vector3(-a.x, 0.0, a.z), Vector3(-b.x, 0.0, b.z), "InlaneGuideR%d" % i
+			parent, Vector3(rx, 0.0, z_top), Vector3(rx, 0.0, z_bot), "LaneRail%d" % int(rx * 10)
 		)
 
 
@@ -219,18 +263,18 @@ static func _build_borders(parent: Node3D) -> void:
 ## ball down from the orbit into the field. From the developer's pink guide: a curved rail per side
 ## sweeping from the mid-field up-and-out toward the top corner. Right path; left mirrors (x negated).
 static func _build_return_guides(parent: Node3D) -> void:
-	var right_path: Array[Vector3] = [
+	# SMOOTH CURVE (developer: not angular). Control points; _build_curved_rail rounds them.
+	var right_control: Array[Vector3] = [
 		Vector3(4.0, 0.0, -8.5),     ## inner-low (pink region 2: x[4..7.8] z[-19..-8.5])
-		Vector3(6.5, 0.0, -13.0),    ## curving up-and-out
+		Vector3(5.6, 0.0, -11.5),
+		Vector3(7.0, 0.0, -14.8),
 		Vector3(7.8, 0.0, -18.0),    ## toward the top corner
 	]
-	for i: int in range(right_path.size() - 1):
-		var a: Vector3 = right_path[i]
-		var b: Vector3 = right_path[i + 1]
-		_add_border_segment(parent, a, b, "ReturnGuideR%d" % i)
-		_add_border_segment(
-			parent, Vector3(-a.x, 0.0, a.z), Vector3(-b.x, 0.0, b.z), "ReturnGuideL%d" % i
-		)
+	var left_control: Array[Vector3] = []
+	for p: Vector3 in right_control:
+		left_control.append(Vector3(-p.x, 0.0, p.z))
+	_build_curved_rail(parent, right_control, "ReturnGuideR")
+	_build_curved_rail(parent, left_control, "ReturnGuideL")
 
 
 ## One border line: a thin white wall box from a to b, standing WALL_HEIGHT tall, yawed along the

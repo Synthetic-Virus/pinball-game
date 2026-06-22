@@ -549,10 +549,10 @@ const SLINGSHOT_SCORE: int = 50
 # From the developer's PINK guide (homography-measured off the calibrated grid), kept clear of the
 # +/-11.5 wall and the right lane (x < ~9): a TOP standup bank, a LEFT vertical target, and a RIGHT
 # vertical bank.
+# The top row is NOT targets - those are CHUTES (rollover lanes); see _build_top_lanes in
+# table_geometry. These are the actual standup targets: a LEFT vertical target and a RIGHT vertical
+# bank (pink).
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-2.8, 0.0, -15.8),   ## top bank (pink regions 11-13)
-	Vector3(-0.3, 0.0, -15.8),
-	Vector3(2.3, 0.0, -15.8),
 	Vector3(-7.9, 0.0, -8.4),    ## left vertical target (pink region 5)
 	Vector3(9.0, 0.0, -6.0),     ## right vertical bank (pink column at x~9), clears the lane (x<11)
 	Vector3(9.0, 0.0, -4.0),
