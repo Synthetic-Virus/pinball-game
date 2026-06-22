@@ -206,16 +206,18 @@ static func _build_borders(parent: Node3D) -> void:
 	var hw: float = TableConfig.HALF_WIDTH
 	var hl: float = TableConfig.HALF_LENGTH
 	var li: float = TableConfig.LANE_INNER_X
-	var outline: Array[Vector3] = [
-		Vector3(-hw, 0.0, hl - 2.0),       ## bottom-left
-		Vector3(-hw, 0.0, -hl + 8.0),      ## up the left wall to the corner
-		Vector3(-hw + 1.6, 0.0, -hl + 4.0),## rounded top-left
-		Vector3(-hw + 4.0, 0.0, -hl),      ## top edge begins
-		Vector3(hw - 4.0, 0.0, -hl),       ## top edge ends
-		Vector3(hw - 1.6, 0.0, -hl + 4.0), ## rounded top-right
-		Vector3(hw, 0.0, -hl + 8.0),       ## down to the right wall (lane outer)
-		Vector3(hw, 0.0, hl - 2.0),        ## right wall down
-	]
+	# ROUNDED TOP (developer): the top is one smooth ARCH (half-ellipse) instead of a flat edge with
+	# chamfers. The side walls run up to arch_base_z, then the arch sweeps from the left wall top, over
+	# the apex at (0, -hl), to the right wall top. rx spans the full width; rz is the rise.
+	var arch_base_z: float = -hl + 8.0
+	var rx: float = hw
+	var rz: float = arch_base_z - (-hl)  ## apex lands at z = -hl, the old top height
+	var outline: Array[Vector3] = [Vector3(-hw, 0.0, hl - 2.0)]  ## bottom-left, then up the left wall
+	var steps: int = 18
+	for i: int in range(steps + 1):
+		var ang: float = deg_to_rad(180.0 - 180.0 * float(i) / float(steps))
+		outline.append(Vector3(rx * cos(ang), 0.0, arch_base_z - rz * sin(ang)))
+	outline.append(Vector3(hw, 0.0, hl - 2.0))  ## down the right wall, bottom open for the drain
 	for i: int in range(outline.size() - 1):
 		_add_border_segment(parent, outline[i], outline[i + 1], "Border%d" % i)
 

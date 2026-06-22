@@ -478,7 +478,7 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # placed by hand. Still outboard of the flipper pivots (+/-4.5) and inside the walls, so the world-
 # scale pins hold. Asymmetric on purpose - it is a rough first pass to iterate from in the editor.
 const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-7.08, 0.0, 13.97)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(7.08, 0.0, 13.97)  ## mirror of the left (symmetry pass)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(5.14, 0.0, 14.02)  ## developer's 11:32 draft (asymmetric)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
@@ -555,10 +555,10 @@ const SLINGSHOT_SCORE: int = 50
 # table_geometry. These are the actual standup targets: a LEFT vertical target and a RIGHT vertical
 # bank (pink).
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-7.9, 0.0, -8.4),    ## left vertical target (pink region 5)
-	Vector3(9.0, 0.0, -6.0),     ## right vertical bank (pink column at x~9), clears the lane (x<11)
-	Vector3(9.0, 0.0, -4.0),
-	Vector3(9.0, 0.0, -2.0),
+	Vector3(-7.69, 0.0, -8.41),  ## left single target (developer's 11:32 draft)
+	Vector3(9.32, 0.0, -4.48),   ## right vertical bank (clears the lane, x < 11)
+	Vector3(9.41, 0.0, -2.83),
+	Vector3(9.21, 0.0, -0.76),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------
@@ -650,23 +650,28 @@ func gravity_vector_world() -> Vector3:
 ## playfield-local (x, z). table.gd seeds these as editable EditRail nodes; the developer can drag,
 ## add, or delete them and SAVE a new layout that overrides this default. Returned by a function (not
 ## a const) so each call hands back fresh, independent data. See [[in-game-layout-editor]].
-## DEVELOPER'S FIRST DRAFT rails (2026-06-22, in-game editor) after a SYMMETRY pass: the left side is
-## the source of truth and the right is its exact mirror (x negated) for the pairs that should be
-## symmetric - inlane guides, return guides, the upper side wall - plus evenly-spaced chutes.
+## DEVELOPER'S DEFAULT rails (2026-06-22 11:32, dragged in the in-game editor, pinball_layout.json).
+## Baked faithfully from the developer's save - left/right are NOT mirrored here (it is a rough
+## work-in-progress); a symmetry pass can be run on request.
 func default_rails() -> Array:
 	return [
-		# Inlane guides (curved) - left drawn by hand, right mirrored.
+		# Inlane guides (curved).
 		{"kind": "guide", "smooth": true, "points": [Vector2(-10.42, 13.8), Vector2(-9.82, 18.57), Vector2(-5.25, 19.8)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(10.42, 13.8), Vector2(9.82, 18.57), Vector2(5.25, 19.8)]},
-		# Return guides (curved) - left drawn by hand, right mirrored.
-		{"kind": "guide", "smooth": true, "points": [Vector2(-8.88, -8.32), Vector2(-7.55, -10.91), Vector2(-8.03, -15.78)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(8.88, -8.32), Vector2(7.55, -10.91), Vector2(8.03, -15.78)]},
-		# Upper side wall (straight diagonal) - mirrored to both sides.
-		{"kind": "wall", "smooth": false, "points": [Vector2(-10.48, -16.3), Vector2(-6.99, -10.44)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(10.48, -16.3), Vector2(6.99, -10.44)]},
-		# Top chutes - 4 evenly-spaced rails (3 rollover lanes), symmetric about centre.
-		{"kind": "wall", "smooth": false, "points": [Vector2(-3.6, -17.3), Vector2(-3.6, -14.0)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(-1.2, -17.3), Vector2(-1.2, -14.0)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(1.2, -17.3), Vector2(1.2, -14.0)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(3.6, -17.3), Vector2(3.6, -14.0)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(8.69, 13.68), Vector2(8.71, 18.77), Vector2(5.22, 20.04)]},
+		# Return guides (curved).
+		{"kind": "guide", "smooth": true, "points": [Vector2(10.12, -4.57), Vector2(9.77, -6.62), Vector2(7.38, -10.53)]},
+		{"kind": "guide", "smooth": true, "points": [Vector2(-10.34, -1.87), Vector2(-9.06, -7.51), Vector2(-7.34, -9.78)]},
+		# Top chutes (straight).
+		{"kind": "wall", "smooth": false, "points": [Vector2(-3.97, -17.36), Vector2(-4.0, -14.24)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(-0.69, -17.04), Vector2(-0.67, -13.74)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(2.66, -17.46), Vector2(2.71, -14.04)]},
+		# Upper-right side wall (straight diagonal).
+		{"kind": "wall", "smooth": false, "points": [Vector2(10.62, -15.57), Vector2(7.25, -10.53)]},
+		# Left side: a short guide + a vertical wall forming a lane.
+		{"kind": "guide", "smooth": true, "points": [Vector2(-7.15, -9.69), Vector2(-7.65, -13.34), Vector2(-10.73, -11.77)]},
+		{"kind": "wall", "smooth": false, "points": [Vector2(-10.65, -11.68), Vector2(-10.35, -1.47)]},
+		# Right side: a multi-point orbit/lane wall.
+		{"kind": "wall", "smooth": false, "points": [Vector2(9.97, -4.57), Vector2(10.11, -4.46), Vector2(10.12, -0.24), Vector2(9.25, 1.81), Vector2(7.28, 3.77), Vector2(10.93, 8.4)]},
+		# Left lower guide.
+		{"kind": "guide", "smooth": true, "points": [Vector2(-12.81, 8.67), Vector2(-10.05, 5.64), Vector2(-12.88, 1.37)]},
 	]
