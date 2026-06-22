@@ -23,8 +23,7 @@ static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
 	_build_lane_guides(playfield)
-	# _build_return_guides: REMOVED - the curved walls overlapped the bumpers/chutes and were wrong
-	# (developer: "shouldn't be that way at all"). The real side details get re-marked next.
+	_build_return_guides(playfield)
 	_build_top_lanes(playfield)
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
@@ -267,12 +266,13 @@ static func _build_borders(parent: Node3D) -> void:
 ## ball down from the orbit into the field. From the developer's pink guide: a curved rail per side
 ## sweeping from the mid-field up-and-out toward the top corner. Right path; left mirrors (x negated).
 static func _build_return_guides(parent: Node3D) -> void:
-	# SMOOTH CURVE (developer: not angular). Control points; _build_curved_rail rounds them.
+	# SMOOTH CURVE, positioned OUTBOARD so it does NOT overlap the bumpers (x~3) or chutes (x~3.6):
+	# starts above the bumpers and hugs the upper side toward the top corner (developer: keep the
+	# walls, but no overlap).
 	var right_control: Array[Vector3] = [
-		Vector3(4.0, 0.0, -8.5),     ## inner-low (pink region 2: x[4..7.8] z[-19..-8.5])
-		Vector3(5.6, 0.0, -11.5),
-		Vector3(7.0, 0.0, -14.8),
-		Vector3(7.8, 0.0, -18.0),    ## toward the top corner
+		Vector3(6.0, 0.0, -11.0),    ## above the bumpers, outboard of the chutes
+		Vector3(7.3, 0.0, -14.5),
+		Vector3(8.5, 0.0, -18.0),    ## toward the top corner
 	]
 	var left_control: Array[Vector3] = []
 	for p: Vector3 in right_control:

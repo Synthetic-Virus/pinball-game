@@ -474,9 +474,10 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
 # corners relative means placing the node moves the whole triangle (the tests place it at the origin
 # and fire a ball at it). POS = centroid of the absolute corners.
-# NARROW: slings move inward to the pink-markup position (center ~ +/-6, z 11) on the narrowed table.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-6.0, 0.0, 11.0)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(6.0, 0.0, 11.0)
+# CLEARANCE (developer: lower third too cramped): slings out to +/-8 so there is room for the inlane
+# channel between the sling and the flipper (pivot +/-4.5) and the outlane outboard.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-8.0, 0.0, 11.0)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(8.0, 0.0, 11.0)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
