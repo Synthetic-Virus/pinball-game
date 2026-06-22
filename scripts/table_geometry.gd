@@ -32,9 +32,10 @@ static func build(playfield: Node3D) -> void:
 ## POLYLINE for the LEFT; the right is the mirror (x negated). Built as white wall segments.
 static func _build_lane_guides(parent: Node3D) -> void:
 	var left_path: Array[Vector3] = [
-		Vector3(-13.0, 0.0, 11.5),   ## top (near the sling, out by the wall)
-		Vector3(-12.0, 0.0, 16.0),   ## bend
-		Vector3(-9.5, 0.0, 19.5),    ## down toward the flipper
+		Vector3(-13.0, 0.0, 12.0),   ## top (near the sling, out by the wall)
+		Vector3(-14.0, 0.0, 15.0),   ## slight outward bulge
+		Vector3(-13.0, 0.0, 18.0),   ## back in, still down the outer side
+		Vector3(-9.0, 0.0, 20.0),    ## cut in toward the flipper
 	]
 	for i: int in range(left_path.size() - 1):
 		var a: Vector3 = left_path[i]
