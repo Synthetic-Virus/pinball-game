@@ -145,34 +145,27 @@ func test_flipper_height_exceeds_ball_radius() -> void:
 # If any constant is accidentally reverted this group catches it immediately.
 
 func test_half_width_is_16() -> void:
-	# The widen slice sets HALF_WIDTH exactly 16.0 (was 12.0).
-	# This is the headline assertion for the rescale; everything else derives from it.
+	# NARROW (2026-06-21): HALF_WIDTH set to 13.0 to match the developer's table outline (was 16).
 	assert_eq(
-		TableConfig.HALF_WIDTH, 16.0,
-		"HALF_WIDTH must be 16.0 after the widen slice (was 12.0); got %f" % TableConfig.HALF_WIDTH
+		TableConfig.HALF_WIDTH, 13.0,
+		"HALF_WIDTH must be 13.0 after the narrow; got %f" % TableConfig.HALF_WIDTH
 	)
 
 
 func test_lane_inner_x_is_14() -> void:
-	# LANE_INNER_X was re-derived from 10.5 to 14.0 (SLICE "Playtest fixes 2", 2026-06-20)
-	# to give a SNUG ~ball-width chute: LANE_WIDTH = 16 - 14 = 2.0 units (~1.7 ball diameters).
-	# Before: the lane was 5.5 units wide (over 4 ball diameters); the plunger face read as a box.
-	# After: the ball (diameter 1.2) sits snugly with ~0.4 units clearance each side.
+	# NARROW: LANE_INNER_X follows the narrower table to 11.0 (lane = 11..13, ~ball-width chute).
 	assert_eq(
-		TableConfig.LANE_INNER_X, 14.0,
-		"LANE_INNER_X must be 14.0 after the resize (was 10.5); got %f" % TableConfig.LANE_INNER_X
+		TableConfig.LANE_INNER_X, 11.0,
+		"LANE_INNER_X must be 11.0 after the narrow; got %f" % TableConfig.LANE_INNER_X
 	)
 
 
 func test_ball_start_x_is_lane_center() -> void:
-	# BALL_START.x was re-derived to 15.0 (SLICE "Playtest fixes 2", 2026-06-20), the new lane
-	# center: (LANE_INNER_X + HALF_WIDTH) * 0.5 = (14.0 + 16.0) / 2 = 15.0. The old value 13.25
-	# would sit OUTSIDE the narrowed lane (on the divider), so the ball could not seat against the
-	# plunger. Verified as a float-equality (the constant is the literal 15.0, not an expression).
-	assert_eq(
-		TableConfig.BALL_START.x, 15.0,
-		"BALL_START.x must be 15.0 (lane center on the resized table); got %f"
-		% TableConfig.BALL_START.x
+	# BALL_START.x is the lane center, (LANE_INNER_X + HALF_WIDTH) * 0.5 (= 12 after the narrow). Asserted
+	# as the RELATIONSHIP so it auto-follows future width changes instead of pinning a literal.
+	assert_almost_eq(
+		TableConfig.BALL_START.x, (TableConfig.LANE_INNER_X + TableConfig.HALF_WIDTH) * 0.5, 0.01,
+		"BALL_START.x must be the lane center; got %f" % TableConfig.BALL_START.x
 	)
 
 
@@ -246,9 +239,9 @@ func test_lane_guide_divider_auto_follows_widen() -> void:
 		"LANE_GUIDE_DIVIDER_X must be HALF_WIDTH-3.0=%f; got %f"
 		% [TableConfig.HALF_WIDTH - 3.0, TableConfig.LANE_GUIDE_DIVIDER_X]
 	)
-	# Concrete value check so a constant extraction typo is caught.
+	# Concrete value check so a constant extraction typo is caught (HALF_WIDTH 13 - 3 = 10 after narrow).
 	assert_eq(
-		TableConfig.LANE_GUIDE_DIVIDER_X, 13.0,
-		"LANE_GUIDE_DIVIDER_X must be 13.0 after the widen; got %f"
+		TableConfig.LANE_GUIDE_DIVIDER_X, 10.0,
+		"LANE_GUIDE_DIVIDER_X must be 10.0 after the narrow; got %f"
 		% TableConfig.LANE_GUIDE_DIVIDER_X
 	)

@@ -22,7 +22,8 @@ const SHOW_COORD_GRID: bool = true
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
-	_build_lane_guides(playfield)
+	# _build_lane_guides: temporarily OFF during the NARROW - the old wide-table guide coords foul the
+	# narrowed lane. Rebuilt at narrow/detected coords in the furniture stage.
 	if SHOW_COORD_GRID:
 		_build_coord_grid(playfield)
 
@@ -51,8 +52,10 @@ static func _build_lane_guides(parent: Node3D) -> void:
 ## no collision, no gameplay effect. Lines sit a hair above the surface (y) so they show on the dark
 ## top. Grid step is 4 world units; labels every 4 along the bottom (x) and left (z) edges.
 static func _build_coord_grid(parent: Node3D) -> void:
-	var hw: float = TableConfig.HALF_WIDTH
-	var hl: float = TableConfig.HALF_LENGTH
+	# Pinned to a FIXED +/-16 / +/-25 frame (not HALF_WIDTH) so the in-game grid keeps matching the
+	# developer's overlay coordinates even though the table itself narrowed.
+	var hw: float = 16.0
+	var hl: float = 25.0
 	var y: float = 0.06  ## just above the surface top (y=0)
 	var minor := StandardMaterial3D.new()
 	minor.albedo_color = Color(0.30, 0.32, 0.40)  ## very faint, the every-2 lines
@@ -185,27 +188,29 @@ static func _build_borders(parent: Node3D) -> void:
 	# Outer outline, walked as a polyline: up the left wall, around the rounded top-left corner, across
 	# the top, around the rounded top-RIGHT corner, and down the right wall. Bottom open for the drain.
 	# BOTH top corners are rounded (developer: the top-right was square and sealed the ball in).
+	# Derived from the world-scale width so the shell narrows with HALF_WIDTH (NARROW 2026-06-21: the
+	# developer's outline is ~x -13..+13). Left wall at -hw, right wall (lane outer) at +hw, both top
+	# corners rounded, bottom open for the drain.
+	var hw: float = TableConfig.HALF_WIDTH
+	var hl: float = TableConfig.HALF_LENGTH
+	var li: float = TableConfig.LANE_INNER_X
 	var outline: Array[Vector3] = [
-		Vector3(-16.4, 0.0, 24.0),    ## bottom-left (left wall, near the drain)
-		Vector3(-16.4, 0.0, -17.0),   ## up the left wall to where the corner begins
-		Vector3(-15.2, 0.0, -21.0),   ## rounded top-left corner (3 short chords)
-		Vector3(-13.0, 0.0, -23.6),
-		Vector3(-10.6, 0.0, -25.0),   ## top edge begins
-		Vector3(10.6, 0.0, -25.0),    ## top edge ends (symmetric)
-		Vector3(13.0, 0.0, -23.6),    ## rounded top-right corner (3 short chords)
-		Vector3(15.2, 0.0, -21.0),
-		Vector3(16.4, 0.0, -17.0),    ## down to where the right wall begins
-		Vector3(16.4, 0.0, 24.0),     ## down the right wall toward the drain
+		Vector3(-hw, 0.0, hl - 2.0),       ## bottom-left
+		Vector3(-hw, 0.0, -hl + 8.0),      ## up the left wall to the corner
+		Vector3(-hw + 1.6, 0.0, -hl + 4.0),## rounded top-left
+		Vector3(-hw + 4.0, 0.0, -hl),      ## top edge begins
+		Vector3(hw - 4.0, 0.0, -hl),       ## top edge ends
+		Vector3(hw - 1.6, 0.0, -hl + 4.0), ## rounded top-right
+		Vector3(hw, 0.0, -hl + 8.0),       ## down to the right wall (lane outer)
+		Vector3(hw, 0.0, hl - 2.0),        ## right wall down
 	]
 	for i: int in range(outline.size() - 1):
 		_add_border_segment(parent, outline[i], outline[i + 1], "Border%d" % i)
 
-	# The launch-lane divider: the inner right wall forming the shooter lane (x ~ +14.5), parallel to
-	# the right wall. It STOPS short of the top (z -16) so the top of the lane is OPEN: a launched ball
-	# clears the divider and curves left into the field around the rounded top-right corner, instead of
-	# being sealed in the corner (developer feedback).
+	# Launch-lane divider at +LANE_INNER_X (the inner right wall forming the shooter lane, lane =
+	# li..hw). It STOPS short of the top so the lane is OPEN and a launched ball curves into the field.
 	_add_border_segment(
-		parent, Vector3(14.5, 0.0, -16.0), Vector3(14.5, 0.0, 23.0), "LaneDivider"
+		parent, Vector3(li, 0.0, -hl + 9.0), Vector3(li, 0.0, hl - 2.0), "LaneDivider"
 	)
 
 

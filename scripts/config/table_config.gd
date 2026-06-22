@@ -46,7 +46,7 @@ const BALL_FRICTION: float = 0.4
 ## (BALL_START.x, the furniture position arrays, the slingshot X) are re-derived by hand below with
 ## a WHY-comment on each. The rescale is re-validated by tools/table_viz.py + test_world_scale.gd
 ## + test_furniture_layout.gd + test_shot_geometry.gd before the slice ships.
-const HALF_WIDTH: float = 16.0      ## => 32 units wide (was 24). The WIDEN.
+const HALF_WIDTH: float = 13.0      ## NARROW (2026-06-21): 16 -> 13 to match the developer's outline.
 const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
 const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
 const WALL_THICKNESS: float = 0.8
@@ -69,7 +69,7 @@ const WALL_THICKNESS: float = 0.8
 ## HALF_W) follows automatically. The right lane-guide divider (LANE_GUIDE_RIGHT_DIVIDER_X = 9.0)
 ## still sits inboard of the new lane (between flipper pivot 7.2 and the divider 14.0), so it needs
 ## no change. Re-validated by tools/table_viz.py + test_world_scale/test_furniture_layout.
-const LANE_INNER_X: float = 14.0    ## X of the inner divider wall (lane lives to its right).
+const LANE_INNER_X: float = 11.0    ## NARROW: 14 -> 11 (divider follows the narrower table; lane 11..13).
 const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 2.0).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
@@ -226,7 +226,9 @@ const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perime
 ## against the plunger.) Written as the literal 15.0 (not the expression) so the thin-client
 ## tools/table_viz.py parser, which reads single-line Vector3 literals, stays simple; the derivation
 ## is the comment above.
-const BALL_START: Vector3 = Vector3(15.0, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0)
+const BALL_START: Vector3 = Vector3(
+	(LANE_INNER_X + HALF_WIDTH) * 0.5, BALL_RADIUS + 0.2, HALF_LENGTH - 2.0
+)  ## x = lane center, auto-follows the narrow (= 12).
 
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
