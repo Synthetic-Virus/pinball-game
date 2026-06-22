@@ -46,7 +46,7 @@ const BALL_FRICTION: float = 0.4
 ## (BALL_START.x, the furniture position arrays, the slingshot X) are re-derived by hand below with
 ## a WHY-comment on each. The rescale is re-validated by tools/table_viz.py + test_world_scale.gd
 ## + test_furniture_layout.gd + test_shot_geometry.gd before the slice ships.
-const HALF_WIDTH: float = 13.0      ## NARROW (2026-06-21): 16 -> 13 to match the developer's outline.
+const HALF_WIDTH: float = 11.5      ## REAL-SCALE (2026-06-22): ~19 ball-diameters wide (ball dia 1.2).
 const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
 const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
 const WALL_THICKNESS: float = 0.8
@@ -69,7 +69,7 @@ const WALL_THICKNESS: float = 0.8
 ## HALF_W) follows automatically. The right lane-guide divider (LANE_GUIDE_RIGHT_DIVIDER_X = 9.0)
 ## still sits inboard of the new lane (between flipper pivot 7.2 and the divider 14.0), so it needs
 ## no change. Re-validated by tools/table_viz.py + test_world_scale/test_furniture_layout.
-const LANE_INNER_X: float = 11.0    ## NARROW: 14 -> 11 (divider follows the narrower table; lane 11..13).
+const LANE_INNER_X: float = 9.5     ## REAL-SCALE: lane 9.5..11.5 (~1.7 ball-widths), divider follows.
 const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 2.0).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
@@ -88,8 +88,8 @@ const ARCH_SWEEP_EXTEND_RAD: float = 0.5
 
 ## ---- FLIPPERS ----------------------------------------------------------------------------------
 ## Two flippers form an inverted V near the drain end. Pivot positions are on the playfield plane.
-const FLIPPER_LENGTH: float = 5.0   ## NARROW (2026-06-21): 7 -> 5, the bats were massive on the
-const FLIPPER_WIDTH: float = 1.1    ## narrowed table. 1.4 -> 1.1 width to match.
+const FLIPPER_LENGTH: float = 3.8   ## REAL-SCALE: ~2.8 ball-diameters (a real flipper). Was 7 then 5.
+const FLIPPER_WIDTH: float = 0.9
 const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BALL_RADIUS overlap).
 ## Half-distance between the two pivots (so pivots sit at +/-FLIPPER_PIVOT_SPREAD on X).
 ## CONSTRAINT (verified by tests/test_world_scale.gd test_flippers_do_not_overlap_at_pivots):
@@ -106,7 +106,7 @@ const FLIPPER_HEIGHT: float = 1.2   ## Thickness off the surface (must exceed BA
 ## 7.2. This nudges the flippers slightly outward on the wider field (so the lower field is not a
 ## tiny island in the middle) while the drain mouth stays the proven-playable size. Pivots at +/-7.2
 ## stay well inside the +/-16 side walls, leaving the wider side channels for the lane guides.
-const FLIPPER_PIVOT_SPREAD: float = 5.5  ## NARROW: 7.2 -> 5.5 so the shorter bats keep a ~2.5 gap.
+const FLIPPER_PIVOT_SPREAD: float = 4.5  ## REAL-SCALE: with the 3.8 bats, keeps a ~2.5 (2-ball) gap.
 const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain the pivots sit.
 ## Resting and energized angles (radians) of the flipper about its pivot, measured on the playfield
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
@@ -430,7 +430,7 @@ const KICK_COOLDOWN_S: float = 0.25
 ## RESIZE (SLICE "Table reshape"): 1.6 -> 2.0. Developer feedback "slots too small". A bigger bumper
 ## reads clearly as a target on the wider field and is easier to aim at, while staying clear of the
 ## side walls (clearance HALF_WIDTH - RADIUS = 14.0 vs the +/-6.0 bumper X) and below the arch.
-const POP_BUMPER_RADIUS: float = 2.0
+const POP_BUMPER_RADIUS: float = 1.6  ## REAL-SCALE: ~2.7 ball-diameters across (a real pop bumper).
 ## POP_BUMPER_HEIGHT: stands as tall as the perimeter so a ball cannot ride up and over it.
 const POP_BUMPER_HEIGHT: float = WALL_HEIGHT
 ## POP_BUMPER_SCORE: flat points per kick (placeholder, no multipliers - DESIGN scope).
@@ -549,11 +549,11 @@ const SLINGSHOT_SCORE: int = 50
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
 	Vector3(-8.4, 0.0, -12.4),   ## upper-left, beside the bumpers
 	Vector3(5.7, 0.0, -12.4),    ## upper-right, beside the bumpers
-	Vector3(8.4, 0.0, -2.3),     ## right vertical bank (4)
-	Vector3(8.5, 0.0, -0.9),
-	Vector3(8.7, 0.0, 0.5),
-	Vector3(8.9, 0.0, 2.1),
-	Vector3(-11.4, 0.0, 2.1),    ## left single
+	Vector3(8.0, 0.0, -2.3),     ## right vertical bank (4) - capped at x8 to clear the narrowed lane
+	Vector3(8.0, 0.0, -0.9),
+	Vector3(8.0, 0.0, 0.5),
+	Vector3(8.0, 0.0, 2.1),
+	Vector3(-10.0, 0.0, 2.1),    ## left single - pulled in off the narrowed wall
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------

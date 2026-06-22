@@ -147,16 +147,16 @@ func test_flipper_height_exceeds_ball_radius() -> void:
 func test_half_width_is_16() -> void:
 	# NARROW (2026-06-21): HALF_WIDTH set to 13.0 to match the developer's table outline (was 16).
 	assert_eq(
-		TableConfig.HALF_WIDTH, 13.0,
-		"HALF_WIDTH must be 13.0 after the narrow; got %f" % TableConfig.HALF_WIDTH
+		TableConfig.HALF_WIDTH, 11.5,
+		"HALF_WIDTH must be 11.5 after the real-scale pass; got %f" % TableConfig.HALF_WIDTH
 	)
 
 
 func test_lane_inner_x_is_14() -> void:
 	# NARROW: LANE_INNER_X follows the narrower table to 11.0 (lane = 11..13, ~ball-width chute).
 	assert_eq(
-		TableConfig.LANE_INNER_X, 11.0,
-		"LANE_INNER_X must be 11.0 after the narrow; got %f" % TableConfig.LANE_INNER_X
+		TableConfig.LANE_INNER_X, 9.5,
+		"LANE_INNER_X must be 9.5 after the real-scale pass; got %f" % TableConfig.LANE_INNER_X
 	)
 
 
@@ -241,7 +241,7 @@ func test_lane_guide_divider_auto_follows_widen() -> void:
 	)
 	# Concrete value check so a constant extraction typo is caught (HALF_WIDTH 13 - 3 = 10 after narrow).
 	assert_eq(
-		TableConfig.LANE_GUIDE_DIVIDER_X, 10.0,
-		"LANE_GUIDE_DIVIDER_X must be 10.0 after the narrow; got %f"
+		TableConfig.LANE_GUIDE_DIVIDER_X, 8.5,
+		"LANE_GUIDE_DIVIDER_X must be 8.5 after the real-scale pass; got %f"
 		% TableConfig.LANE_GUIDE_DIVIDER_X
 	)

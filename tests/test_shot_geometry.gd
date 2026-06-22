@@ -21,8 +21,8 @@ func test_geometry_is_on_widened_table() -> void:
 	## This canary asserts the concrete value so a stale revert to HALF_WIDTH=12 fails immediately
 	## rather than silently changing every clearance threshold.
 	assert_eq(
-		TableConfig.HALF_WIDTH, 13.0,
-		"geometry checks are calibrated for HALF_WIDTH=13 (the narrow); got %f" % TableConfig.HALF_WIDTH
+		TableConfig.HALF_WIDTH, 11.5,
+		"geometry checks are calibrated for HALF_WIDTH=11.5 (real-scale); got %f" % TableConfig.HALF_WIDTH
 	)
 
 
