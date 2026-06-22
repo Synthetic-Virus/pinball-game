@@ -86,6 +86,7 @@ func _ready() -> void:
 	_build_dynamic_elements()
 	_build_flow_and_hud()
 	_wire_signals()
+	_build_layout_editor()
 	# Kick off the first ball through the flow state machine, not directly.
 	if game_flow != null and game_flow.has_method("start_game"):
 		game_flow.start_game()
@@ -313,6 +314,113 @@ func _build_dynamic_elements() -> void:
 	oob_drain.add_child(oob_col)
 	oob_drain.position = Vector3(0.0, TableConfig.OOB_DRAIN_Y, 0.0)
 	playfield.add_child(oob_drain)
+
+
+# --- In-game layout editor support ---------------------------------------------------------------
+# These let scripts/layout_editor.gd build the table from the developer's own placements. The editor
+# is browser-only; in headless tests it is inert (OS.has_feature("web") is false), so the built-in
+# furniture above is what tests see. WHY: the describe-and-rebuild loop kept misreading hand-drawn
+# markups; the developer now drags the furniture into place themselves and saves it.
+
+## Tag the built-in furniture with its editor type, then create the editor and hand it the live refs.
+func _build_layout_editor() -> void:
+	for b: Area3D in pop_bumpers:
+		b.set_meta("etype", "bumper")
+	for t: Area3D in targets:
+		t.set_meta("etype", "target")
+	if slingshots.size() >= 1:
+		slingshots[0].set_meta("etype", "sling_left")
+	if slingshots.size() >= 2:
+		slingshots[1].set_meta("etype", "sling_right")
+	if left_flipper != null:
+		left_flipper.set_meta("etype", "flipper_left")
+	if right_flipper != null:
+		right_flipper.set_meta("etype", "flipper_right")
+	var editor: Node = preload("res://scripts/layout_editor.gd").new()
+	editor.name = "LayoutEditor"
+	add_child(editor)
+	editor.setup(self, _camera, playfield)
+
+
+## Every element the editor may move/delete, in one list. Used to pick on click and to serialise.
+func editor_editables() -> Array:
+	var arr: Array = []
+	arr.append_array(pop_bumpers)
+	arr.append_array(targets)
+	arr.append_array(slingshots)
+	if left_flipper != null:
+		arr.append(left_flipper)
+	if right_flipper != null:
+		arr.append(right_flipper)
+	return arr
+
+
+## Spawn one editable element of the given type at a playfield-local position. Mirrors the built-in
+## furniture construction so an editor-placed piece behaves exactly like a default one. rot_y radians
+## is applied to furniture (flippers manage their own orientation via configure, so rot_y is ignored
+## for them). Returns the new node (or null for an unknown type).
+func editor_spawn(etype: String, pos: Vector3, rot_y: float) -> Node3D:
+	var node: Node3D = null
+	match etype:
+		"bumper":
+			node = PopBumperScene.instantiate()
+			if node.has_method("configure"):
+				node.configure()
+			pop_bumpers.append(node)
+		"target":
+			node = TargetScene.instantiate()
+			targets.append(node)
+		"sling_left":
+			node = SlingshotScene.instantiate()
+			if node.has_method("configure"):
+				node.configure(false)
+			slingshots.append(node)
+		"sling_right":
+			node = SlingshotScene.instantiate()
+			if node.has_method("configure"):
+				node.configure(true)
+			slingshots.append(node)
+		"flipper_left":
+			node = FlipperScene.instantiate()
+			node.name = "LeftFlipper"
+			node.position = pos
+			playfield.add_child(node)
+			node.configure("left_flipper", false)
+			left_flipper = node
+			node.set_meta("etype", etype)
+			return node
+		"flipper_right":
+			node = FlipperScene.instantiate()
+			node.name = "RightFlipper"
+			node.position = pos
+			playfield.add_child(node)
+			node.configure("right_flipper", true)
+			right_flipper = node
+			node.set_meta("etype", etype)
+			return node
+		_:
+			return null
+	node.position = pos
+	node.rotation.y = rot_y
+	node.set_meta("etype", etype)
+	playfield.add_child(node)
+	if node.has_method("set_ball") and ball != null:
+		node.set_ball(ball)
+	return node
+
+
+## Remove an editor-managed element from its array and free it.
+func editor_remove(node: Node3D) -> void:
+	if node == null:
+		return
+	pop_bumpers.erase(node)
+	targets.erase(node)
+	slingshots.erase(node)
+	if node == left_flipper:
+		left_flipper = null
+	if node == right_flipper:
+		right_flipper = null
+	node.queue_free()
 
 
 ## Instance GameFlow (Node) and HUD (CanvasLayer) and assign handles.
