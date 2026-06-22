@@ -472,23 +472,25 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
 # corners relative means placing the node moves the whole triangle (the tests place it at the origin
 # and fire a ball at it). POS = centroid of the absolute corners.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-7.67, 0.0, 11.67)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(7.67, 0.0, 11.67)
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-9.4, 0.0, 12.1)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(9.4, 0.0, 12.1)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
 ## POS + corner - read the ABSOLUTE post off the in-game grid, and I set POS = their average and these
 ## = each minus that average. RIGHT mirrors LEFT (x negated). Placeholders near the flippers for now.
 ## (Absolute: left top (-7,9), bottom-outer (-9.5,13), bottom-inner (-6.5,13); centroid (-7.67,11.67).)
+# From the developer's yellow markup (measured off the grid): absolute left corners top (-10.1, 9.3),
+# outer (-10.5, 13.2), inner (-7.6, 13.8); centroid (-9.4, 12.1). These are each minus the centroid.
 const SLINGSHOT_LEFT_CORNERS: Array[Vector2] = [
-	Vector2(0.67, -2.67),    ## top post
-	Vector2(-1.83, 1.33),    ## bottom-outer post
-	Vector2(1.17, 1.33),     ## bottom-inner post
+	Vector2(-0.7, -2.8),    ## top post
+	Vector2(-1.1, 1.1),     ## bottom-outer post
+	Vector2(1.8, 1.7),      ## bottom-inner post
 ]
 const SLINGSHOT_RIGHT_CORNERS: Array[Vector2] = [
-	Vector2(-0.67, -2.67),
-	Vector2(1.83, 1.33),
-	Vector2(-1.17, 1.33),
+	Vector2(0.7, -2.8),
+	Vector2(1.1, 1.1),
+	Vector2(-1.8, 1.7),
 ]
 ## The slingshot is a short angled wall (a flat kicker face). These are its box dimensions (local,
 ## before the per-side angle is applied). Long axis is X; it stands WALL_HEIGHT tall.
