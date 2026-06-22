@@ -238,20 +238,37 @@ func _build_hud() -> void:
 	_hud.layer = 50
 	add_child(_hud)
 
+	# Everything sits in ONE dark panel on the LEFT, BELOW the score line, so the editor UI never
+	# overlaps the game HUD (SCORE top-left, BALLS top-right, LAUNCH POWER bottom). The panel hugs its
+	# contents, so when edit mode is off it is just the small EDIT button.
+	var panel := PanelContainer.new()
+	panel.position = Vector2(10.0, 96.0)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.0, 0.0, 0.0, 0.72)
+	bg.content_margin_left = 8.0
+	bg.content_margin_right = 8.0
+	bg.content_margin_top = 6.0
+	bg.content_margin_bottom = 6.0
+	panel.add_theme_stylebox_override("panel", bg)
+	_hud.add_child(panel)
+
+	var column := VBoxContainer.new()
+	panel.add_child(column)
+
 	var toggle := Button.new()
 	toggle.text = "EDIT"
-	toggle.position = Vector2(12.0, 12.0)
 	toggle.pressed.connect(func() -> void: _set_edit_mode(not _edit_mode))
-	_hud.add_child(toggle)
+	column.add_child(toggle)
 
 	_status = Label.new()
-	_status.position = Vector2(70.0, 16.0)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.custom_minimum_size = Vector2(190.0, 0.0)
 	_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	_hud.add_child(_status)
+	_status.visible = false
+	column.add_child(_status)
 
 	_palette = VBoxContainer.new()
-	_palette.position = Vector2(12.0, 52.0)
-	_hud.add_child(_palette)
+	column.add_child(_palette)
 	_add_palette_button("+ Bumper", func() -> void: _add("bumper"))
 	_add_palette_button("+ Target", func() -> void: _add("target"))
 	_add_palette_button("+ Sling L", func() -> void: _add("sling_left"))
@@ -276,6 +293,8 @@ func _set_edit_mode(on: bool) -> void:
 		_dragging = false
 	if _palette != null:
 		_palette.visible = on
+	if _status != null:
+		_status.visible = on
 	_refresh_status()
 
 
@@ -288,7 +307,7 @@ func _refresh_status() -> void:
 	var sel: String = "none"
 	if _selected != null and _selected.has_meta("etype"):
 		sel = String(_selected.get_meta("etype"))
-	_status.text = "EDIT MODE - click+drag to move, wheel to rotate, Del to remove   [selected: %s]" % sel
+	_status.text = "EDIT MODE\ndrag = move\nwheel = rotate\nDel = remove\nselected: %s" % sel
 
 
 func _flash(msg: String) -> void:
