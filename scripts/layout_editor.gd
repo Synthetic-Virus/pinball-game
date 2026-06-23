@@ -39,6 +39,9 @@ var _dragging: bool = false
 var _drawing: bool = false        ## true while laying down a new rail point-by-point
 var _draw_rail: Node3D = null     ## the rail being drawn
 
+var _grabbing: bool = false       ## Blender-style GRAB: selected follows the cursor, no button held
+var _grab_origin: Vector3 = Vector3.ZERO  ## where the grabbed element started (restored on cancel)
+
 var _hud: CanvasLayer = null
 var _menu: Control = null          ## the main menu (Build / Play), shown at boot
 var _play_bar: Control = null      ## the small "Menu" button shown while playing
@@ -80,11 +83,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		):
 			_delete_selected()
 			return
+		# Blender-style GRAB: G picks up the selection so it follows the cursor (no button held); a
+		# left-click drops it, Escape (or right-click) cancels back to where it started.
+		if _edit_mode and event.keycode == KEY_G and _selected != null and not _drawing:
+			_toggle_grab()
+			return
+		if _grabbing and event.keycode == KEY_ESCAPE:
+			_cancel_grab()
+			return
 	if not _edit_mode:
 		return
 	if event is InputEventMouseButton:
 		_handle_mouse_button(event)
-	elif event is InputEventMouseMotion and _dragging and _selected != null:
+	elif event is InputEventMouseMotion and (_dragging or _grabbing) and _selected != null:
 		var hit: Variant = _ray_to_field(event.position)
 		if hit != null:
 			_selected.position.x = hit.x
@@ -98,6 +109,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
+	# While GRABBING: a left-click drops the element here, a right-click cancels back to the start.
+	if _grabbing and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			_grabbing = false
+			_refresh_status()
+			return
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			_cancel_grab()
+			return
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			# While drawing a rail, each click DROPS A POINT instead of selecting/dragging.
@@ -157,6 +177,7 @@ func _pick(screen_pos: Vector2) -> Node3D:
 func _select(node: Node3D) -> void:
 	if _selected == node:
 		return
+	_grabbing = false  ## changing selection ends any in-progress grab
 	if _selected != null:
 		_selected.position.y = _selected_base_y   ## drop the previous selection back down
 	_selected = node
@@ -179,6 +200,32 @@ func _delete_selected() -> void:
 			_table.editor_remove(twin)
 	if _table.has_method("editor_remove"):
 		_table.editor_remove(doomed)
+	_refresh_status()
+
+
+## GRAB (Blender's G): toggle the selected element following the cursor. Starting a grab remembers the
+## origin so a cancel can restore it; toggling again (or left-click) confirms the new spot.
+func _toggle_grab() -> void:
+	if _selected == null:
+		return
+	if _grabbing:
+		_grabbing = false
+	else:
+		_grab_origin = _selected.position
+		_grabbing = true
+	_refresh_status()
+
+
+## Cancel a grab: snap the element back to where it started and stop following the cursor.
+func _cancel_grab() -> void:
+	if _selected != null:
+		_selected.position = _grab_origin
+		if _selected.has_meta("rail"):
+			var rail: Node = _selected.get_meta("rail")
+			if is_instance_valid(rail):
+				rail.rebuild()
+		_update_twin(_selected)
+	_grabbing = false
 	_refresh_status()
 
 
@@ -448,6 +495,7 @@ func _build_build_panel() -> void:
 	_add_action(column, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
 	_add_action(column, "Draw WALL", func() -> void: _begin_draw("wall", false))
 	_add_action(column, "DONE drawing", _finish_draw)
+	_add_action(column, "Grab move  G", _toggle_grab)
 	_add_action(column, "Delete selected", _delete_selected)
 	_add_action(column, "SAVE", _save)
 	_add_action(column, "RESET saved", _reset_saved)
@@ -579,10 +627,15 @@ func _refresh_status() -> void:
 	if _drawing:
 		_status.text = "DRAWING\nclick = add point\nDONE = finish"
 		return
+	if _grabbing:
+		_status.text = "GRAB\nmove mouse\nclick = drop\nEsc = cancel"
+		return
 	var sel: String = "none"
 	if _selected != null and _selected.has_meta("etype"):
 		sel = String(_selected.get_meta("etype"))
-	_status.text = "EDIT MODE\ndrag = move\nwheel = rotate\nDel = remove\nselected: %s" % sel
+	_status.text = (
+		"EDIT MODE\nG = grab/move\ndrag = move\nwheel = rotate\nDel = remove\nselected: %s" % sel
+	)
 
 
 func _flash(msg: String) -> void:
