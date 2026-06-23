@@ -47,12 +47,15 @@ const METER_OUTLINE_WIDTH: float = 2.0
 ## slightly larger size (GAME_OVER_FONT_SIZE) so it reads as the headline.
 const HUD_FONT_SIZE: int = 28
 const HUD_FONT_PATH: String = "res://assets/fonts/hud.otf"  ## OPTIPinBall, developer-supplied
+const TITLE_FONT_PATH: String = "res://assets/fonts/title.ttf"  ## CHLORINP, the backbox banner
 const GAME_OVER_FONT_SIZE: int = 34
 
 # --- Node references (assigned in _ready) ---
 var _root: Control          ## the full-rect root control; visibility + fade are applied here
 var _lbl_score: Label
 var _lbl_balls: Label
+var _lbl_high: Label         ## backbox high-score line (best score this session)
+var _high_score: int = 0     ## tracked across balls so the backbox can show a running best
 var _lbl_msg: Label
 var _meter_fill: ColorRect   # The coloured fill portion of the power meter bar.
 var _pnl_game_over: PanelContainer
@@ -72,31 +75,75 @@ func _build_ui() -> void:
 	add_child(root_ctrl)
 	_root = root_ctrl
 
-	# -- SCORE label (top-left) --
+	# -- BACKBOX scoreboard (the "head"): a framed dark panel on the RIGHT with the banner, score, ball
+	# count, a message line, and the session high score. The table is panned LEFT in play mode (see
+	# table.set_play_view) so this panel does not cover the playfield.
+	var box := PanelContainer.new()
+	box.anchor_left = 0.605
+	box.anchor_right = 0.985
+	box.anchor_top = 0.03
+	box.anchor_bottom = 0.60
+	box.offset_left = 0.0
+	box.offset_right = 0.0
+	box.offset_top = 0.0
+	box.offset_bottom = 0.0
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.02, 0.02, 0.07, 0.96)
+	sb.border_color = Color(0.45, 0.45, 0.62)
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 12.0
+	sb.content_margin_right = 12.0
+	sb.content_margin_top = 10.0
+	sb.content_margin_bottom = 10.0
+	box.add_theme_stylebox_override("panel", sb)
+	root_ctrl.add_child(box)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	box.add_child(col)
+
+	# Banner (the table name) in the title typeface.
+	var banner := Label.new()
+	banner.text = "PINBALL"
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.add_theme_font_size_override("font_size", 44)
+	var title_font: Resource = load(TITLE_FONT_PATH)
+	if title_font is Font:
+		banner.add_theme_font_override("font", title_font)
+	col.add_child(banner)
+
+	# SCORE (large, accent colour) - the headline number.
 	_lbl_score = Label.new()
 	_lbl_score.text = "SCORE  0"
-	_lbl_score.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_lbl_score.position = Vector2(16.0, 12.0)
-	_apply_font_size(_lbl_score, HUD_FONT_SIZE)
-	root_ctrl.add_child(_lbl_score)
+	_lbl_score.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_font_size(_lbl_score, 38)
+	_lbl_score.add_theme_color_override("font_color", Color(0.55, 0.72, 1.0))
+	col.add_child(_lbl_score)
 
-	# -- BALLS label (top-right) --
+	# BALL count.
 	_lbl_balls = Label.new()
 	_lbl_balls.text = "BALLS  3"
-	_lbl_balls.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	# Offset left from the right edge so the text is not clipped (wider offset for the bigger font).
-	_lbl_balls.position = Vector2(-200.0, 12.0)
+	_lbl_balls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_apply_font_size(_lbl_balls, HUD_FONT_SIZE)
-	root_ctrl.add_child(_lbl_balls)
+	col.add_child(_lbl_balls)
 
-	# -- MESSAGE label (bottom-centre) --
+	# MESSAGE line (launch prompt, drain messages...).
 	_lbl_msg = Label.new()
 	_lbl_msg.text = ""
 	_lbl_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_msg.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_lbl_msg.position = Vector2(0.0, -100.0)
-	_apply_font_size(_lbl_msg, HUD_FONT_SIZE)
-	root_ctrl.add_child(_lbl_msg)
+	_lbl_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_apply_font_size(_lbl_msg, 22)
+	_lbl_msg.add_theme_color_override("font_color", Color(0.62, 0.82, 1.0))
+	col.add_child(_lbl_msg)
+
+	# HIGH score (best this session).
+	_lbl_high = Label.new()
+	_lbl_high.text = "HIGH  0"
+	_lbl_high.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_font_size(_lbl_high, 22)
+	col.add_child(_lbl_high)
 
 	# -- POWER METER (bottom-left) --
 	# UX item 7 (colorblind-safe): the bar WIDTH is the primary power cue, reinforced by a high-
@@ -188,6 +235,10 @@ func fade_in(duration: float = 0.6) -> void:
 ## Update the score display. Receives score_changed(score) from GameFlow. STABLE SIGNATURE.
 func set_score(score: int) -> void:
 	_lbl_score.text = "SCORE  %d" % score
+	if score > _high_score:
+		_high_score = score
+		if _lbl_high != null:
+			_lbl_high.text = "HIGH  %d" % _high_score
 
 ## Update the ball count display. Receives balls_changed(balls) from GameFlow. STABLE SIGNATURE.
 func set_balls(balls: int) -> void:

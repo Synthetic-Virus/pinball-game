@@ -567,6 +567,9 @@ func _enter_play() -> void:
 func _show_hud(shown: bool) -> void:
 	if _table != null and _table.has_method("set_hud_shown"):
 		_table.set_hud_shown(shown, shown)
+	# PLAY view pans the table left to make room for the backbox; BUILD/menu re-centre it.
+	if _table != null and _table.has_method("set_play_view"):
+		_table.set_play_view(shown)
 
 
 func _set_edit_mode(on: bool) -> void:

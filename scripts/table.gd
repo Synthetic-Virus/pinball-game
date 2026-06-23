@@ -56,6 +56,10 @@ const SlingshotScene := preload("res://scenes/elements/Slingshot.tscn")
 const CAMERA_FOV: float = 60.0
 const VIEW_PITCH_DEG: float = 42.0
 const FRAME_MARGIN: float = 1.08
+## PLAY-view framing: zoom out a touch and pan the table LEFT so the right-side backbox scoreboard
+## has room (BUILD/menu keep the centred framing). Tuned against the deployed demo.
+const PLAY_VIEW_ZOOM: float = 1.32
+const PLAY_VIEW_H_OFFSET: float = 6.5
 
 # Filled in _ready(). Typed so the rest of the file (and tests) get autocomplete + checks.
 var playfield: Node3D
@@ -79,6 +83,7 @@ var slingshots: Array[Area3D] = []
 var rails: Array = []  ## editor-managed EditRail nodes (guides/walls/chutes); see layout_editor.gd
 var assets: Array = []  ## editor-placed imported part .glb nodes (wire guides, rails, targets)
 var _camera: Camera3D
+var _play_view: bool = false  ## true = PLAY framing (table panned left for the backbox); see _frame_camera
 
 
 func _ready() -> void:
@@ -203,8 +208,22 @@ func _frame_camera() -> void:
 		dist += 1.5
 		_place_camera(center, out_dir, dist)
 		guard += 1
-	# A little breathing room so the table is not edge-to-edge.
-	_place_camera(center, out_dir, dist * FRAME_MARGIN)
+	# A little breathing room so the table is not edge-to-edge. In PLAY view the table is zoomed out a
+	# touch and panned LEFT (camera h_offset) so the backbox scoreboard on the right does not cover it.
+	var final_dist: float = dist * FRAME_MARGIN
+	if _play_view:
+		final_dist *= PLAY_VIEW_ZOOM
+		_camera.h_offset = PLAY_VIEW_H_OFFSET
+	else:
+		_camera.h_offset = 0.0
+	_place_camera(center, out_dir, final_dist)
+
+
+## Switch between the centred BUILD/menu framing and the PLAY framing (table panned left for the
+## backbox). Re-frames the camera. Called by the layout editor on mode changes.
+func set_play_view(on: bool) -> void:
+	_play_view = on
+	call_deferred("_frame_camera")
 
 
 func _place_camera(center: Vector3, out_dir: Vector3, dist: float) -> void:
