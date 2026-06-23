@@ -49,14 +49,6 @@ license (or swap in an open-licensed alternative such as an SIL OFL font) BEFORE
 ### Button text (assets/fonts/button.ttf) - "Schwarzenberg Italic"
 - Source: downloaded. Commercial-use + embedding license: UNVERIFIED.
 
-## Third-party code
-
-### GUT - Godot Unit Test (addons/gut/)
-- Source: github.com/bitwes/Gut
-- License: MIT (see addons/gut/LICENSE.md)
-- Use: test framework, run in CI only - NOT included in shipped game builds.
-
 ## Notes
 - CC BY-SA 4.0 license text: https://creativecommons.org/licenses/by-sa/4.0/
 - ShareAlike applies to the derived MODELS, not to the rest of the game's original code/content.
-- MIT (GUT) requires keeping its license text, which lives in addons/gut/LICENSE.md.

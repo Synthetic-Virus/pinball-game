@@ -10,8 +10,9 @@
 # assets (not our own scenes/scripts), so we ignore them. NOTE: this is scoped to addons/ ONLY - the
 # .import/.uid sidecars for our REAL project assets (scenes/, scripts/, tests/) ARE tracked, per
 # Godot 4.x practice, because they carry stable resource IDs the project references.
-addons/**/*.import
-addons/**/*.uid
+# GUT test framework kept local (tests run locally, not in CI):
+addons/
+.gutconfig.json
 
 # Local dev tooling - not part of the public game source.
 .claude/
