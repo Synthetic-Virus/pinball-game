@@ -58,8 +58,11 @@ const VIEW_PITCH_DEG: float = 42.0
 const FRAME_MARGIN: float = 1.08
 ## PLAY-view framing: zoom out a touch and pan the table LEFT so the right-side backbox scoreboard
 ## has room (BUILD/menu keep the centred framing). Tuned against the deployed demo.
-const PLAY_VIEW_ZOOM: float = 1.32
-const PLAY_VIEW_H_OFFSET: float = 6.5
+const PLAY_VIEW_ZOOM: float = 1.5
+const PLAY_VIEW_H_OFFSET: float = 9.5
+## BUILD-mode zoom clamp: 1x = the default framing, up to 4x in (developer asked to cap the zoom).
+const CAM_ZOOM_MIN: float = 1.0
+const CAM_ZOOM_MAX: float = 4.0
 
 # Filled in _ready(). Typed so the rest of the file (and tests) get autocomplete + checks.
 var playfield: Node3D
@@ -84,6 +87,10 @@ var rails: Array = []  ## editor-managed EditRail nodes (guides/walls/chutes); s
 var assets: Array = []  ## editor-placed imported part .glb nodes (wire guides, rails, targets)
 var _camera: Camera3D
 var _play_view: bool = false  ## true = PLAY framing (table panned left for the backbox); see _frame_camera
+var _cam_pan: Vector3 = Vector3.ZERO  ## BUILD-mode camera pan offset (developer moves the view around)
+var _cam_zoom: float = 1.0            ## BUILD-mode zoom factor (1x default .. CAM_ZOOM_MAX in)
+var _grid_node: Node3D = null         ## the CoordGrid (built/managed here; shown only in build mode)
+var _grid_step: float = 2.0           ## current grid unit; gets finer as the developer zooms in
 
 
 func _ready() -> void:
@@ -215,7 +222,10 @@ func _frame_camera() -> void:
 		final_dist *= PLAY_VIEW_ZOOM
 		_camera.h_offset = PLAY_VIEW_H_OFFSET
 	else:
+		# BUILD/menu: centred, but the developer can pan the view and zoom in (capped at CAM_ZOOM_MAX).
 		_camera.h_offset = 0.0
+		final_dist /= _cam_zoom
+		center = _cam_pan
 	_place_camera(center, out_dir, final_dist)
 
 
@@ -242,6 +252,58 @@ func _build_playfield() -> void:
 ## Instance the static geometry (surface, perimeter walls, arch, lane divider) via TableGeometry.
 func _build_static_geometry() -> void:
 	TableGeometry.build(playfield)
+	if TableGeometry.SHOW_COORD_GRID:
+		_grid_node = TableGeometry.build_coord_grid(playfield, _grid_step)
+		_grid_node.visible = false  ## only shown in BUILD mode (set_grid_visible)
+
+
+# --- Build-mode camera + grid (driven by the layout editor) --------------------------------------
+
+## Show / hide the coordinate grid (BUILD mode only).
+func set_grid_visible(v: bool) -> void:
+	if _grid_node != null:
+		_grid_node.visible = v
+
+
+## Pan the BUILD-mode camera by a world-space offset on the table plane.
+func camera_pan(world_delta: Vector3) -> void:
+	_cam_pan += world_delta
+	_cam_pan.x = clampf(_cam_pan.x, -20.0, 20.0)
+	_cam_pan.z = clampf(_cam_pan.z, -28.0, 28.0)
+	_frame_camera()
+
+
+## Zoom the BUILD-mode camera by a multiplicative factor, clamped to [1x, CAM_ZOOM_MAX]. Rebuilds the
+## grid with finer units as you zoom in.
+func camera_zoom(factor: float) -> void:
+	_cam_zoom = clampf(_cam_zoom * factor, CAM_ZOOM_MIN, CAM_ZOOM_MAX)
+	_refresh_grid_step()
+	_frame_camera()
+
+
+## Reset the BUILD-mode camera to the default gameplay framing.
+func reset_camera() -> void:
+	_cam_pan = Vector3.ZERO
+	_cam_zoom = 1.0
+	_refresh_grid_step()
+	_frame_camera()
+
+
+## Pick a grid unit from the current zoom (finer when zoomed in) and rebuild the grid if it changed.
+func _refresh_grid_step() -> void:
+	var step: float = 2.0
+	if _cam_zoom >= 3.0:
+		step = 0.5
+	elif _cam_zoom >= 1.8:
+		step = 1.0
+	if is_equal_approx(step, _grid_step):
+		return
+	_grid_step = step
+	if _grid_node != null:
+		var was_visible: bool = _grid_node.visible
+		_grid_node.queue_free()
+		_grid_node = TableGeometry.build_coord_grid(playfield, _grid_step)
+		_grid_node.visible = was_visible
 
 
 ## Instance Ball, two Flippers, Plunger, Targets, Drain (+ failsafe OobDrain) under the playfield

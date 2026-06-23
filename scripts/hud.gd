@@ -79,10 +79,11 @@ func _build_ui() -> void:
 	# count, a message line, and the session high score. The table is panned LEFT in play mode (see
 	# table.set_play_view) so this panel does not cover the playfield.
 	var box := PanelContainer.new()
-	box.anchor_left = 0.605
-	box.anchor_right = 0.985
+	box.anchor_left = 0.62
+	box.anchor_right = 0.99
 	box.anchor_top = 0.03
-	box.anchor_bottom = 0.60
+	box.anchor_bottom = 0.03  ## top-anchored; grows DOWN to fit its content (not a fixed long panel)
+	box.grow_vertical = Control.GROW_DIRECTION_END
 	box.offset_left = 0.0
 	box.offset_right = 0.0
 	box.offset_top = 0.0
@@ -145,41 +146,40 @@ func _build_ui() -> void:
 	_apply_font_size(_lbl_high, 22)
 	col.add_child(_lbl_high)
 
-	# -- POWER METER (bottom-left) --
-	# UX item 7 (colorblind-safe): the bar WIDTH is the primary power cue, reinforced by a high-
-	# contrast OUTLINE so the filled LENGTH reads against any background without relying on color.
-	# Layering (back to front): outline rect, grey background, coloured fill.
+	# -- LAUNCH POWER meter, INSIDE the backbox (was bottom-left, "way far down" from the table). A
+	# tag plus a fixed-width bar (outline + grey background + coloured fill) centred in the column.
+	var lbl_meter_tag := Label.new()
+	lbl_meter_tag.text = "LAUNCH POWER"
+	lbl_meter_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_font_size(lbl_meter_tag, 18)
+	col.add_child(lbl_meter_tag)
+
+	var meter_holder := Control.new()
+	meter_holder.custom_minimum_size = Vector2(
+		METER_BAR_WIDTH + METER_OUTLINE_WIDTH * 2.0, METER_BAR_HEIGHT + METER_OUTLINE_WIDTH * 2.0
+	)
+	meter_holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(meter_holder)
+
 	var meter_outline := ColorRect.new()
 	meter_outline.color = METER_OUTLINE_COLOR
-	meter_outline.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	meter_outline.position = Vector2(16.0 - METER_OUTLINE_WIDTH, -48.0 - METER_OUTLINE_WIDTH)
+	meter_outline.position = Vector2.ZERO
 	meter_outline.size = Vector2(
-		METER_BAR_WIDTH + METER_OUTLINE_WIDTH * 2.0,
-		METER_BAR_HEIGHT + METER_OUTLINE_WIDTH * 2.0
+		METER_BAR_WIDTH + METER_OUTLINE_WIDTH * 2.0, METER_BAR_HEIGHT + METER_OUTLINE_WIDTH * 2.0
 	)
-	root_ctrl.add_child(meter_outline)
+	meter_holder.add_child(meter_outline)
 
 	var meter_bg := ColorRect.new()
-	meter_bg.color = Color(0.25, 0.25, 0.25)  # Dark grey background.
-	meter_bg.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	meter_bg.position = Vector2(16.0, -48.0)
+	meter_bg.color = Color(0.25, 0.25, 0.25)
+	meter_bg.position = Vector2(METER_OUTLINE_WIDTH, METER_OUTLINE_WIDTH)
 	meter_bg.size = Vector2(METER_BAR_WIDTH, METER_BAR_HEIGHT)
-	root_ctrl.add_child(meter_bg)
+	meter_holder.add_child(meter_bg)
 
 	_meter_fill = ColorRect.new()
 	_meter_fill.color = METER_COLOR_LOW
-	_meter_fill.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_meter_fill.position = Vector2(16.0, -48.0)
+	_meter_fill.position = Vector2(METER_OUTLINE_WIDTH, METER_OUTLINE_WIDTH)
 	_meter_fill.size = Vector2(0.0, METER_BAR_HEIGHT)  # Starts empty (zero power).
-	root_ctrl.add_child(_meter_fill)
-
-	# Meter label above the bar so the player knows what it represents.
-	var lbl_meter_tag := Label.new()
-	lbl_meter_tag.text = "LAUNCH POWER"
-	lbl_meter_tag.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	lbl_meter_tag.position = Vector2(16.0, -84.0)
-	_apply_font_size(lbl_meter_tag, HUD_FONT_SIZE)
-	root_ctrl.add_child(lbl_meter_tag)
+	meter_holder.add_child(_meter_fill)
 
 	# -- GAME OVER PANEL (hidden by default, shown via show_game_over) --
 	_pnl_game_over = PanelContainer.new()

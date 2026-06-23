@@ -42,6 +42,9 @@ var _draw_rail: Node3D = null     ## the rail being drawn
 
 var _grabbing: bool = false       ## Blender-style GRAB: selected follows the cursor, no button held
 var _grab_origin: Vector3 = Vector3.ZERO  ## where the grabbed element started (restored on cancel)
+var _cam_panning: bool = false    ## middle-mouse held: dragging pans the build camera
+var _collapsed: bool = false      ## build panel collapsed to just its header bar
+var _panel_body: Control = null   ## the part of the build panel hidden when collapsed
 
 var _hud: CanvasLayer = null
 var _menu: Control = null          ## the main menu (Build / Play), shown at boot
@@ -109,6 +112,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		_handle_mouse_button(event)
+	elif event is InputEventMouseMotion and _cam_panning:
+		# Middle-drag pans the BUILD view (grab the world and slide it under the cursor).
+		if _table != null and _table.has_method("camera_pan"):
+			_table.camera_pan(Vector3(-event.relative.x * 0.05, 0.0, -event.relative.y * 0.05))
 	elif event is InputEventMouseMotion and (_dragging or _grabbing) and _selected != null:
 		var hit: Variant = _ray_to_field(event.position)
 		if hit != null:
@@ -132,6 +139,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			_cancel_grab()
 			return
+	# Middle button held = pan the camera (handled in the motion branch).
+	if event.button_index == MOUSE_BUTTON_MIDDLE:
+		_cam_panning = event.pressed
+		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			# While drawing a rail, each click DROPS A POINT instead of selecting/dragging.
@@ -144,14 +155,18 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 			_dragging = _selected != null
 		else:
 			_dragging = false
-	elif event.pressed and _selected != null:
-		# Wheel up / down rotates the selected element about the vertical (table-normal) axis.
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_selected.rotation.y += deg_to_rad(ROTATE_STEP_DEG)
+	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		if _selected != null:
+			_selected.rotation.y += deg_to_rad(ROTATE_STEP_DEG)  ## rotate the selection
 			_update_twin(_selected)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		elif _table != null and _table.has_method("camera_zoom"):
+			_table.camera_zoom(1.1)  ## nothing selected: zoom the camera IN (capped in the table)
+	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		if _selected != null:
 			_selected.rotation.y -= deg_to_rad(ROTATE_STEP_DEG)
 			_update_twin(_selected)
+		elif _table != null and _table.has_method("camera_zoom"):
+			_table.camera_zoom(1.0 / 1.1)  ## zoom OUT
 
 
 # --- Picking / selection -------------------------------------------------------------------------
@@ -532,10 +547,32 @@ func _build_build_panel() -> void:
 	_header.gui_input.connect(_on_header_input)
 	column.add_child(_header)
 
+	# Collapse toggle (stays visible) so the panel can shrink to just the header + this button.
+	var collapse_btn := Button.new()
+	collapse_btn.text = "collapse"
+	_apply_font(collapse_btn, BUTTON_FONT_PATH)
+	collapse_btn.pressed.connect(_toggle_collapse)
+	column.add_child(collapse_btn)
+
+	# Everything below lives in the BODY, which is what collapsing hides.
+	_panel_body = VBoxContainer.new()
+	column.add_child(_panel_body)
+	var body: VBoxContainer = _panel_body
+
 	# Navigation up top so it is always obvious how to leave BUILD mode (the game HUD is hidden here).
 	# NOTE: the button font (Schwarzenberg-Italic) lacks < > / ( ) glyphs, so labels avoid them.
-	_add_action(column, "MAIN MENU", _enter_menu)
-	_add_action(column, "PLAY", _enter_play)
+	_add_action(body, "MAIN MENU", _enter_menu)
+	_add_action(body, "PLAY", _enter_play)
+
+	# Camera: middle-drag pans, wheel (with nothing selected) zooms; a button resets to the play view.
+	var cam_hint := Label.new()
+	cam_hint.text = "view: middle-drag pan, wheel zoom"
+	cam_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cam_hint.custom_minimum_size = Vector2(196.0, 0.0)
+	cam_hint.add_theme_font_size_override("font_size", 13)
+	cam_hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.85))
+	body.add_child(cam_hint)
+	_add_action(body, "Reset view", _reset_view)
 
 	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
 	_object_dropdown = OptionButton.new()
@@ -543,26 +580,26 @@ func _build_build_panel() -> void:
 	for i: int in range(_placeables.size()):
 		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
 	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
-	column.add_child(_object_dropdown)
+	body.add_child(_object_dropdown)
 	_mirror_check = CheckBox.new()
 	_mirror_check.text = "Mirror LR linked"
 	_apply_font(_mirror_check, BUTTON_FONT_PATH)
-	column.add_child(_mirror_check)
-	_add_action(column, "PLACE", _place_from_dropdown)
+	body.add_child(_mirror_check)
+	_add_action(body, "PLACE", _place_from_dropdown)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size = Vector2(196.0, 0.0)
 	_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	column.add_child(_status)
+	body.add_child(_status)
 
-	_add_action(column, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
-	_add_action(column, "Draw WALL", func() -> void: _begin_draw("wall", false))
-	_add_action(column, "DONE drawing", _finish_draw)
-	_add_action(column, "Grab move  G", _toggle_grab)
-	_add_action(column, "Delete selected", _delete_selected)
-	_add_action(column, "SAVE", _save)
-	_add_action(column, "RESET saved", _reset_saved)
+	_add_action(body, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
+	_add_action(body, "Draw WALL", func() -> void: _begin_draw("wall", false))
+	_add_action(body, "DONE drawing", _finish_draw)
+	_add_action(body, "Grab move  G", _toggle_grab)
+	_add_action(body, "Delete selected", _delete_selected)
+	_add_action(body, "SAVE", _save)
+	_add_action(body, "RESET saved", _reset_saved)
 
 
 ## The small bar shown while PLAYING: a button back to the main menu.
@@ -574,7 +611,9 @@ func _build_play_bar() -> void:
 	_play_bar.add_theme_stylebox_override("panel", bg)
 	_hud.add_child(_play_bar)
 	var b := Button.new()
-	b.text = "Menu"
+	b.text = "MENU"
+	b.custom_minimum_size = Vector2(120.0, 48.0)
+	b.add_theme_font_size_override("font_size", 26)
 	b.pressed.connect(_enter_menu)
 	_apply_font(b, BUTTON_FONT_PATH)
 	_play_bar.add_child(b)
@@ -647,6 +686,19 @@ func _enter_play() -> void:
 			_table.start_play()
 
 
+## Collapse the build panel down to just its header + the collapse button (and back).
+func _toggle_collapse() -> void:
+	_collapsed = not _collapsed
+	if _panel_body != null:
+		_panel_body.visible = not _collapsed
+
+
+## Reset the build camera (pan + zoom) to the default gameplay framing.
+func _reset_view() -> void:
+	if _table != null and _table.has_method("reset_camera"):
+		_table.reset_camera()
+
+
 ## Show (fade in) or hide the game HUD via the table.
 func _show_hud(shown: bool) -> void:
 	if _table != null and _table.has_method("set_hud_shown"):
@@ -664,6 +716,10 @@ func _set_edit_mode(on: bool) -> void:
 		_finish_draw()
 	if _table != null and _table.has_method("editor_set_rail_handles_visible"):
 		_table.editor_set_rail_handles_visible(on)
+	if _table != null and _table.has_method("set_grid_visible"):
+		_table.set_grid_visible(on)  ## the coordinate grid shows ONLY in build mode
+	if _table != null and not on and _table.has_method("reset_camera"):
+		_table.reset_camera()  ## leaving build resets any pan/zoom to the gameplay framing
 	if _panel != null:
 		_panel.visible = on
 	_refresh_status()

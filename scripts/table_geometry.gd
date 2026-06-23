@@ -26,9 +26,8 @@ static func build(playfield: Node3D) -> void:
 	# EditRail elements (scripts/edit_rail.gd) created by table.gd so the developer can draw/reshape
 	# them. table.gd seeds the same default shapes via TableConfig.DEFAULT_RAILS. The surface, outer
 	# borders, and launch-lane divider stay here because the plunger-lane tests build TableGeometry
-	# directly and depend on them.
-	if SHOW_COORD_GRID:
-		_build_coord_grid(playfield)
+	# directly and depend on them. The coordinate GRID is built+managed by table.gd (build_coord_grid)
+	# so it can be shown only in BUILD mode and rebuilt with finer units as the developer zooms in.
 
 
 ## Sample a SMOOTH curve (Catmull-Rom) through the control points -> a denser polyline so a guide
@@ -59,48 +58,71 @@ static func _smooth_curve(pts: Array[Vector3], per_seg: int) -> Array[Vector3]:
 	return out
 
 
-## Draw a faint coordinate grid on the surface, brighter axis lines through (0,0), and floating number
-## labels along the edges, so the developer can read (x, z) straight off the 3D board. Visual only -
-## no collision, no gameplay effect. Lines sit a hair above the surface (y) so they show on the dark
-## top. Grid step is 4 world units; labels every 4 along the bottom (x) and left (z) edges.
-static func _build_coord_grid(parent: Node3D) -> void:
-	# Pinned to a FIXED +/-16 / +/-25 frame (not HALF_WIDTH) so the in-game grid keeps matching the
-	# developer's overlay coordinates even though the table itself narrowed.
+## Build the coordinate grid under a fresh "CoordGrid" node and return it, so table.gd can show it only
+## in BUILD mode and rebuild it with a finer `step` as the developer zooms in. Lines run every `step`
+## world units, brighter every 2*step, blue on the x=0 / z=0 axes; number labels every 4*step. Visual
+## only (no collision). Pinned to a FIXED +/-16 / +/-25 frame so coordinates stay stable.
+static func build_coord_grid(parent: Node3D, step: float) -> Node3D:
+	var grid := Node3D.new()
+	grid.name = "CoordGrid"
+	parent.add_child(grid)
 	var hw: float = 16.0
 	var hl: float = 25.0
 	var y: float = 0.06  ## just above the surface top (y=0)
+	var major_step: float = step * 2.0
+	var label_step: float = step * 4.0
 	var minor := StandardMaterial3D.new()
-	minor.albedo_color = Color(0.30, 0.32, 0.40)  ## very faint, the every-2 lines
+	minor.albedo_color = Color(0.30, 0.32, 0.40)  ## faint, the every-step lines
 	var major := StandardMaterial3D.new()
-	major.albedo_color = Color(0.45, 0.48, 0.58)  ## brighter, the every-4 lines
+	major.albedo_color = Color(0.45, 0.48, 0.58)  ## brighter, the every-2*step lines
 	var axis := StandardMaterial3D.new()
 	axis.albedo_color = Color(0.20, 0.65, 1.0)  ## bright blue for the x=0 / z=0 axes
 
-	# Vertical grid lines (constant x, running in z), every 2 units; every-4 brighter; x=0 is the axis.
-	var x: int = -16
-	while x <= 16:
-		var mat: StandardMaterial3D = axis if x == 0 else (major if x % 4 == 0 else minor)
-		var w: float = 0.18 if x == 0 else (0.08 if x % 4 == 0 else 0.05)
-		_grid_strip(parent, Vector3(float(x), y, 0.0), Vector3(w, 0.04, hl * 2.0), mat)
-		x += 2
-	# Horizontal grid lines (constant z, running in x), every 2 units; every-4 brighter; z=0 is axis.
-	var z: int = -24
-	while z <= 24:
-		var mat2: StandardMaterial3D = axis if z == 0 else (major if z % 4 == 0 else minor)
-		var t: float = 0.18 if z == 0 else (0.08 if z % 4 == 0 else 0.05)
-		_grid_strip(parent, Vector3(0.0, y, float(z)), Vector3(hw * 2.0, 0.04, t), mat2)
-		z += 2
+	# Vertical grid lines (constant x, running in z).
+	var x: float = -hw
+	while x <= hw + 0.001:
+		var is_axis: bool = is_zero_approx(x)
+		var is_major: bool = _near_multiple(x, major_step)
+		var mat: StandardMaterial3D = axis if is_axis else (major if is_major else minor)
+		var w: float = 0.18 if is_axis else (0.08 if is_major else 0.05)
+		_grid_strip(grid, Vector3(x, y, 0.0), Vector3(w, 0.04, hl * 2.0), mat)
+		x += step
+	# Horizontal grid lines (constant z, running in x).
+	var z: float = -hl
+	while z <= hl + 0.001:
+		var is_axis2: bool = is_zero_approx(z)
+		var is_major2: bool = _near_multiple(z, major_step)
+		var mat2: StandardMaterial3D = axis if is_axis2 else (major if is_major2 else minor)
+		var t: float = 0.18 if is_axis2 else (0.08 if is_major2 else 0.05)
+		_grid_strip(grid, Vector3(0.0, y, z), Vector3(hw * 2.0, 0.04, t), mat2)
+		z += step
 
-	# Number labels: x values along the bottom edge, z values along the left edge.
-	var xl: int = -16
-	while xl <= 16:
-		_grid_label(parent, "%d" % xl, Vector3(float(xl), y, hl - 1.0))
-		xl += 4
-	var zl: int = -24
-	while zl <= 24:
-		_grid_label(parent, "%d" % zl, Vector3(-hw + 1.0, y, float(zl)))
-		zl += 4
-	_grid_label(parent, "0,0", Vector3(1.2, y, 1.2))
+	# Number labels: x along the bottom edge, z along the left edge.
+	var xl: float = -hw
+	while xl <= hw + 0.001:
+		_grid_label(grid, _grid_num(xl), Vector3(xl, y, hl - 1.0))
+		xl += label_step
+	var zl: float = -hl
+	while zl <= hl + 0.001:
+		_grid_label(grid, _grid_num(zl), Vector3(-hw + 1.0, y, zl))
+		zl += label_step
+	_grid_label(grid, "0,0", Vector3(1.2, y, 1.2))
+	return grid
+
+
+## True when v is a (near) multiple of m - tolerant of float drift at the 0.5/1/2 grid steps.
+static func _near_multiple(v: float, m: float) -> bool:
+	if m <= 0.0:
+		return false
+	var r: float = fmod(absf(v), m)
+	return r < 0.01 or r > m - 0.01
+
+
+## Format a grid coordinate: whole numbers as ints, otherwise one decimal (for the 0.5 fine grid).
+static func _grid_num(v: float) -> String:
+	if is_equal_approx(v, roundf(v)):
+		return "%d" % int(roundf(v))
+	return "%.1f" % v
 
 
 ## One thin flat grid strip (a flat box, no collision) centred at pos with the given size + material.
