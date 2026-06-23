@@ -7,7 +7,11 @@ jobs:
   native:
     runs-on: [self-hosted, godot]
     steps:
+      # lfs: true so the native export embeds the REAL binary assets (the *.glb part models, the
+      # *.otf/*.ttf fonts) instead of 130-byte LFS pointers. Matches ci.yml and deploy-demo.yml.
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Export native builds (headless)
         run: |
           mkdir -p build/windows build/linux
