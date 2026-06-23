@@ -22,6 +22,7 @@ const LAYOUT_KEY: String = "pinball_layout"   ## browser localStorage key the la
 const SELECT_RADIUS: float = 2.5              ## a click within this many table units grabs an element
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
 const SELECT_LIFT: float = 0.6                ## how far the selected element lifts (visual cue only)
+const LONG_PRESS_MS: float = 350.0            ## a play touch held this long also fires launch (spacebar)
 
 ## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for button text.
 const TITLE_FONT_PATH: String = "res://assets/fonts/title.ttf"
@@ -56,6 +57,10 @@ var _mirror_check: CheckBox = null         ## when ticked, a placed object gets 
 ## editor_spawn, "asset" routes to editor_spawn_asset. Built in _build_hud from TableConfig.
 var _placeables: Array = []
 
+var _playing: bool = false          ## true in PLAY mode (touch flipper controls are live)
+var _touches: Dictionary = {}       ## active screen touches: index -> {"action": String, "start": ms}
+var _launch_held: bool = false      ## whether a long-press is currently holding the launch action
+
 
 ## Wire the editor to the live table. table.gd calls this once the furniture exists.
 func setup(table: Node, camera: Camera3D, playfield: Node3D) -> void:
@@ -65,11 +70,20 @@ func setup(table: Node, camera: Camera3D, playfield: Node3D) -> void:
 	_build_hud()
 	_load_saved()
 	set_process_unhandled_input(true)
+	set_process(true)  ## drives the long-press launch timer during play
+	# The editor (and its menu) must keep running while the game is PAUSED so the pause menu responds.
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
 # --- Input ---------------------------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	# PLAY mode: touch the LEFT half for the left flipper, the RIGHT half for the right; a long press
+	# also fires "launch" (the spacebar). Only screen touches drive this, so on-screen buttons (which
+	# get the touch first via mouse emulation) stay tappable; the editor never sees these.
+	if _playing and event is InputEventScreenTouch:
+		_handle_play_touch(event)
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_E:
 			# Quick toggle between BUILD and PLAY (skips the menu).
@@ -249,6 +263,56 @@ func _editables() -> Array:
 	if _table != null and _table.has_method("editor_editables"):
 		return _table.editor_editables()
 	return []
+
+
+# --- Touch controls (PLAY mode only) -------------------------------------------------------------
+
+## A screen touch in play: LEFT half presses left_flipper, RIGHT half presses right_flipper. The
+## per-touch start time feeds the long-press launch in _process. Releasing lifts that flipper.
+func _handle_play_touch(event: InputEventScreenTouch) -> void:
+	if get_tree().paused:
+		return
+	if event.pressed:
+		var half: float = get_viewport().get_visible_rect().size.x * 0.5
+		var action: String = "left_flipper" if event.position.x < half else "right_flipper"
+		_touches[event.index] = {"action": action, "start": float(Time.get_ticks_msec())}
+		Input.action_press(action)
+	elif _touches.has(event.index):
+		Input.action_release(_touches[event.index]["action"])
+		_touches.erase(event.index)
+		_update_launch()
+
+
+func _process(_delta: float) -> void:
+	if _playing and not get_tree().paused:
+		_update_launch()
+
+
+## Hold "launch" (the spacebar) while ANY active touch has been held past LONG_PRESS_MS; release it
+## once none are. So a quick tap is just a flipper flick, a long press also charges/fires the plunger.
+func _update_launch() -> void:
+	var now: float = float(Time.get_ticks_msec())
+	var any_long: bool = false
+	for idx: int in _touches:
+		if now - float(_touches[idx]["start"]) >= LONG_PRESS_MS:
+			any_long = true
+			break
+	if any_long and not _launch_held:
+		Input.action_press("launch")
+		_launch_held = true
+	elif not any_long and _launch_held:
+		Input.action_release("launch")
+		_launch_held = false
+
+
+## Lift every held touch action (and launch). Called when leaving PLAY so nothing sticks down.
+func _release_all_touches() -> void:
+	for idx: int in _touches:
+		Input.action_release(_touches[idx]["action"])
+	_touches.clear()
+	if _launch_held:
+		Input.action_release("launch")
+		_launch_held = false
 
 
 # --- Palette / adding ----------------------------------------------------------------------------
@@ -535,15 +599,29 @@ func _apply_font(ctrl: Control, path: String) -> void:
 # --- Modes ---------------------------------------------------------------------------------------
 
 func _enter_menu() -> void:
-	_set_edit_mode(false)
-	if _menu != null:
-		_menu.visible = true
+	# Opening the menu FROM play is a PAUSE: freeze the game and use a TRANSLUCENT background so the
+	# table shows through (it stands out as an overlay). Opening it at boot / from build uses an OPAQUE
+	# background so the game board is NOT visible behind the main menu.
+	var pausing: bool = _playing
+	_playing = false
+	_release_all_touches()
 	if _play_bar != null:
 		_play_bar.visible = false
-	_show_hud(false)  ## no game HUD over the menu
+	if _menu != null:
+		_menu.visible = true
+		_menu.color = Color(0.04, 0.05, 0.08, 0.55 if pausing else 1.0)
+	if pausing:
+		get_tree().paused = true  ## keep the HUD/board behind the translucent overlay, frozen
+	else:
+		_set_edit_mode(false)
+		_show_hud(false)
+		get_tree().paused = false
 
 
 func _enter_build() -> void:
+	get_tree().paused = false  ## leaving a pause menu into build resumes the tree
+	_playing = false
+	_release_all_touches()
 	if _menu != null:
 		_menu.visible = false
 	if _play_bar != null:
@@ -553,14 +631,20 @@ func _enter_build() -> void:
 
 
 func _enter_play() -> void:
+	var resuming: bool = get_tree().paused
+	get_tree().paused = false
 	if _menu != null:
 		_menu.visible = false
 	_set_edit_mode(false)
 	if _play_bar != null:
 		_play_bar.visible = true
-	_show_hud(true)  ## fade the HUD in as the table loads
-	if _table != null and _table.has_method("start_play"):
-		_table.start_play()
+	_playing = true
+	if not resuming:
+		# A fresh start (from the boot menu / build): fade the HUD in and serve the first ball. When
+		# RESUMING a paused game the HUD and framing are already up, so just unpause above.
+		_show_hud(true)
+		if _table != null and _table.has_method("start_play"):
+			_table.start_play()
 
 
 ## Show (fade in) or hide the game HUD via the table.
