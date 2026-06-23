@@ -7,7 +7,7 @@ extends GutTest
 ## test_flipper_shape.gd). A new collision shape is a NEW tunneling risk: a convex hull has angled
 ## faces and a thin rounded tip a small fast ball could clip past between solver steps. The only
 ## existing ball-vs-flipper test (test_flipper_rubber.gd) fires at only ~50 u/s - far below the
-## worst-case. The .claude/CLAUDE.md non-negotiable and DESIGN.md "NOTHING TUNNELS, EVER" require a
+## worst-case. The the project docs non-negotiable and DESIGN.md "NOTHING TUNNELS, EVER" require a
 ## stress test that fires a >= 2x LAUNCH_SPEED_MAX ball at the REAL instanced bat and proves it
 ## never passes through, at BOTH the resting bat AND a bat in MID-SWING (the worst case: a fast bat
 ## face sweeping into a fast ball, the highest closing speed in the game).

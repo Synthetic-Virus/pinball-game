@@ -4,7 +4,7 @@ extends RigidBody3D
 ## OWNERSHIP: physics-programmer. Geometry/scale comes from TableConfig; YOU own mass tuning,
 ## damping, the PhysicsMaterial, and (critically) the no-tunneling guarantee.
 ##
-## NON-NEGOTIABLE (from .claude/CLAUDE.md and DESIGN.md "NO TUNNELING, EVER"):
+## NON-NEGOTIABLE (from DESIGN.md "NO TUNNELING, EVER"):
 ##   - continuous_cd MUST be true. This is the single most important correctness property in the
 ##     project. The GUT stress test (tests/test_ball_tunneling.gd) asserts a full-flip-speed ball
 ##     never passes through a wall/flipper. Do not ship this with CCD off.

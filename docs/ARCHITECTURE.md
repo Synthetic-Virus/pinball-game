@@ -1,6 +1,6 @@
 # Architecture: Core 3D table rebuild on Jolt
 
-Owner: gamedev-lead-programmer. This is the engineering contract for the "Core 3D table rebuild on
+Owner: lead-programmer. This is the engineering contract for the "Core 3D table rebuild on
 Jolt" slice (docs/BACKLOG.md). It records the scene structure, world scale, physics layers, input
 map, file ownership, and the signal contracts. The physics-programmer and gameplay-programmer fill
 DIFFERENT files against the stable signatures below, in parallel, without conflict.
@@ -842,7 +842,7 @@ Test-builder + qa-lead:
 
 ## 13. SLICE: Fix the launch (gray-box, physics-based, 2026-06-20)
 
-Owner: gamedev-lead-programmer (this section + the test scaffolds + the file-ownership split).
+Owner: lead-programmer (this section + the test scaffolds + the file-ownership split).
 This slice fixes a CONFIRMED playability bug on main: the ball climbs partway up the launch chute,
 stalls, and rolls back, so play cannot start across the power meter. It is a CORRECTNESS slice:
 launch SPEED tuning + a new behavioral lane-clear TEST (+ a friction/small-widen tweak ONLY IF the

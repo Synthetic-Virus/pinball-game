@@ -60,7 +60,7 @@ active kicks, scoring) and every collider do NOT change.
 - R1 Node-name compatibility: ~15 tests find nodes by exact name; the data build loop MUST name nodes
   deterministically. Add a test asserting the built tree's names match the legacy set.
 - R2 CI must be Git-LFS-aware BEFORE phase 2 merges, or the web build gets pointer files and breaks.
-  Owner: gamedev-devops-engineer (confirm git-lfs in the runner image + LFS pull in CI).
+  Owner: devops-engineer (confirm git-lfs in the runner image + LFS pull in CI).
 - R3 Art-as-collider ban: add a CI test asserting no element uses a concave/trimesh collider.
 - R4 `.glb` footprint must match the tuned collider (esp. the tapered flipper) or feel/look diverge;
   flipper/ball convert last with explicit alignment review.

@@ -1,5 +1,5 @@
 # Infrastructure Runbook
-Owner: gamedev-devops-engineer. How the pinball project builds and deploys. The laptop holds NO
+Owner: devops-engineer. How the pinball project builds and deploys. The laptop holds NO
 Godot and NO build tooling; everything heavy runs on a homelab self-hosted runner, triggered by
 `git push`.
 
@@ -27,7 +27,7 @@ IMPORTANT: confirm GODOT_VERSION in Dockerfile/compose matches the latest stable
 ## 2. Generate export presets (one time)
 The deploy/release workflows need presets named exactly "Web", "Windows Desktop", and "Linux/X11".
 Easiest: open the project once in the Godot editor (on any machine with Godot) and define them, OR
-have gamedev-devops-engineer generate export_presets.cfg and verify it on the runner. Commit
+have devops-engineer generate export_presets.cfg and verify it on the runner. Commit
 export_presets.cfg. Install the matching export templates in the runner image (already handled by
 the Dockerfile).
 

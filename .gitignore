@@ -13,9 +13,9 @@
 addons/**/*.import
 addons/**/*.uid
 
-# Local agent tooling state (machine-specific, not project source).
-.claude/settings.json
-.claude/worktrees/
+# Local dev tooling - not part of the public game source.
+.claude/
+docs/TEAM.md
 
 # Build outputs
 *.exe

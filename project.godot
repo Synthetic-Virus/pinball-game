@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Pinball (working title)"
-config/description="A pinball game targeting a commercial Steam release. Built by a team of specialized agents (docs/TEAM.md). Built on the homelab, deployed by git push (docs/INFRA.md)."
+config/description="A physics-first 3D pinball game built in Godot 4, with an in-browser table editor."
 run/main_scene="res://scenes/Table.tscn"
 config/features=PackedStringArray("4.7")
 

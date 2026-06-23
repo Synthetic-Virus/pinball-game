@@ -1,5 +1,5 @@
 # Pinball - Design Document
-Owner: gamedev-game-designer. Status: SEEDED from Andrew's inspiration set (docs/REFERENCES.md);
+Owner: game-designer. Status: SEEDED from Andrew's inspiration set (docs/REFERENCES.md);
 the designer sharpens and fills the rest.
 
 ## North star
@@ -89,7 +89,7 @@ These are FEEL targets, achievable with zero art/audio - hit them with geometry,
 ## Intellectual property (COMMERCIAL release - boundary)
 Recreate the EXPERIENCE and MECHANICS, NOT the copyrighted names, themes, characters, art, or audio
 of 3-D Ultra Pinball / Hyper 3-D Pinball / Pinball 2000. Original world, original IP.
-gamedev-product-strategist + gamedev-producer own this.
+product-strategist + producer own this.
 
 ## Slice design intent: "make the core interactions physics-based" (gray-box, 2026-06-19)
 This slice converts three EXISTING fake/trigger interactions into REAL physics. It adds NO features.

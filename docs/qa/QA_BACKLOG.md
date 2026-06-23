@@ -1,5 +1,5 @@
 # QA Backlog (independent)
-Owner: gamedev-qa-lead. QA is an INDEPENDENT team. It is never blocked waiting for a coding handoff.
+Owner: qa-lead. QA is an INDEPENDENT team. It is never blocked waiting for a coding handoff.
 It pulls work from this backlog and runs in parallel with development. Tests EXECUTE headless on the
 homelab runner via CI (the laptop has no Godot); CI results are the source of truth. Three streams:
 
@@ -68,7 +68,7 @@ homelab runner via CI (the laptop has no Godot); CI results are the source of tr
       cradled on a REAL flipper (left, then right) held energized, watches Drain.ball_drained for
       the full settle, asserts ZERO emissions (independent oracle). Goes in test_world_scale.gd +
       test_table_integration.gd. Write it RED now (the current geometry overlaps), green after fix.
-      Owner: gamedev-test-builder + gamedev-qa-lead.
+      Owner: test-builder + qa-lead.
       WRITTEN: test_world_scale.gd::test_drain_up_table_edge_clears_the_flipper_bat_catch_zone
       (config assert), test_table_integration.gd::test_ball_in_flipper_catch_zone_does_not_drain
       (behavioral integration). Both exist on main / slice/fix-the-launch HEAD. The behavioral

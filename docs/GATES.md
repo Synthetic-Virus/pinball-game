@@ -1,5 +1,5 @@
 # Kill / Keep Gates
-Owner: gamedev-producer. Pre-committed checkpoints that decide whether the project continues.
+Owner: producer. Pre-committed checkpoints that decide whether the project continues.
 Scrapping at an early gate is a WIN (a cheap lesson), not a failure. Record each gate, dated, here.
 
 ## Gate 0 - Fun Gate (after the gray-box prototype)
@@ -99,7 +99,7 @@ Status: NOT REACHED.
        tests RED. A PASS requires ci_conclusion == success; this is a hard fail.
     2. NOT PUSHED, NO PR. Branch slice/playtest-fixes-2 does not exist on origin; pr_url is empty.
        "Green on the runner (the artifact, not a doc claim)" is unprovable - there is no run.
-    3. TREE NOT CLEAN. .claude/settings.json untracked plus ~150 engine .uid/.import artifacts dirty.
+    3. TREE NOT CLEAN.  ~150 ~150 engine .uid/.import artifacts dirty.
   The six reds are not cosmetic; three are the slice's own headline fixes:
     a. test_flipper_rubber_top (2 reds) - BOTH bats' rubber-top caps face -Y (avg_ny = -1.0), not +Y.
        The winding correction in flipper.gd _build_bat_mesh is wrong on the left bat too, so fix #2 is
@@ -126,7 +126,7 @@ Status: NOT REACHED.
   Required to clear (re-derive GREEN from a FRESH runner run on the pushed sha, never from BACKLOG notes):
   fix (a) in production code; fix (b)(c) test miscounts; add the (d) stress assertions against the real
   triangular sling face and the real resized plunger face; commit the whole slice (gitignore the engine
-  .uid/.import + .claude/settings.json or commit them - the tree must be clean); push ONE PR; produce the
+  .uid/.import or commit them - the tree must be clean); push ONE PR; produce the
   runner log showing the FULL GUT suite executed (not pending/skipped) and GREEN. DEFER (do NOT block):
   stale comments in active_kicker.gd / slingshot.gd BUG-032 / test_plunger.gd 120Hz, the missing-named
   test_flipper_no_overlap rename, hud.gd hardcoded-offset layout, the slingshot detector Minkowski-offset

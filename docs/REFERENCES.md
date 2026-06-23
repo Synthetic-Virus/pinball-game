@@ -1,5 +1,5 @@
 # Design References - the games we are recreating
-Owner: gamedev-game-designer (seeded 2026-06-17 from Andrew's inspiration set). These are the
+Owner: game-designer (seeded 2026-06-17 from Andrew's inspiration set). These are the
 childhood favorites this project reimagines: modern UI/UX, modern features, and SMOOTH HIGH FPS.
 The originals ran poorly, and that frame-rate pain is the single experience flaw we most want to fix.
 
@@ -35,7 +35,7 @@ The defining inspiration. What made them special and worth recreating:
 
 ## What to MODERNIZE (the reason for the remake)
 1. SMOOTH HIGH FRAME RATE - the headline fix. The originals ran badly. This ties directly to the
-   project's physics-first mandate (120hz+ tick, continuous_cd, zero tunneling). See .claude/CLAUDE.md.
+   project's physics-first mandate (120hz+ tick, continuous_cd, zero tunneling).
 2. Modern UI/UX: clean readable HUD, clear objective tracking, fluid menus, widescreen, scaling.
 3. Modern features to weigh: Steam achievements + leaderboards, controller support, accessibility
    (remappable input, colorblind-safe, readable text), daily/online challenges, a progression layer.
@@ -44,7 +44,7 @@ The defining inspiration. What made them special and worth recreating:
 ## Intellectual property (this is a COMMERCIAL Steam release - read carefully)
 Recreate the EXPERIENCE and MECHANICS (multi-board, themed, mission pinball), NOT the copyrighted
 names, themes, characters, art, or audio of these games. Original world, original IP throughout.
-gamedev-product-strategist + gamedev-producer own this boundary.
+product-strategist + producer own this boundary.
 
 ## Prior-art consulted for the "real pinball furniture" slice (2026-06-19)
 Consulted by the design + physics agents BEFORE building, so we adopt patterns rather than reinvent.
@@ -72,7 +72,7 @@ described. DESIGN DECISION for our slice (see DESIGN.md): use an ACTIVE kick (a 
 on contact) so even a slow ball is fired away with authority, layered on top of CCD-safe solid
 geometry. This is a deliberate divergence from the prior art toward the developer's stated feel.
 
-## Open questions for gamedev-game-designer
+## Open questions for game-designer
 - An original theme/world that evokes the same wonder (IP-safe), not a clone of any title above.
 - v1 scope: ONE multi-board table done excellently (producer's cut-scope gate) before any others.
 - How "multi-board" is realized in Godot: separate scenes/cameras, seamless ball hand-off, framing.

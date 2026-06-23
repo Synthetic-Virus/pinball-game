@@ -2,7 +2,7 @@
 # Runs on a homelab Docker host so ALL build tooling stays off the laptop.
 # Layers Godot headless + export templates + steamcmd + gdtoolkit on a maintained runner base.
 #
-# PROVISION-TIME TODO (gamedev-devops-engineer): confirm GODOT_VERSION matches the latest stable
+# PROVISION-TIME TODO (devops-engineer): confirm GODOT_VERSION matches the latest stable
 # 4.x AND the project's config/features in project.godot. Export templates MUST match exactly.
 ARG RUNNER_BASE=myoung34/github-runner:latest
 FROM ${RUNNER_BASE}

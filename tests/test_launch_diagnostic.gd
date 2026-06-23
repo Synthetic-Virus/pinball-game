@@ -1,6 +1,6 @@
 extends GutTest
 ## Test matrix entry: LAUNCH DIAGNOSTIC (measure-first, do NOT guess).
-## Owner: gamedev-physics-programmer (fills the measurement + the assert) + gamedev-test-builder.
+## Owner: physics-programmer (fills the measurement + the assert) + test-builder.
 ## Slice: "Fix the launch" (DESIGN.md / BACKLOG.md / ARCHITECTURE.md section 13).
 ##
 ## WHY THIS EXISTS: the deployed launch climbs the chute, stalls, and rolls back across the lower

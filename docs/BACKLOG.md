@@ -4,22 +4,22 @@ pull from here. Keep items small and finishable. Each task names an owner agent 
 
 ## Now (milestone: gray-box prototype -> Gate 0)
 - [ ] DEVOPS: provision the self-hosted Godot runner on a homelab Docker host; generate Godot export
-      presets (Web, Windows); install the GUT test addon (addons/gut). Owner: gamedev-devops-engineer.
+      presets (Web, Windows); install the GUT test addon (addons/gut). Owner: devops-engineer.
       Acceptance: a push to main runs the pipeline green and publishes the web demo URL.
-- [ ] DESIGN: fill DESIGN.md one-sentence pitch + core loop. Owner: gamedev-game-designer.
-- [ ] PHYSICS: gray-box table - ball + two flippers + outer walls. Owner: gamedev-physics-programmer.
+- [ ] DESIGN: fill DESIGN.md one-sentence pitch + core loop. Owner: game-designer.
+- [ ] PHYSICS: gray-box table - ball + two flippers + outer walls. Owner: physics-programmer.
       Acceptance: full-power flip into a wall repeated 100x with ZERO tunneling; continuous_cd on;
       physics tick >= 120 (verified by a GUT test that runs on the runner).
 - [ ] GAMEPLAY: launch the ball, detect drain, track ball count, show a basic score.
-      Owner: gamedev-gameplay-programmer. Acceptance: 3 balls, score increments on target hit,
+      Owner: gameplay-programmer. Acceptance: 3 balls, score increments on target hit,
       game ends at zero balls.
-- [ ] UX: minimal HUD (score + balls remaining) and a launch control. Owner: gamedev-ux-designer.
-- [ ] PRODUCER: schedule the Gate 0 fun check once the above land. Owner: gamedev-producer.
+- [ ] UX: minimal HUD (score + balls remaining) and a launch control. Owner: ux-designer.
+- [ ] PRODUCER: schedule the Gate 0 fun check once the above land. Owner: producer.
 
 ## Next (filled in only after Gate 0 passes)
 -
 
-## SLICE: Make the core interactions PHYSICS-BASED (gray-box) - run through the gamedev-* team
+## SLICE: Make the core interactions PHYSICS-BASED (gray-box) - run through the * team
 Convert three EXISTING fake/trigger interactions into REAL physics. NO new features. Design intent
 confirmed in DESIGN.md ("Slice design intent: make the core interactions physics-based"). Flow:
 game-designer (DONE - intent below) -> lead-programmer (shared-physics impact: layers/masks/materials)
@@ -35,7 +35,7 @@ Tasks (pull from here):
 - [x] LEAD: audit shared physics (collision layers/masks, physics materials) for the lane pocket,
       physical plunger face, and physical targets so they interoperate with ball/flippers/walls.
       Acceptance: documented in ARCHITECTURE.md; flipper tests stay green after the changes.
-      Owner: gamedev-lead-programmer.
+      Owner: lead-programmer.
       DONE 2026-06-19 (architecture + scaffolds): ARCHITECTURE.md section 9 records the shared-physics
       audit + the per-conversion design. KEY RESULTS: (1) NO new physics layer and NO mask change -
       every new body reuses existing PhysicsLayers (lane pocket + target deflector = STATIC_OBSTACLES,
@@ -57,8 +57,8 @@ Tasks (pull from here):
       ARCHITECTURE: adopt _build_lane_pocket + the LANE_POCKET_* constants from the prototype branch
       (ARCHITECTURE.md 9.3). Acceptance: GUT test (tests/test_lane_pocket_drain.gd) - ball placed at
       BALL_START comes to rest in the lane (does not exit the bottom); a ball at center-X still reaches
-      the drain (the pocket did not close the center). Owner: gamedev-physics-programmer +
-      gamedev-gameplay-programmer (the center-still-drains half) + gamedev-test-builder.
+      the drain (the pocket did not close the center). Owner: physics-programmer +
+      gameplay-programmer (the center-still-drains half) + test-builder.
       DONE 2026-06-19 (lead polish pass, QA BUG-012): the _build_lane_pocket builder was DROPPED during
       the original slice integration (build() called surface/walls/divider/arch only). Restored from
       prototype/physical-plunger and wired into TableGeometry.build() so the ball actually rests in the
@@ -67,8 +67,8 @@ Tasks (pull from here):
 - [ ] PHYSICS+GAMEPLAY: physical plunger - a collision body (AnimatableBody3D on KINEMATIC_OBSTACLES,
       like flippers) that STRIKES the resting ball; the existing meter (power 0..1) maps to strike
       strength so the launched ball ends in LAUNCH_SPEED_MIN..MAX. PRESERVE the contract
-      (power_changed/ball_launched; arm/disarm/set_ball/is_armed) exactly. Owner: gamedev-physics-
-      programmer (internal strike) + gamedev-gameplay-programmer (contract re-verify).
+      (power_changed/ball_launched; arm/disarm/set_ball/is_armed) exactly. Owner: physics-
+      programmer (internal strike) + gameplay-programmer (contract re-verify).
       ARCHITECTURE: ADOPT the prototype/physical-plunger version of scripts/plunger.gd +
       scripts/table_geometry.gd._build_lane_pocket + the TableConfig pocket/stroke constants onto the
       slice branch (sound, well-commented, not gate-passed - see ARCHITECTURE.md 9.3). The one
@@ -102,8 +102,8 @@ Tasks (pull from here):
       Acceptance: GUT tests (tests/test_target_physical.gd structural+behavioral;
       tests/test_target_no_tunneling.gd stress) - ball physically bounces off (measured direction
       change AND momentum kept, not killed), scores once per contact, cooldown blocks per-frame
-      farming, no pass-through, no tunneling at >= ~2x LAUNCH_SPEED_MAX. Owner: gamedev-gameplay-
-      programmer + gamedev-physics-programmer.
+      farming, no pass-through, no tunneling at >= ~2x LAUNCH_SPEED_MAX. Owner: gameplay-
+      programmer + physics-programmer.
       GAMEPLAY HALF DONE 2026-06-19 (slice/physical-interactions): scripts/target.gd - manual
       velocity kick DELETED; Area3D is now the detector shell (collision_layer=0,
       collision_mask=BALLS); detector CylinderShape3D radius = POST_RADIUS + BALL_RADIUS (wider
@@ -115,25 +115,25 @@ Tasks (pull from here):
       body + PhysicsMaterial; test_target_physical.gd behavioral tests; test_target_no_tunneling.gd.
 - [x] TEST/QA (QA BUG-014): integration test that instances the REAL Table.tscn and asserts table.gd's
       wiring - the two slice blockers (missing lane pocket, double-offset plunger) slipped through CI
-      because every other slice test bypasses table.gd. Owner: gamedev-lead-programmer (folded into the
-      polish pass) + gamedev-test-builder. DONE 2026-06-19: tests/test_table_integration.gd instances
+      because every other slice test bypasses table.gd. Owner: lead-programmer (folded into the
+      polish pass) + test-builder. DONE 2026-06-19: tests/test_table_integration.gd instances
       res://scenes/Table.tscn and asserts (a) a LanePocket StaticBody3D on STATIC_OBSTACLES exists,
       (b) the PlungerFace, mapped from world space back into playfield-local, sits inside the lane in X
       and at PLUNGER_REST_POS.z (catches the double-offset), and (c) the real ball settles and stays in
       the lane. Written to FAIL pre-fix and PASS post-fix (locks both blockers closed).
 - [ ] PHYSICS: VERIFY flippers still impart real momentum (no redesign). Acceptance: existing
-      test_flipper_momentum.gd stays green after the shared-physics changes. Owner: gamedev-physics-programmer.
+      test_flipper_momentum.gd stays green after the shared-physics changes. Owner: physics-programmer.
 - [ ] PHYSICS/QA: extend GUT stress tests so the fast ball (>= ~2x LAUNCH_SPEED_MAX) does NOT tunnel
       through the plunger face, lane pocket, targets, walls, arch, or flippers, asserted against REAL
       instanced bodies measuring real position/velocity (independent-oracle, never a counter).
       FILES: tests/test_target_no_tunneling.gd (target post, scaffolded - fill the loop);
       tests/test_plunger_launch.gd (face + pocket, adopt from prototype); test_ball_tunneling.gd stays
       green (the flat-wall headline gate, unchanged). Acceptance: stress suite GREEN on the homelab
-      godot runner (the artifact, not a doc claim). Owner: gamedev-physics-programmer + gamedev-qa-lead.
+      godot runner (the artifact, not a doc claim). Owner: physics-programmer + qa-lead.
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (no new features) and both physics-first claims
-      are GREEN on the runner before any merge to main. Owner: gamedev-producer.
+      are GREEN on the runner before any merge to main. Owner: producer.
 
-## SLICE: Real pinball furniture (rubber flippers + active pop bumpers + slingshots) - gamedev-* team
+## SLICE: Real pinball furniture (rubber flippers + active pop bumpers + slingshots) - * team
 Add the first REAL pinball furniture on the physics foundation: rubber-wrapped flippers, active pop
 bumpers, slingshots, one standup target bank, and minimal inlane/outlane guides, in a representative
 (NOT commercial) layout. Every interaction physics-based. Design intent confirmed in DESIGN.md
@@ -153,7 +153,7 @@ Tasks (pull from here - keep them small and finishable):
       geometry, KICK_IMPULSE (with a CCD-safe cap and a minimum outgoing speed), and the per-element
       RETRIGGER cooldown seconds. Audit shared physics layers so every new body interoperates with
       ball/flippers/walls (reuse existing PhysicsLayers; document any addition in ARCHITECTURE.md).
-      Owner: gamedev-lead-programmer. Acceptance: constants documented with the WHY; flipper tests
+      Owner: lead-programmer. Acceptance: constants documented with the WHY; flipper tests
       stay green after the layer audit; numbers honor the world-scale contract.
       DONE 2026-06-19 (architecture + scaffolds): ARCHITECTURE.md section 10 records the slice
       contract. KEY RESULTS: (1) NO new physics layer and NO mask change - every new body reuses the
@@ -175,8 +175,8 @@ Tasks (pull from here - keep them small and finishable):
 - [x] LEAD/QA: EXTEND tools/table_viz.py for CAD-style shot validation: plot the flipper-tip sweep arc
       and assert it reaches the standup bank / feeds the bumper cluster; plot each pop-bumper and
       slingshot kick-direction vector and assert it points into play (up-table/toward center), NOT
-      into the drain or a wall; plot the inlane/outlane feed paths. Owner: gamedev-lead-programmer +
-      gamedev-qa-lead. Acceptance: a deterministic check (a small Python assert or a GUT geometry
+      into the drain or a wall; plot the inlane/outlane feed paths. Owner: lead-programmer +
+      qa-lead. Acceptance: a deterministic check (a small Python assert or a GUT geometry
       test) FAILS if a bumper/sling kick aims at the drain or a target sits outside flipper reach.
       DONE 2026-06-19: table_viz.py now draws the pop-bumper radial-kick fans, the slingshot kick
       vectors, the standup bank, the lane-guide dividers, and the flipper-tip sweep arc on the
@@ -188,14 +188,14 @@ Tasks (pull from here - keep them small and finishable):
       moved out of the makeable window.
 - [ ] PHYSICS: RUBBER-WRAP the flippers - add a rubber bounce surface to the existing flipper collider
       via PhysicsMaterial / a rubber edge. Do NOT touch the force/hinge/return-spring drive.
-      Owner: gamedev-physics-programmer. Acceptance: a GUT behavioral test shows a ball rebounds off
+      Owner: physics-programmer. Acceptance: a GUT behavioral test shows a ball rebounds off
       the flipper face PRESERVING momentum (fast stays fast); test_flipper_momentum.gd, the snap
       timing test, and test_flipper_no_overlap stay GREEN unchanged.
 - [~] PHYSICS+GAMEPLAY: ACTIVE POP BUMPERS - 2-3 round bumper bodies in the upper-middle that, on
       ball contact, apply an outward IMPULSE (away from center along the contact normal), capped
       CCD-safe with a minimum outgoing speed, and score once per contact with a re-trigger cooldown.
       Physics owns the body/shape/impulse/cap/no-tunnel; gameplay owns the detector/score/cooldown.
-      Owner: gamedev-physics-programmer + gamedev-gameplay-programmer.
+      Owner: physics-programmer + gameplay-programmer.
       Acceptance: GUT behavioral test - a ball arriving SLOWLY leaves FAST and directed OUTWARD
       (measured velocity, independent oracle); scores once; cooldown blocks per-frame farming; a
       resting ball is pushed off once, not strobed.
@@ -209,7 +209,7 @@ Tasks (pull from here - keep them small and finishable):
 - [~] PHYSICS+GAMEPLAY: SLINGSHOTS - one angled active kicker above each flipper (2 total) that, on
       contact, kicks the ball UP-and-into-play (never toward the drain), capped CCD-safe, scores
       with cooldown. Same active-kick family as the pop bumpers (shares active_kicker.gd base).
-      Owner: gamedev-physics-programmer + gamedev-gameplay-programmer.
+      Owner: physics-programmer + gameplay-programmer.
       Acceptance: GUT behavioral test - a ball dropping down the side contacts the sling and leaves
       with a velocity whose up-table (-Z) and toward-center components are positive (measured); scores
       once; cooldown holds.
@@ -221,7 +221,7 @@ Tasks (pull from here - keep them small and finishable):
       re-home the existing physical target body) on the mid-field at a flipper-makeable position, plus
       minimal physical inlane/outlane guide walls down both sides (outer outlane feeds the drain,
       inner inlane feeds back toward the flipper). NO rollover scoring, lights, or ball-save.
-      Owner: gamedev-gameplay-programmer.
+      Owner: gameplay-programmer.
       Acceptance: GUT test - standup bank scores on contact and is reachable from a flipper sweep
       (per table_viz validation); a ball placed in the outlane reaches the drain and a ball in the
       inlane returns toward the flipper.
@@ -234,13 +234,13 @@ Tasks (pull from here - keep them small and finishable):
 - [ ] PHYSICS/QA: STRESS - extend the GUT no-tunneling suite so the fast ball (>= ~2x
       LAUNCH_SPEED_MAX, including AFTER an active kick) does not tunnel through any new body (pop
       bumpers, slingshots, standup bank, lane guides) or the rubber flipper, asserted against REAL
-      instanced bodies measuring real position/velocity. Owner: gamedev-physics-programmer +
-      gamedev-qa-lead. Acceptance: stress suite GREEN on the homelab godot runner (the artifact).
+      instanced bodies measuring real position/velocity. Owner: physics-programmer +
+      qa-lead. Acceptance: stress suite GREEN on the homelab godot runner (the artifact).
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (representative subset only, no ramps/modes/
       multiball/art/audio/rollover scoring) and that the active-kick + no-tunnel claims are GREEN on
-      the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
+      the runner on the pushed sha before any merge to main. Owner: producer.
 
-## SLICE: Table reshape + playtest fixes (gray-box, physics-based) - gamedev-* team
+## SLICE: Table reshape + playtest fixes (gray-box, physics-based) - * team
 FIRST playtest-driven slice: the developer played the deployed homelab build and reported five
 concrete problems. Fix all five in ONE slice. NO new mechanics or element types - only shape, size,
 spacing, and table width change. Design intent confirmed in DESIGN.md ("Slice design intent: Table
@@ -263,7 +263,7 @@ Tasks (pull from here - keep them small and finishable):
       methods arm/disarm/set_ball/is_armed; power 0..1; oscillating meter; power->launch-speed mapping
       so the ball lands in ~LAUNCH_SPEED_MIN..MAX). Keep the plunger body visible and seated in the
       lane behind the ball. Production launch must come from the contact/impulse, NOT a code velocity
-      set on the ball. Owner: gamedev-physics-programmer (mechanism) + gamedev-gameplay-programmer
+      set on the ball. Owner: physics-programmer (mechanism) + gameplay-programmer
       (contract re-verify). Files: scripts/plunger.gd, scripts/ball.gd, scripts/config/table_config.gd.
       Acceptance: tests/test_plunger_launch.gd - a release imparts REAL measured velocity FROM REST,
       full strike out-throws a weak one (>=1.5x), resulting speed in ~LAUNCH_SPEED_MIN..MAX, no-ball is
@@ -274,7 +274,7 @@ Tasks (pull from here - keep them small and finishable):
       white rubber top surface (2-tone gray-box only; no external art). PRESERVE the force/hinge/
       return-spring drive, configure()/is_energized()/tip_speed()/force_energized(), BAT_MASS 0.40 /
       BAT_BOUNCE 0.70, the ~50 ms snap, the cradle, and _apply_handedness (bat extends toward center
-      both sides). Owner: gamedev-physics-programmer. File: scripts/flipper.gd. Acceptance: a
+      both sides). Owner: physics-programmer. File: scripts/flipper.gd. Acceptance: a
       structural test asserts the collider is a CAPSULE / convex hull (NOT BoxShape3D);
       test_flipper_momentum.gd (full swing out-throws a tap, ~50 ms snap), test_flipper_rubber.gd
       (rebound >= 35%), test_flipper_no_overlap.gd all stay GREEN; no tunneling.
@@ -283,7 +283,7 @@ Tasks (pull from here - keep them small and finishable):
       FLIPPER_PIVOT_SPREAD (keep the inverted V with a ~1-ball-plus drain gap, not crossed),
       DRAIN_WIDTH / DRAIN_CENTER_X, ARCH_RADIUS_X, LANE_GUIDE_DIVIDER_X, SLINGSHOT_LEFT/RIGHT_POS,
       POP_BUMPER_POSITIONS X, STANDUP_BANK_POSITIONS X, plunger/lane-pocket lane math. Nothing inside a
-      wall, off the field, or crossing the centerline. Owner: gamedev-lead-programmer. Files:
+      wall, off the field, or crossing the centerline. Owner: lead-programmer. Files:
       scripts/config/table_config.gd, scripts/table_geometry.gd. Acceptance: test_world_scale.gd +
       test_furniture_layout.gd updated and GREEN for the new width; flipper-overlap and drain-mouth
       asserts pass; table_viz validate_layout passes on the new constants.
@@ -302,7 +302,7 @@ Tasks (pull from here - keep them small and finishable):
       exist in table_geometry._build_lane_guides + test_furniture_layout, so this is likely a STALE
       CACHED BUILD). Confirm LaneGuideLeft AND LaneGuideRight build on STATIC_OBSTACLES at the new
       spacing and read as outlane/inlane gutters via table_viz; only fix the right one if it is
-      genuinely missing/weak. Owner: gamedev-lead-programmer + gamedev-qa-lead. File:
+      genuinely missing/weak. Owner: lead-programmer + qa-lead. File:
       scripts/table_geometry.gd. Acceptance: test_furniture_layout.gd asserts both gutters present on
       the rebuilt scene at the new width; table_viz feed-path plot shows both.
       LEAD VERIFY 2026-06-19: confirmed _build_lane_guides builds BOTH LaneGuideLeft AND
@@ -315,8 +315,8 @@ Tasks (pull from here - keep them small and finishable):
 - [~] GAMEPLAY+PHYSICS: RESIZE + RESPACE TARGETS AND BUMPERS for the wider table ("too small, not
       spaced well"). Bigger standup targets (target size / post radius up) and bigger pop bumpers
       (POP_BUMPER_RADIUS up), with wider sensible spacing (STANDUP_BANK_POSITIONS, POP_BUMPER_POSITIONS)
-      that stays flipper-makeable. Owner: gamedev-gameplay-programmer (sizes/positions) +
-      gamedev-physics-programmer (no-tunnel on the bigger bodies). Files: scripts/config/table_config.gd,
+      that stays flipper-makeable. Owner: gameplay-programmer (sizes/positions) +
+      physics-programmer (no-tunnel on the bigger bodies). Files: scripts/config/table_config.gd,
       scripts/table.gd. Acceptance: tests/test_shot_geometry.gd - standup bank inside the flipper-tip
       sweep window and bumpers clear of walls/arch on the NEW constants; targets/bumpers kick + score on
       contact (behavioral); no tunneling at >= 2x LAUNCH_SPEED_MAX.
@@ -331,7 +331,7 @@ Tasks (pull from here - keep them small and finishable):
 - [x] LEAD/QA: EXTEND tools/table_viz.py to re-validate the NEW layout deterministically (CAD method):
       flipper-tip reach to the resized targets/bumpers, lane feeds, drain mouth, both gutter feed paths.
       Tool EXITS NON-ZERO if a shot is unmakeable or a kick aims at the drain. Owner:
-      gamedev-lead-programmer + gamedev-qa-lead. Acceptance: tool passes on the new constants and fails
+      lead-programmer + qa-lead. Acceptance: tool passes on the new constants and fails
       a deliberately-broken one; tests/test_shot_geometry.gd is the GUT twin (CI source of truth).
       DONE 2026-06-19: table_viz.py already PLOTS + validate_layout()-checks the flipper-tip sweep,
       bumper/sling kick vectors, standup window, and lane-guide feed paths; it now re-validates the new
@@ -345,7 +345,7 @@ Tasks (pull from here - keep them small and finishable):
       correct layers at new spacing; furniture on correct layers at new positions; table width = new
       HALF_WIDTH. BEHAVIORAL: plunger release imparts real measured velocity and launches; rubber
       rebound >= 35%; targets/bumpers kick + score on contact. STRESS: no tunneling at >= ~2x
-      LAUNCH_SPEED_MAX on every interaction. Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance:
+      LAUNCH_SPEED_MAX on every interaction. Owner: test-builder + qa-lead. Acceptance:
       the updated suite runs GREEN on the homelab godot runner (the artifact, not a doc claim).
       LEAD SCAFFOLD 2026-06-19: tests/test_flipper_shape.gd ADDED (gdlint clean) - the STRUCTURAL
       independent-oracle for the capsule swap: asserts the bat collider is a CapsuleShape3D or
@@ -356,9 +356,9 @@ Tasks (pull from here - keep them small and finishable):
       behavioral/stress VERIFY re-runs are the test-builder's per ARCHITECTURE.md 11.7.
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (five fixes only, no new element types/art) and
       that the launch + capsule + width + gutter + resize claims are GREEN on the runner on the pushed
-      sha before any merge to main. Owner: gamedev-producer.
+      sha before any merge to main. Owner: producer.
 
-## SLICE: Playtest fixes 2 (gray-box, physics-based) - gamedev-* team
+## SLICE: Playtest fixes 2 (gray-box, physics-based) - * team
 SECOND playtest-driven slice: the developer played the deployed wider table (main 286356e) and
 reported a fresh batch of problems. Fix them in ONE slice. NO new mechanics or element types - only
 shape, size, material, and state-logic change. Same element counts (3 bumpers, 3 targets, 2
@@ -381,8 +381,8 @@ Tasks (pull from here - keep them small and finishable):
       can ALWAYS be relaunched: if, a short settle time after launch, the ball is still in the launch
       lane / below the arch, treat the launch as FAILED and RE-ARM the plunger for the SAME ball
       (re-seat the ball at the cradle if needed). Do NOT spend a ball for a failed launch; do NOT
-      change drain behavior for a ball that genuinely reached play. Owner: gamedev-physics-programmer
-      (detect "did not reach play", positional, independent oracle) + gamedev-gameplay-programmer
+      change drain behavior for a ball that genuinely reached play. Owner: physics-programmer
+      (detect "did not reach play", positional, independent oracle) + gameplay-programmer
       (state recovery + re-arm). Files: scripts/game_flow.gd, scripts/plunger.gd, scripts/ball.gd,
       scripts/config/table_config.gd (the settle-time / arch-line threshold constant with a WHY).
       Acceptance: a NEW behavioral test drives a too-weak launch and asserts the ball is recoverable
@@ -394,7 +394,7 @@ Tasks (pull from here - keep them small and finishable):
       _rebuild_bat_geometry) likely inverts the triangle winding so the white TOP cap (surface 1) faces
       down / is culled on the right bat. FIX so BOTH flippers show the same black body + white rubber
       top: the mirror must not drop or wrong-face the rubber-top material / the mesh normals/UVs on the
-      right side. Owner: gamedev-physics-programmer. File: scripts/flipper.gd. Acceptance: a STRUCTURAL
+      right side. Owner: physics-programmer. File: scripts/flipper.gd. Acceptance: a STRUCTURAL
       test asserts BOTH bats carry the white-rubber-top material/mesh surface (surface count + the
       RUBBER_TOP_COLOR material present, top cap faces +Y) on the right flipper as on the left;
       test_flipper_momentum / test_flipper_rubber / test_flipper_no_overlap / test_flipper_shape stay
@@ -407,7 +407,7 @@ Tasks (pull from here - keep them small and finishable):
       shape (a convex hull / triangular prism) AND the visible mesh to the triangular form; keep the
       existing active-kick behavior, kick DIRECTION (SLINGSHOT_LEFT/RIGHT_KICK_DIR), score, and
       cooldown UNCHANGED. Keep the BUG-018 corner-contact detector guarantee. Owner:
-      gamedev-physics-programmer (triangular body + mesh + no-tunnel) + gamedev-gameplay-programmer
+      physics-programmer (triangular body + mesh + no-tunnel) + gameplay-programmer
       (re-verify score/cooldown contract unchanged). Files: scripts/slingshot.gd (and
       scripts/active_kicker.gd if the shape/mesh is built there), scripts/config/table_config.gd.
       Acceptance: STRUCTURAL test asserts the slingshot solid body + mesh are triangular (a convex
@@ -418,8 +418,8 @@ Tasks (pull from here - keep them small and finishable):
       diameter ~1.2, radius 0.6). Narrow the plunger face and the launch lane so they line up with the
       ball being launched (currently too wide/bulky). Keep the plunger functional (it must still strike
       + launch the ball reliably on the FIRST stroke) and the stable contract. Owner:
-      gamedev-lead-programmer (TableConfig lane/plunger geometry + re-derive dependents with WHY) +
-      gamedev-physics-programmer (the resized face still strikes head-on, seats in contact, no gap to
+      lead-programmer (TableConfig lane/plunger geometry + re-derive dependents with WHY) +
+      physics-programmer (the resized face still strikes head-on, seats in contact, no gap to
       tunnel). Files: scripts/config/table_config.gd (LANE_WIDTH / LANE_INNER_X / PLUNGER_FACE_WIDTH /
       lane-pocket + lane geometry), scripts/plunger.gd, scripts/table_geometry.gd. Acceptance:
       tools/table_viz.py confirms the resized lane lines up with the ball (deterministic, not
@@ -432,7 +432,7 @@ Tasks (pull from here - keep them small and finishable):
       and 3, not only ball 1). (6) Name the actual restart key in the game-over screen (it is SPACE /
       the launch action). (7) Colorblind-safe power meter: the bar WIDTH is the primary cue; do not
       rely on the green->red color alone. (8) Raise the HUD font size for readability. Owner:
-      gamedev-gameplay-programmer (+ ux-designer input). Files: scripts/hud.gd, scripts/plunger.gd,
+      gameplay-programmer (+ ux-designer input). Files: scripts/hud.gd, scripts/plunger.gd,
       scripts/game_flow.gd. Acceptance: a behavioral test asserts the launch prompt message is emitted
       on every ball arm (not just the first); the game-over text names the restart key; (the meter and
       font items are visual - confirm via the HUD setters and a viz/screenshot check, no CI gate).
@@ -443,7 +443,7 @@ Tasks (pull from here - keep them small and finishable):
       still works; slingshot kicks into play + scores; launch prompt on every ball arm. STRESS: no
       tunneling at >= ~2x LAUNCH_SPEED_MAX through the resized plunger face and the triangular
       slingshot. Real instanced bodies, measured position/velocity, never a self-reported counter.
-      Owner: gamedev-test-builder + gamedev-qa-lead. Acceptance: the FULL updated suite runs GREEN on
+      Owner: test-builder + qa-lead. Acceptance: the FULL updated suite runs GREEN on
       the homelab godot runner (the artifact, not a doc claim).
       LEAD POLISH 2026-06-20 (QA findings B2 + BUG-029..032): folded in the hardening this slice owns.
       (B2) tests/test_soft_lock_integration.gd ADDED - instances the REAL Table.tscn, fires a too-weak
@@ -462,9 +462,9 @@ Tasks (pull from here - keep them small and finishable):
       cap winding via signed-area anyway. All changed files gdlint-clean, no emoji/em-dash, lines <=100.
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (eight fixes only, no new element types/art/
       rescale) and that the soft-lock + flipper-material + triangular-sling + lane-resize + UX claims
-      are GREEN on the runner on the pushed sha before any merge to main. Owner: gamedev-producer.
+      are GREEN on the runner on the pushed sha before any merge to main. Owner: producer.
 
-## SLICE: Fix the launch (gray-box, physics-based) - gamedev-* team
+## SLICE: Fix the launch (gray-box, physics-based) - * team
 CONFIRMED playability bug on the deployed build (main): the developer plunges and the ball climbs
 partway up the launch chute, stalls, and rolls back, so play cannot start reliably across the power
 meter. This is a CORRECTNESS slice: NO new mechanics or element types, same element counts, every
@@ -496,7 +496,7 @@ Tasks (pull from here - keep them small and finishable):
       test skeletons scaffolded (gdlint clean, lines <= 100, stable typed signatures + helpers so the
       coders fill bodies without conflict): tests/test_launch_diagnostic.gd (the MIN/MID/MAX measurement
       rig, physics fills the asserts) and tests/test_launch_clears_lane.gd (the behavioral lane-clear
-      oracle, test-builder fills the asserts). Owner: gamedev-lead-programmer.
+      oracle, test-builder fills the asserts). Owner: lead-programmer.
       DONE 2026-06-20.
 - [ ] PHYSICS: DIAGNOSE BY MEASUREMENT. Headless, on the REAL tilted Playfield + REAL TableGeometry
       (build exactly like tests/test_plunger_launch.gd: rotated TILT_DEG about X, TableGeometry.build,
@@ -505,7 +505,7 @@ Tasks (pull from here - keep them small and finishable):
       (most up-table) the ball reaches before rolling back. Determine which is true: (a) floor too low
       (the ~45 u/s climb requirement vs LAUNCH_SPEED_MIN 30), (b) the impulse under-delivers (full
       power < LAUNCH_SPEED_MAX at the ball), (c) the snug 2.0-unit lane bleeds energy to rattle +
-      BALL_FRICTION 0.4. Owner: gamedev-physics-programmer. Files: tests/test_launch_diagnostic.gd
+      BALL_FRICTION 0.4. Owner: physics-programmer. Files: tests/test_launch_diagnostic.gd
       (SCAFFOLDED by lead - fill the two measurement asserts; stable helpers _measure_delivered_speed /
       _measure_apex already built). Acceptance: the measured speeds and apexes at MIN/MID/MAX are
       REPORTED in the deliverable, and the cause(s) named from the numbers.
@@ -518,7 +518,7 @@ Tasks (pull from here - keep them small and finishable):
       bulky box; keep the developer's snug ball-width look). Keep the plunger face striking square with
       no gap. If the impulse under-delivers, fix the impulse sizing so the delivered ball speed lands in
       LAUNCH_SPEED_MIN..MAX. WHY-comment every changed number with the measured value behind it.
-      Owner: gamedev-physics-programmer (impulse/friction) + gamedev-lead-programmer (TableConfig
+      Owner: physics-programmer (impulse/friction) + lead-programmer (TableConfig
       constants + re-derive dependents). Files: scripts/config/table_config.gd, scripts/plunger.gd,
       scripts/ball.gd, scripts/table_geometry.gd (only the lane-friction/widen IF measured). Acceptance:
       the new behavioral lane-clear test (below) passes at MIN/low/mid; test_plunger_launch.gd and
@@ -527,7 +527,7 @@ Tasks (pull from here - keep them small and finishable):
       byte-for-byte after any tuning: signals power_changed(power)/ball_launched; methods
       arm/disarm/set_ball/is_armed; power 0..1; oscillating meter; launch from contact-impulse, never
       a code velocity set (QA BUG-017 stays honored). Confirm test_plunger.gd contract tests stay
-      green. Owner: gamedev-gameplay-programmer. File: scripts/plunger.gd (read-only re-verify).
+      green. Owner: gameplay-programmer. File: scripts/plunger.gd (read-only re-verify).
       DONE 2026-06-20: contract confirmed intact - no code edit was required. All signals, methods,
       and the impulse-on-contact mechanism are byte-for-byte the same as the Playtest fixes 2 slice
       delivered. test_plunger.gd asserts the same contract this slice leaves unchanged. No production
@@ -537,7 +537,7 @@ Tasks (pull from here - keep them small and finishable):
       up-table PAST the lane exit / arch into the play area (ball center crosses up-table of
       LAUNCH_REACHED_PLAY_Z / the lane-divider top), then settles in the OPEN playfield, NOT back in
       the lane. Use the ball's MEASURED position as the oracle (position cannot lie). Owner:
-      gamedev-test-builder + gamedev-qa-lead. Files: tests/test_launch_clears_lane.gd (SCAFFOLDED by
+      test-builder + qa-lead. Files: tests/test_launch_clears_lane.gd (SCAFFOLDED by
       lead - stable rig + helper _launch_and_track + three pending() asserts spelled out; fill the
       asserts). Acceptance: the lane-clear test FAILS against the current too-low floor and PASSES
       after the fix (intended red-to-green); test_plunger_launch.gd + test_plunger_lane_size.gd stay
@@ -555,20 +555,20 @@ Tasks (pull from here - keep them small and finishable):
 - [ ] PHYSICS/QA: NO-TUNNEL RE-CONFIRM AT THE NEW MAX. If LAUNCH_SPEED_MAX is raised, update every
       no-tunnel stress test to fire at >= 2x the NEW max and confirm zero tunneling through the plunger
       face, lane pocket, walls, arch, targets, pop bumpers, slingshots, lane guides, and flippers,
-      against REAL instanced bodies measuring real position/velocity. Owner: gamedev-physics-programmer
-      + gamedev-qa-lead. Files: tests/test_plunger_launch.gd, tests/test_ball_tunneling.gd,
+      against REAL instanced bodies measuring real position/velocity. Owner: physics-programmer
+      + qa-lead. Files: tests/test_plunger_launch.gd, tests/test_ball_tunneling.gd,
       tests/test_target_no_tunneling.gd, tests/test_active_kicker_no_tunneling.gd. Acceptance: the full
       stress suite GREEN on the homelab godot runner at >= 2x the new max (the artifact, not a doc claim).
 - [ ] PRODUCER: scope/finish gate. Confirm scope held (launch tuning + lane-clear test only, no new
       element types/art/rescale) and that the lane-clear + no-tunnel claims are GREEN on the runner on
-      the pushed sha before any merge to main. Owner: gamedev-producer.
+      the pushed sha before any merge to main. Owner: producer.
 
 ## Icebox (deliberately deferred - NOT now)
 - multiball, ramps, bumpers, special modes, meta-progression, multiple tables, art pass, audio pass,
   Steam integration, menus beyond the minimum.
 - INFRA (deferred 2026-06-17): activate the public demo URL via the prepped Cloudflare tunnel (docs/INFRA.md section 6). Needs the connector token from the CF Zero Trust dashboard pasted into the VM .env as CF_TUNNEL_TOKEN, then `docker compose --profile tunnel up -d`. Demo is LAN-only at 10.1.1.214:8080 until then. NOT needed to start dev.
 
-## SLICE: Core 3D table rebuild on Jolt (run through the gamedev-* team)
+## SLICE: Core 3D table rebuild on Jolt (run through the * team)
 Replace the hand-coded kinematic gray-box (scripts/Main.gd) with a properly-architected 3D table on the
 modern Jolt foundation, adopting the patterns in docs/pinhead-tech-notes.md. This slice is meant to go
 through the full process: game-designer (confirm core-table intent) -> lead-programmer (architecture: scene
@@ -605,28 +605,28 @@ scripts/Main.gd + scenes/Main.tscn removed; root scene is now scenes/Table.tscn.
 Tasks (pull from here):
 - [ ] PHYSICS: scripts/ball.gd - RigidBody with continuous_cd, mass/material/shape from TableConfig,
       reset_to_start/reset_to/launch helpers. Acceptance: test_ball_tunneling.gd green (zero tunnel
-      at >= 2x LAUNCH_SPEED_MAX), CCD on. Owner: gamedev-physics-programmer.
+      at >= 2x LAUNCH_SPEED_MAX), CCD on. Owner: physics-programmer.
 - [ ] PHYSICS: scripts/flipper.gd - hinge joint + driven solenoid force + return spring (NOT
       kinematic). configure()/is_energized()/tip_speed(). Acceptance: test_flipper_momentum.gd green
       (full swing out-throws a tap, force-driven, ~50 ms snap), no inverted-V overlap.
-      Owner: gamedev-physics-programmer.
+      Owner: physics-programmer.
 - [x] GAMEPLAY: scripts/plunger.gd - oscillating power meter (~0.5-1.0 s sweep), power->speed launch.
-      Acceptance: test_plunger.gd green. Owner: gamedev-gameplay-programmer.
+      Acceptance: test_plunger.gd green. Owner: gameplay-programmer.
       DONE 2026-06-17: pingpong oscillation at CHARGE_RATE 2.5 (0.8 s sweep), lerpf power->speed,
       arm/disarm/set_ball/is_armed stable. tests/test_plunger.gd filled with 9 concrete assertions.
 - [x] GAMEPLAY: scripts/drain.gd + scripts/target.gd - drain detect + scoring target w/ knock-back.
-      Owner: gamedev-gameplay-programmer.
+      Owner: gameplay-programmer.
       DONE 2026-06-17: drain.gd - Area3D, BoxShape3D from TableConfig, PhysicsLayers.BALLS mask,
       body_entered guard on _ball. target.gd - CylinderShape3D + CylinderMesh, kick_dir on XZ plane,
       MIN_KICK_DIST_SQ guard, scored(points) emitted before kick.
 - [x] GAMEPLAY: scripts/game_flow.gd + scripts/hud.gd - state machine + HUD. Acceptance:
       test_game_flow.gd green; HUD ticks on hit, drain message, game over + restart.
-      Owner: gamedev-gameplay-programmer.
+      Owner: gameplay-programmer.
       DONE 2026-06-17: game_flow.gd - explicit State enum, all guards in place, no phantom scores,
       restart only from GAME_OVER. hud.gd - full Control tree built in code, meter color lerp,
       game-over panel. tests/test_game_flow.gd filled with 15 concrete assertions.
 - [x] LEAD: scripts/table_geometry.gd (surface/walls/arch/lane) + table.gd build+wire bodies; fill the
-      element-instancing TODOs once ball/flipper land. Owner: gamedev-lead-programmer.
+      element-instancing TODOs once ball/flipper land. Owner: lead-programmer.
       DONE 2026-06-18 (polish pass): table_geometry.gd builds the surface (PLAYFIELD layer), full-length
       side walls + top wall (bottom OPEN for the drain), lane divider, and an overlapping-segment arch
       that seals (no gap a fast ball squeezes through). table.gd instances Ball/2x Flipper/Plunger/3x
@@ -639,7 +639,7 @@ Tasks (pull from here):
       momentum + has a re-trigger cooldown (BUG-007); plunger requires release-before-charge after arm
       (BUG-008); tip_speed() projects onto the hinge axis (BUG-010).
 - [~] TEST/QA: fill the tests/*.gd stubs against the stable signatures; confirm CI test job runs GUT.
-      Owner: gamedev-test-builder + gamedev-qa-lead.
+      Owner: test-builder + qa-lead.
       RESUBMISSION SCOPE (the slice signs off only when BOTH run GREEN on the homelab godot runner,
       NOT pending/skipped):
         1. test_ball_tunneling.gd - the 100-iteration stress loop fires an instanced REAL Ball.tscn

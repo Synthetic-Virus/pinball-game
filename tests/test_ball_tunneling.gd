@@ -2,7 +2,7 @@ extends GutTest
 ## Test matrix entry: NO TUNNELING, EVER (the headline correctness gate).
 ## Owner: test-builder + physics-programmer.
 ##
-## This is the single most important test in the project (.claude/CLAUDE.md, DESIGN.md).
+## This is the single most important test in the project (DESIGN.md).
 ## It fires a RigidBody3D ball at a static wall at worst-case full-flip speed, repeatedly,
 ## and asserts the ball NEVER ends up on the far side of the wall plane.
 ##

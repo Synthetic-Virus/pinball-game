@@ -71,7 +71,6 @@ homelab (label `godot`) does every build and test. The laptop never holds Godot 
 - `docs/DESIGN.md` - design doc; `docs/GATES.md` - kill/keep gates; `docs/INFRA.md` - runner +
   pipeline runbook; `docs/BACKLOG.md` and `docs/qa/QA_BACKLOG.md` - dev + QA backlogs.
 - `CREDITS.md` - third-party asset attribution (some 3D parts are CC BY-SA 4.0).
-- `.claude/CLAUDE.md` - project instructions; `docs/TEAM.md` - the agent roster.
 
 ## Credits
 
