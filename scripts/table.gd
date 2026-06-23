@@ -574,10 +574,13 @@ func editor_spawn_rail(kind: String, smooth: bool, points: Array) -> Node3D:
 
 ## Move an existing flipper (the editor repositions the fixed pair rather than recreating them).
 func editor_set_flipper(side: String, pos: Vector3) -> void:
-	if side == "flipper_left" and left_flipper != null:
-		left_flipper.position = pos
-	elif side == "flipper_right" and right_flipper != null:
-		right_flipper.position = pos
+	var flip: Node3D = left_flipper if side == "flipper_left" else right_flipper
+	if flip == null:
+		return
+	if flip.has_method("editor_move"):
+		flip.editor_move(pos)  ## teleports the physics bat too (a plain position set leaves it behind)
+	else:
+		flip.position = pos
 
 
 ## Show / hide every rail's point-handles (handles only show in edit mode so they do not clutter play).

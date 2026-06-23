@@ -19,10 +19,11 @@ extends Node
 ## runs there is no browser, so the editor is completely inert and the built-in layout is used.
 
 const LAYOUT_KEY: String = "pinball_layout"   ## browser localStorage key the layout is saved under
-const SELECT_RADIUS: float = 2.5              ## a click within this many table units grabs an element
+const SELECT_RADIUS: float = 1.6              ## a click within this many table units grabs an element
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
 const SELECT_LIFT: float = 0.6                ## how far the selected element lifts (visual cue only)
 const LONG_PRESS_MS: float = 350.0            ## a play touch held this long also fires launch (spacebar)
+const UNDO_DEPTH: int = 40                    ## how many edit snapshots Undo can step back through
 
 ## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for button text.
 const TITLE_FONT_PATH: String = "res://assets/fonts/title.ttf"
@@ -46,6 +47,8 @@ var _cam_panning: bool = false    ## middle-mouse held: dragging pans the build 
 var _collapsed: bool = false      ## build panel collapsed to just its header bar
 var _panel_body: Control = null   ## the part of the build panel hidden when collapsed
 var _sel_marker: MeshInstance3D = null  ## bright ring under the selected element (clear selection cue)
+var _undo_stack: Array = []             ## snapshots of the layout taken BEFORE each edit (for Undo)
+var _drag_undo_pushed: bool = false     ## one Undo snapshot per drag, taken on its first move
 
 var _hud: CanvasLayer = null
 var _menu: Control = null          ## the main menu (Build / Play), shown at boot
@@ -89,27 +92,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _playing and event is InputEventScreenTouch:
 		_handle_play_touch(event)
 		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_E:
-			# Quick toggle between BUILD and PLAY (skips the menu).
-			if _edit_mode:
-				_enter_play()
-			else:
-				_enter_build()
-			return
-		if _edit_mode and _selected != null and (
-			event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE
-		):
-			_delete_selected()
-			return
-		# Blender-style GRAB: G picks up the selection so it follows the cursor (no button held); a
-		# left-click drops it, Escape (or right-click) cancels back to where it started.
-		if _edit_mode and event.keycode == KEY_G and _selected != null and not _drawing:
-			_toggle_grab()
-			return
-		if _grabbing and event.keycode == KEY_ESCAPE:
-			_cancel_grab()
-			return
+	if event is InputEventKey and event.pressed and not event.echo and _handle_edit_key(event):
+		return
 	if not _edit_mode:
 		return
 	if event is InputEventMouseButton:
@@ -121,7 +105,36 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and (_dragging or _grabbing) and _selected != null:
 		var hit: Variant = _ray_to_field(event.position)
 		if hit != null:
+			if _dragging and not _grabbing and not _drag_undo_pushed:
+				_push_undo()  ## one snapshot per drag, on the first move
+				_drag_undo_pushed = true
 			_apply_move(_selected, hit.x, hit.z)
+
+
+## Handle an edit-mode keyboard shortcut. Returns true if the key was consumed. Pulled out of
+## _unhandled_input to keep that function's branching small.
+func _handle_edit_key(event: InputEventKey) -> bool:
+	if event.keycode == KEY_E:
+		# Quick toggle between BUILD and PLAY (skips the menu).
+		if _edit_mode:
+			_enter_play()
+		else:
+			_enter_build()
+		return true
+	if not _edit_mode:
+		return false
+	# Edit-mode shortcuts. GRAB (G): pick up the selection so it follows the cursor; Escape cancels.
+	if event.keycode == KEY_Z and event.ctrl_pressed:
+		_undo()
+	elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+		_delete_selected()
+	elif event.keycode == KEY_G and _selected != null and not _drawing:
+		_toggle_grab()
+	elif event.keycode == KEY_ESCAPE and _grabbing:
+		_cancel_grab()
+	else:
+		return false
+	return true
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
@@ -138,6 +151,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	if event.button_index == MOUSE_BUTTON_MIDDLE:
 		_cam_panning = event.pressed
 		return
+	# Right-click on empty space (or anywhere) clears the selection.
+	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed and not _drawing:
+		_select(null)
+		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			# While drawing a rail, each click DROPS A POINT instead of selecting/dragging.
@@ -148,16 +165,19 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 				return
 			_select(_pick(event.position))
 			_dragging = _selected != null
+			_drag_undo_pushed = false  ## the drag's Undo snapshot is taken on its first move
 		else:
 			_dragging = false
 	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 		if _selected != null:
+			_push_undo()
 			_selected.rotation.y += deg_to_rad(ROTATE_STEP_DEG)  ## rotate the selection
 			_update_twin(_selected)
 		elif _table != null and _table.has_method("camera_zoom"):
 			_table.camera_zoom(1.1)  ## nothing selected: zoom the camera IN (capped in the table)
 	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 		if _selected != null:
+			_push_undo()
 			_selected.rotation.y -= deg_to_rad(ROTATE_STEP_DEG)
 			_update_twin(_selected)
 		elif _table != null and _table.has_method("camera_zoom"):
@@ -263,9 +283,11 @@ func _apply_move(node: Node3D, x: float, z: float) -> void:
 func _delete_selected() -> void:
 	if _selected == null:
 		return
+	_push_undo()
 	var doomed: Node3D = _selected
 	_selected = null
 	_dragging = false
+	_update_sel_marker()
 	# A mirror pair is removed together.
 	if doomed.has_meta("twin"):
 		var twin: Node = doomed.get_meta("twin")
@@ -284,6 +306,7 @@ func _toggle_grab() -> void:
 	if _grabbing:
 		_grabbing = false
 	else:
+		_push_undo()  ## snapshot before the grab move so Undo reverts it
 		_grab_origin = _selected.position
 		_grabbing = true
 	_refresh_status()
@@ -381,6 +404,7 @@ func _place_from_dropdown() -> void:
 	if idx < 0 or idx >= _placeables.size():
 		return
 	var spec: Dictionary = _placeables[idx]
+	_push_undo()  ## snapshot before placing so Undo removes it
 	var mirror: bool = _mirror_check != null and _mirror_check.button_pressed
 	var x0: float = 2.0 if mirror else 0.0
 	var primary: Node3D = _spawn_placeable(spec, Vector3(x0, 0.0, -3.0))
@@ -503,6 +527,28 @@ func _apply_layout(entries: Array) -> void:
 		else:
 			var pos := Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
 			_table.editor_spawn(etype, pos, deg_to_rad(float(entry.get("rot_deg", 0.0))))
+
+
+# --- Undo ----------------------------------------------------------------------------------------
+
+## Snapshot the whole layout BEFORE a mutating edit, so Undo can step back to it. Call this at the
+## start of each edit (place, delete, the start of a drag/grab, a draw, a rotate).
+func _push_undo() -> void:
+	_undo_stack.append(_serialize())
+	if _undo_stack.size() > UNDO_DEPTH:
+		_undo_stack.pop_front()
+
+
+## Step back one edit: restore the most recent snapshot and rebuild the table from it.
+func _undo() -> void:
+	if _undo_stack.is_empty():
+		_flash("nothing to undo")
+		return
+	var snap: Array = _undo_stack.pop_back()
+	_select(null)
+	_finish_draw()
+	_apply_layout(snap)
+	_flash("undid (%d left)" % _undo_stack.size())
 
 
 # --- HUD -----------------------------------------------------------------------------------------
@@ -636,6 +682,7 @@ func _build_build_panel() -> void:
 	_add_action(body, "Draw WALL", func() -> void: _begin_draw("wall", false))
 	_add_action(body, "DONE drawing", _finish_draw)
 	_add_action(body, "Grab move  G", _toggle_grab)
+	_add_action(body, "Undo  Ctrl Z", _undo)
 	_add_action(body, "Delete selected", _delete_selected)
 	_add_action(body, "SAVE", _save)
 	_add_action(body, "RESET saved", _reset_saved)
@@ -781,6 +828,7 @@ func _begin_draw(kind: String, smooth: bool) -> void:
 		return
 	_finish_draw()
 	_select(null)
+	_push_undo()  ## snapshot before drawing so Undo removes the new rail
 	_draw_rail = _table.editor_spawn_rail(kind, smooth, [])
 	if _table.has_method("editor_set_rail_handles_visible"):
 		_table.editor_set_rail_handles_visible(true)  ## so the points we drop are visible as we draw
