@@ -38,8 +38,13 @@ var _table: Node3D = null
 func before_each() -> void:
 	_table = TableScene.instantiate() as Node3D
 	add_child_autofree(_table)
-	# Let _ready() build the whole tree (geometry, dynamic elements, flow, wiring) and run start_game.
+	# Let _ready() build the whole tree (geometry, dynamic elements, flow, wiring). The table now boots
+	# to a main menu instead of auto-starting, so choosing PLAY is what arms the first ball - call the
+	# same entry point here.
 	await wait_frames(3)
+	if _table.has_method("start_play"):
+		_table.start_play()
+	await wait_frames(2)
 
 
 ## Depth-first search for the first descendant with the given node NAME. Returns null if none.

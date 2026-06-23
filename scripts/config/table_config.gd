@@ -645,6 +645,39 @@ func gravity_vector_world() -> Vector3:
 	return Vector3(0.0, -GRAVITY, 0.0)
 
 
+## World units per real metre, so an imported real-scale model matches the game. A real pinball ball is
+## 1-1/16" = 0.027 m across; the game ball is BALL_RADIUS*2 world units across. So a real 1" wire guide
+## lands ~one ball wide. Parts are LOCKED to this scale in the editor (placeable + rotatable, never
+## resized). 0.027 is the real ball diameter in metres.
+func real_to_world() -> float:
+	return (BALL_RADIUS * 2.0) / 0.027
+
+
+## PLACEABLE PART assets: imported real-scale .glb parts the developer can drop into the layout from
+## the editor palette (id used in the saved layout, label on the button, path to the model). Each is
+## scaled by real_to_world() and given collision generated from its mesh. See [[in-game-layout-editor]].
+func placeable_assets() -> Array:
+	return [
+		{"id": "wire_guide_1_thin", "label": "Wire 1in thin", "path": "res://assets/models/wire_guide_1in_thin.glb"},
+		{"id": "wire_guide_1_thick", "label": "Wire 1in thick", "path": "res://assets/models/wire_guide_1in_thick.glb"},
+		{"id": "wire_guide_2_thin", "label": "Wire 2in thin", "path": "res://assets/models/wire_guide_2in_thin.glb"},
+		{"id": "flat_rail_brackets", "label": "Flat rail", "path": "res://assets/models/flat_rail_brackets.glb"},
+		{"id": "flat_rail_bezier", "label": "Rail curve", "path": "res://assets/models/flat_rail_bezier.glb"},
+		{"id": "lane_guide_left", "label": "Lane guide L", "path": "res://assets/models/bottom_lane_guide_left.glb"},
+		{"id": "lane_guide_right", "label": "Lane guide R", "path": "res://assets/models/bottom_lane_guide_right.glb"},
+		{"id": "drop_target", "label": "Drop target", "path": "res://assets/models/drop_target.glb"},
+		{"id": "react_target", "label": "React target", "path": "res://assets/models/react_target_thin.glb"},
+	]
+
+
+## Look up one placeable-asset spec by id (or an empty Dictionary if unknown).
+func placeable_asset(asset_id: String) -> Dictionary:
+	for spec: Dictionary in placeable_assets():
+		if spec["id"] == asset_id:
+			return spec
+	return {}
+
+
 ## DEFAULT editor RAILS (the guides/walls/chutes the table starts with). Each entry is one EditRail:
 ## kind "guide" draws a SMOOTH curve through its points, "wall" draws STRAIGHT segments. points are
 ## playfield-local (x, z). table.gd seeds these as editable EditRail nodes; the developer can drag,

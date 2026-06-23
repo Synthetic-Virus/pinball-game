@@ -77,6 +77,7 @@ var targets: Array[Area3D] = []
 var pop_bumpers: Array[Area3D] = []
 var slingshots: Array[Area3D] = []
 var rails: Array = []  ## editor-managed EditRail nodes (guides/walls/chutes); see layout_editor.gd
+var assets: Array = []  ## editor-placed imported part .glb nodes (wire guides, rails, targets)
 var _camera: Camera3D
 
 
@@ -88,7 +89,13 @@ func _ready() -> void:
 	_build_flow_and_hud()
 	_wire_signals()
 	_build_layout_editor()
-	# Kick off the first ball through the flow state machine, not directly.
+	# The game no longer auto-starts: the layout editor shows a MAIN MENU first (Build vs Play). Play
+	# calls start_play() to kick off the first ball; Build enters the editor with no ball in motion.
+
+
+## Start (or restart) actual play - kick off the first ball through the flow state machine. Called by
+## the layout editor when the developer chooses PLAY from the main menu.
+func start_play() -> void:
 	if game_flow != null and game_flow.has_method("start_game"):
 		game_flow.start_game()
 
@@ -360,12 +367,70 @@ func editor_editables() -> Array:
 	for rail: Node in rails:
 		if is_instance_valid(rail):
 			arr.append_array(rail.handles())
+	for a: Node in assets:
+		if is_instance_valid(a):
+			arr.append(a)
 	return arr
 
 
 ## The editor-managed rail nodes (for serialising their points).
 func editor_rails() -> Array:
 	return rails
+
+
+## The editor-placed part assets (for serialising id + transform).
+func editor_assets() -> Array:
+	return assets
+
+
+## Spawn an imported PART asset (a wire guide, rail, lane guide, target...) by its registry id. The
+## model is LOCKED to the game scale (TableConfig.real_to_world(), never resized in the editor) and
+## given collision generated from its mesh, on the static-obstacle layer like the walls. Returns the
+## node, or null for an unknown id / failed load.
+func editor_spawn_asset(asset_id: String, pos: Vector3, rot_y: float) -> Node3D:
+	var spec: Dictionary = TableConfig.placeable_asset(asset_id)
+	if spec.is_empty():
+		return null
+	var scene: Resource = load(spec["path"])
+	if not (scene is PackedScene):
+		return null
+	var node: Node3D = scene.instantiate()
+	node.name = "Part_%s" % asset_id
+	var s: float = TableConfig.real_to_world()
+	node.scale = Vector3(s, s, s)
+	node.position = pos
+	node.rotation.y = rot_y
+	node.set_meta("etype", "asset:%s" % asset_id)
+	playfield.add_child(node)
+	_add_part_collision(node)
+	assets.append(node)
+	return node
+
+
+## Generate static collision for an imported part: a trimesh body per visible mesh, on the
+## STATIC_OBSTACLES layer (mask 0) exactly like the border walls, so the ball bounces off the part's
+## real shape. The art mesh itself is never a collider (it stays a plain MeshInstance3D).
+func _add_part_collision(root: Node3D) -> void:
+	for mi: MeshInstance3D in _find_mesh_instances(root):
+		mi.create_trimesh_collision()
+		var body: Node = mi.get_node_or_null(String(mi.name) + "_col")
+		if body == null:
+			for c: Node in mi.get_children():
+				if c is StaticBody3D:
+					body = c
+					break
+		if body is StaticBody3D:
+			body.collision_layer = PhysicsLayers.STATIC_OBSTACLES
+			body.collision_mask = 0
+
+
+func _find_mesh_instances(node: Node) -> Array:
+	var found: Array = []
+	if node is MeshInstance3D:
+		found.append(node)
+	for c: Node in node.get_children():
+		found.append_array(_find_mesh_instances(c))
+	return found
 
 
 ## Spawn one POINT element (bumper/target/sling) at a playfield-local position. Mirrors the built-in
@@ -441,6 +506,10 @@ func editor_clear() -> void:
 		if is_instance_valid(rail):
 			rail.queue_free()
 	rails.clear()
+	for a: Node in assets:
+		if is_instance_valid(a):
+			a.queue_free()
+	assets.clear()
 
 
 ## Remove one editor element. A rail point-handle removes its whole rail; furniture removes itself.
@@ -459,6 +528,7 @@ func editor_remove(node: Node3D) -> void:
 	pop_bumpers.erase(node)
 	targets.erase(node)
 	slingshots.erase(node)
+	assets.erase(node)
 	node.queue_free()
 
 

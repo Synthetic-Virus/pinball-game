@@ -36,11 +36,18 @@ var _drawing: bool = false        ## true while laying down a new rail point-by-
 var _draw_rail: Node3D = null     ## the rail being drawn
 
 var _hud: CanvasLayer = null
-var _panel: PanelContainer = null
+var _menu: Control = null          ## the main menu (Build / Play), shown at boot
+var _play_bar: Control = null      ## the small "Menu" button shown while playing
+var _panel: PanelContainer = null  ## the BUILD-mode editor panel
 var _header: Label = null
 var _hud_dragging: bool = false
 var _status: Label = null
-var _palette: Control = null
+var _object_dropdown: OptionButton = null  ## the placeable-object picker (replaces the button list)
+var _mirror_check: CheckBox = null         ## when ticked, a placed object gets a linked L/R mirror
+
+## Every object the dropdown can place: furniture + the imported parts. kind "furniture" routes to
+## editor_spawn, "asset" routes to editor_spawn_asset. Built in _build_hud from TableConfig.
+var _placeables: Array = []
 
 
 ## Wire the editor to the live table. table.gd calls this once the furniture exists.
@@ -58,7 +65,11 @@ func setup(table: Node, camera: Camera3D, playfield: Node3D) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_E:
-			_set_edit_mode(not _edit_mode)
+			# Quick toggle between BUILD and PLAY (skips the menu).
+			if _edit_mode:
+				_enter_play()
+			else:
+				_enter_build()
 			return
 		if _edit_mode and _selected != null and (
 			event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE
@@ -79,6 +90,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				var rail: Node = _selected.get_meta("rail")
 				if is_instance_valid(rail):
 					rail.rebuild()
+			_update_twin(_selected)
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
@@ -98,8 +110,10 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		# Wheel up / down rotates the selected element about the vertical (table-normal) axis.
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_selected.rotation.y += deg_to_rad(ROTATE_STEP_DEG)
+			_update_twin(_selected)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_selected.rotation.y -= deg_to_rad(ROTATE_STEP_DEG)
+			_update_twin(_selected)
 
 
 # --- Picking / selection -------------------------------------------------------------------------
@@ -154,9 +168,30 @@ func _delete_selected() -> void:
 	var doomed: Node3D = _selected
 	_selected = null
 	_dragging = false
+	# A mirror pair is removed together.
+	if doomed.has_meta("twin"):
+		var twin: Node = doomed.get_meta("twin")
+		if is_instance_valid(twin) and _table.has_method("editor_remove"):
+			_table.editor_remove(twin)
 	if _table.has_method("editor_remove"):
 		_table.editor_remove(doomed)
 	_refresh_status()
+
+
+## Keep a node's mirror twin in sync: mirrored across the table centre (x negated) with the opposite
+## yaw, so dragging/rotating one side builds both sides symmetrically.
+func _update_twin(node: Node3D) -> void:
+	if node == null or not node.has_meta("twin"):
+		return
+	var twin: Node3D = node.get_meta("twin")
+	if not is_instance_valid(twin):
+		return
+	twin.position = Vector3(-node.position.x, node.position.y, node.position.z)
+	twin.rotation.y = -node.rotation.y
+	if twin.has_meta("rail"):
+		var rail: Node = twin.get_meta("rail")
+		if is_instance_valid(rail):
+			rail.rebuild()
 
 
 func _editables() -> Array:
@@ -167,14 +202,40 @@ func _editables() -> Array:
 
 # --- Palette / adding ----------------------------------------------------------------------------
 
-func _add(etype: String) -> void:
-	if _table == null or not _table.has_method("editor_spawn"):
+## Place the object currently chosen in the dropdown, at the centre of the play area, then select it
+## to drag. If the Mirror box is ticked, a linked twin is placed on the other side so dragging one
+## builds both. Drop a touch off-centre (x = 2) so the primary and its mirror do not overlap.
+func _place_from_dropdown() -> void:
+	if _object_dropdown == null or _object_dropdown.selected < 0:
 		return
-	# Drop the new piece in the upper-middle of the play area where it is easy to see, then the
-	# developer drags it into place.
-	var node: Node3D = _table.editor_spawn(etype, Vector3(0.0, 0.0, -3.0), 0.0)
-	if node != null:
-		_select(node)
+	var idx: int = _object_dropdown.get_item_id(_object_dropdown.selected)
+	if idx < 0 or idx >= _placeables.size():
+		return
+	var spec: Dictionary = _placeables[idx]
+	var mirror: bool = _mirror_check != null and _mirror_check.button_pressed
+	var x0: float = 2.0 if mirror else 0.0
+	var primary: Node3D = _spawn_placeable(spec, Vector3(x0, 0.0, -3.0))
+	if primary == null:
+		return
+	if mirror:
+		var twin: Node3D = _spawn_placeable(spec, Vector3(-x0, 0.0, -3.0))
+		if twin != null:
+			primary.set_meta("twin", twin)
+			twin.set_meta("twin", primary)
+	_select(primary)
+
+
+## Spawn one placeable (furniture or imported part) at a playfield-local position. Returns the node.
+func _spawn_placeable(spec: Dictionary, pos: Vector3) -> Node3D:
+	if _table == null:
+		return null
+	if spec.get("kind", "") == "asset":
+		if _table.has_method("editor_spawn_asset"):
+			return _table.editor_spawn_asset(String(spec["id"]), pos, 0.0)
+		return null
+	if _table.has_method("editor_spawn"):
+		return _table.editor_spawn(String(spec["id"]), pos, 0.0)
+	return null
 
 
 # --- Persistence (browser only) ------------------------------------------------------------------
@@ -261,6 +322,11 @@ func _apply_layout(entries: Array) -> void:
 			for p: Variant in entry.get("points", []):
 				pts.append(Vector2(float(p[0]), float(p[1])))
 			_table.editor_spawn_rail(String(entry.get("kind", "guide")), bool(entry.get("smooth", true)), pts)
+		elif etype.begins_with("asset:"):
+			var pos_a := Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
+			_table.editor_spawn_asset(
+				etype.substr(6), pos_a, deg_to_rad(float(entry.get("rot_deg", 0.0)))
+			)
 		elif etype == "flipper_left" or etype == "flipper_right":
 			_table.editor_set_flipper(
 				etype, Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
@@ -278,23 +344,66 @@ func _build_hud() -> void:
 	_hud.layer = 50
 	add_child(_hud)
 
-	# Everything sits in ONE dark panel on the LEFT, BELOW the score line, so the editor UI never
-	# overlaps the game HUD (SCORE top-left, BALLS top-right, LAUNCH POWER bottom). The panel hugs its
-	# contents, so when edit mode is off it is just the small EDIT button.
-	var panel := PanelContainer.new()
-	panel.position = Vector2(10.0, 96.0)
+	# The unified placeable list the dropdown offers: furniture first, then every imported part.
+	_placeables = [
+		{"id": "bumper", "label": "Bumper", "kind": "furniture"},
+		{"id": "target", "label": "Target", "kind": "furniture"},
+		{"id": "sling_left", "label": "Slingshot L", "kind": "furniture"},
+		{"id": "sling_right", "label": "Slingshot R", "kind": "furniture"},
+	]
+	for spec: Dictionary in TableConfig.placeable_assets():
+		_placeables.append({"id": spec["id"], "label": spec["label"], "kind": "asset"})
+
+	_build_main_menu()
+	_build_build_panel()
+	_build_play_bar()
+	_enter_menu()  ## boot to the main menu
+
+
+## The MAIN MENU shown at boot: pick BUILD (the editor) or PLAY (straight to the table).
+func _build_main_menu() -> void:
+	_menu = ColorRect.new()
+	_menu.color = Color(0.04, 0.05, 0.08, 0.92)
+	_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hud.add_child(_menu)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_menu.add_child(center)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 16)
+	center.add_child(col)
+	var title := Label.new()
+	title.text = "PINBALL"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 48)
+	col.add_child(title)
+	var build_btn := Button.new()
+	build_btn.text = "BUILD"
+	build_btn.custom_minimum_size = Vector2(200.0, 48.0)
+	build_btn.pressed.connect(_enter_build)
+	col.add_child(build_btn)
+	var play_btn := Button.new()
+	play_btn.text = "PLAY"
+	play_btn.custom_minimum_size = Vector2(200.0, 48.0)
+	play_btn.pressed.connect(_enter_play)
+	col.add_child(play_btn)
+
+
+## The BUILD-mode editor panel (dropdown picker + mirror + place + draw tools + actions).
+func _build_build_panel() -> void:
+	_panel = PanelContainer.new()
+	_panel.position = Vector2(10.0, 96.0)
 	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.0, 0.0, 0.0, 0.72)
+	bg.bg_color = Color(0.0, 0.0, 0.0, 0.78)
 	bg.content_margin_left = 8.0
 	bg.content_margin_right = 8.0
 	bg.content_margin_top = 6.0
 	bg.content_margin_bottom = 6.0
-	panel.add_theme_stylebox_override("panel", bg)
-	_hud.add_child(panel)
-	_panel = panel
+	_panel.add_theme_stylebox_override("panel", bg)
+	_hud.add_child(_panel)
 
 	var column := VBoxContainer.new()
-	panel.add_child(column)
+	_panel.add_child(column)
 
 	# Drag handle: grab this strip to move the whole editor panel off the playfield.
 	_header = Label.new()
@@ -303,41 +412,82 @@ func _build_hud() -> void:
 	_header.mouse_filter = Control.MOUSE_FILTER_STOP
 	_header.add_theme_color_override("font_color", Color(0.55, 0.8, 1.0))
 	_header.gui_input.connect(_on_header_input)
-	_header.visible = false
 	column.add_child(_header)
 
-	var toggle := Button.new()
-	toggle.text = "EDIT"
-	toggle.pressed.connect(func() -> void: _set_edit_mode(not _edit_mode))
-	column.add_child(toggle)
+	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
+	_object_dropdown = OptionButton.new()
+	_object_dropdown.custom_minimum_size = Vector2(196.0, 0.0)
+	for i: int in range(_placeables.size()):
+		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
+	column.add_child(_object_dropdown)
+	_mirror_check = CheckBox.new()
+	_mirror_check.text = "Mirror L/R (linked)"
+	column.add_child(_mirror_check)
+	_add_action(column, "PLACE", _place_from_dropdown)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.custom_minimum_size = Vector2(190.0, 0.0)
+	_status.custom_minimum_size = Vector2(196.0, 0.0)
 	_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	_status.visible = false
 	column.add_child(_status)
 
-	_palette = VBoxContainer.new()
-	column.add_child(_palette)
-	_add_palette_button("+ Bumper", func() -> void: _add("bumper"))
-	_add_palette_button("+ Target", func() -> void: _add("target"))
-	_add_palette_button("+ Sling L", func() -> void: _add("sling_left"))
-	_add_palette_button("+ Sling R", func() -> void: _add("sling_right"))
-	_add_palette_button("Draw GUIDE", func() -> void: _begin_draw("guide", true))
-	_add_palette_button("Draw WALL", func() -> void: _begin_draw("wall", false))
-	_add_palette_button("DONE drawing", _finish_draw)
-	_add_palette_button("Delete sel", _delete_selected)
-	_add_palette_button("SAVE", _save)
-	_add_palette_button("RESET saved", _reset_saved)
-	_palette.visible = false
+	_add_action(column, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
+	_add_action(column, "Draw WALL", func() -> void: _begin_draw("wall", false))
+	_add_action(column, "DONE drawing", _finish_draw)
+	_add_action(column, "Delete selected", _delete_selected)
+	_add_action(column, "SAVE", _save)
+	_add_action(column, "RESET saved", _reset_saved)
+	_add_action(column, "> PLAY", _enter_play)
+	_add_action(column, "< Main menu", _enter_menu)
 
 
-func _add_palette_button(text: String, cb: Callable) -> void:
+## The small bar shown while PLAYING: a button back to the main menu.
+func _build_play_bar() -> void:
+	_play_bar = PanelContainer.new()
+	_play_bar.position = Vector2(10.0, 96.0)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.0, 0.0, 0.0, 0.6)
+	_play_bar.add_theme_stylebox_override("panel", bg)
+	_hud.add_child(_play_bar)
+	var b := Button.new()
+	b.text = "Menu"
+	b.pressed.connect(_enter_menu)
+	_play_bar.add_child(b)
+
+
+func _add_action(parent: Node, text: String, cb: Callable) -> void:
 	var b := Button.new()
 	b.text = text
 	b.pressed.connect(cb)
-	_palette.add_child(b)
+	parent.add_child(b)
+
+
+# --- Modes ---------------------------------------------------------------------------------------
+
+func _enter_menu() -> void:
+	_set_edit_mode(false)
+	if _menu != null:
+		_menu.visible = true
+	if _play_bar != null:
+		_play_bar.visible = false
+
+
+func _enter_build() -> void:
+	if _menu != null:
+		_menu.visible = false
+	if _play_bar != null:
+		_play_bar.visible = false
+	_set_edit_mode(true)
+
+
+func _enter_play() -> void:
+	if _menu != null:
+		_menu.visible = false
+	_set_edit_mode(false)
+	if _play_bar != null:
+		_play_bar.visible = true
+	if _table != null and _table.has_method("start_play"):
+		_table.start_play()
 
 
 func _set_edit_mode(on: bool) -> void:
@@ -348,12 +498,8 @@ func _set_edit_mode(on: bool) -> void:
 		_finish_draw()
 	if _table != null and _table.has_method("editor_set_rail_handles_visible"):
 		_table.editor_set_rail_handles_visible(on)
-	if _palette != null:
-		_palette.visible = on
-	if _status != null:
-		_status.visible = on
-	if _header != null:
-		_header.visible = on
+	if _panel != null:
+		_panel.visible = on
 	_refresh_status()
 
 
