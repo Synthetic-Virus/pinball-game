@@ -5,16 +5,13 @@ on:
   pull_request:
     branches: [main, develop]
 
-# All jobs run on the homelab self-hosted runner (label: godot). The laptop stays lean.
-# See docs/INFRA.md for runner provisioning.
+# Runs on the homelab self-hosted runner (label: godot). The laptop stays lean.
 jobs:
   lint:
     runs-on: [self-hosted, godot]
     steps:
-      # lfs: true pulls the real binary assets (the *.glb flipper bat, the GUT GUI PNGs) instead of
-      # 130-byte LFS pointer files. Without it the runner checks out pointers and the Godot import
-      # pass below reads a pointer as if it were a glTF file, which breaks the web build (risk R2,
-      # docs/specs/asset-data-driven-foundation.md). git-lfs must be installed on the homelab runner.
+      # lfs: true pulls the real binary assets (the *.glb models, the fonts) instead of 130-byte LFS
+      # pointer files. git-lfs must be installed on the homelab runner.
       - uses: actions/checkout@v4
         with:
           lfs: true
@@ -23,52 +20,5 @@ jobs:
           if command -v gdlint >/dev/null 2>&1; then
             gdlint scripts/ || echo "gdlint reported issues (advisory for now)"
           else
-            echo "gdlint not installed on runner - see docs/INFRA.md"
-          fi
-
-  test:
-    runs-on: [self-hosted, godot]
-    needs: lint
-    steps:
-      # lfs: true so the GUT import pass and the asset-load tests see the real *.glb, not a pointer
-      # (risk R2). The flipper visual mesh imports from assets/models/flipper_bat.glb; a pointer file
-      # would fail to import and the asset-present test would (correctly) fail.
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-      - name: GUT headless tests
-        run: |
-          set -euo pipefail
-          if [ ! -d addons/gut ]; then
-            echo "FAIL: addons/gut is missing - the test gate cannot run. It must be vendored."
-            exit 1
-          fi
-
-          # IMPORT PASS (required): on a clean CI checkout the .godot/ import cache does not
-          # exist, so Godot has not registered GUT's class_name scripts (GutTest, GutMain, ...).
-          # Without this, gut_cmdln.gd aborts at _init with "Some GUT class_names have not been
-          # imported" and runs ZERO tests - yet exits 0, silently passing the gate on a non-run.
-          # We import first so the class_names resolve. '|| true' because a headless import can
-          # return non-zero on benign resource warnings; the real gate is the GUT run below.
-          echo "::group::Godot import pass"
-          godot --headless --path . --import || true
-          echo "::endgroup::"
-
-          # GUT run. -gexit makes Godot's exit code reflect the test results (non-zero on any
-          # failure), and set -e fails the job on that. We additionally GREP the output for the
-          # import-abort signature and for a real run summary, so a future regression to the
-          # "0 tests ran but exit 0" state FAILS LOUDLY instead of passing green.
-          echo "::group::GUT run"
-          godot --headless --path . -s addons/gut/gut_cmdln.gd \
-            -gdir=res://tests -ginclude_subdirs -gexit 2>&1 | tee gut_output.txt
-          echo "::endgroup::"
-
-          if grep -q "class_names have not been imported" gut_output.txt; then
-            echo "FAIL: GUT aborted before running tests (class_names not imported)."
-            exit 1
-          fi
-          # GUT prints a Totals/scripts summary only when it actually discovered and ran tests.
-          if ! grep -qiE "Totals|[0-9]+ of [0-9]+ passed|Tests[[:space:]]+[0-9]+" gut_output.txt; then
-            echo "FAIL: no GUT run summary found - tests did not execute."
-            exit 1
+            echo "gdlint not installed on runner"
           fi

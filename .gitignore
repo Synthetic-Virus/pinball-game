@@ -32,3 +32,10 @@ ci/runner/.env
 .DS_Store
 Thumbs.db
 .idea/
+
+# Internal docs kept local, not in the public repo (screenshots stay for the README):
+docs/*
+!docs/screenshots/
+
+# Test suite kept local, not in the public repo:
+tests/

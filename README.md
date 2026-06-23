@@ -51,8 +51,8 @@ Build the table yourself - no coordinates to dictate, just drag:
 The laptop is a thin client: code is edited in WSL, you `git push`. A self-hosted runner on the
 homelab (label `godot`) does every build and test. The laptop never holds Godot or build tooling.
 
-- **Push to `main`** -> `ci.yml` lints + runs the GUT test suite; `deploy-demo.yml` builds the WEB
-  export and publishes the demo. That URL is the newest playable prototype.
+- **Push to `main`** -> `ci.yml` lints, and `deploy-demo.yml` builds the WEB export and publishes the
+  demo. That URL is the newest playable prototype.
 - **Tag `v*`** -> `release.yml` builds native Windows + Linux and publishes a GitHub Release. Steam
   is stubbed until a Steamworks App ID exists.
 - Binary assets (`.glb` models, `.otf`/`.ttf` fonts, `.blend`) are stored with **Git LFS**.
@@ -67,9 +67,7 @@ homelab (label `godot`) does every build and test. The laptop never holds Godot 
 ## Repo map
 
 - `scripts/` - the game (table, editor, flippers, ball, HUD, parts).
-- `tests/` - GUT tests (run headless in CI; the source of truth for "do the tests pass").
-- `docs/DESIGN.md` - design doc; `docs/GATES.md` - kill/keep gates; `docs/INFRA.md` - runner +
-  pipeline runbook; `docs/BACKLOG.md` and `docs/qa/QA_BACKLOG.md` - dev + QA backlogs.
+- `scenes/` - the Godot scenes; `assets/` - models and fonts.
 - `CREDITS.md` - third-party asset attribution (some 3D parts are CC BY-SA 4.0).
 
 ## Credits
