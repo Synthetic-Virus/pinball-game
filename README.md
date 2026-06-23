@@ -4,6 +4,15 @@ A physics-first 3D pinball game in Godot 4 (GDScript), targeting a commercial St
 current build is a playable gray-box prototype with an in-browser table editor: you build the table
 yourself by placing parts on a grid, then switch to Play.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/main-menu.png" width="240" alt="Main menu">
+  <img src="docs/screenshots/gameplay.png" width="240" alt="Gameplay with the backbox scoreboard">
+  <img src="docs/screenshots/editor.png" width="240" alt="In-browser table editor (Build mode)">
+</p>
+<p align="center"><em>Main menu &nbsp;&middot;&nbsp; gameplay with the backbox scoreboard &nbsp;&middot;&nbsp; the in-browser table editor</em></p>
+
 ## Play the demo
 
 The newest playable build is deployed to the homelab demo URL on every push to `main` (ask the

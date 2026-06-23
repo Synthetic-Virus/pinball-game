@@ -15,3 +15,6 @@
 *.tscn  -filter -diff -merge text
 *.tres  -filter -diff -merge text
 *.gd    -filter -diff -merge text
+
+# Screenshots stay in normal git (small; must render inline on GitHub, not as LFS pointers):
+docs/screenshots/*.png -filter -diff -merge
