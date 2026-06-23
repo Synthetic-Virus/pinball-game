@@ -421,6 +421,11 @@ func _build_build_panel() -> void:
 	_header.gui_input.connect(_on_header_input)
 	column.add_child(_header)
 
+	# Navigation up top so it is always obvious how to leave BUILD mode (the game HUD is hidden here).
+	# NOTE: the button font (Schwarzenberg-Italic) lacks < > / ( ) glyphs, so labels avoid them.
+	_add_action(column, "MAIN MENU", _enter_menu)
+	_add_action(column, "PLAY", _enter_play)
+
 	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
 	_object_dropdown = OptionButton.new()
 	_object_dropdown.custom_minimum_size = Vector2(196.0, 0.0)
@@ -429,7 +434,7 @@ func _build_build_panel() -> void:
 	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
 	column.add_child(_object_dropdown)
 	_mirror_check = CheckBox.new()
-	_mirror_check.text = "Mirror L/R (linked)"
+	_mirror_check.text = "Mirror LR linked"
 	_apply_font(_mirror_check, BUTTON_FONT_PATH)
 	column.add_child(_mirror_check)
 	_add_action(column, "PLACE", _place_from_dropdown)
@@ -446,8 +451,6 @@ func _build_build_panel() -> void:
 	_add_action(column, "Delete selected", _delete_selected)
 	_add_action(column, "SAVE", _save)
 	_add_action(column, "RESET saved", _reset_saved)
-	_add_action(column, "> PLAY", _enter_play)
-	_add_action(column, "< Main menu", _enter_menu)
 
 
 ## The small bar shown while PLAYING: a button back to the main menu.
@@ -489,6 +492,7 @@ func _enter_menu() -> void:
 		_menu.visible = true
 	if _play_bar != null:
 		_play_bar.visible = false
+	_show_hud(false)  ## no game HUD over the menu
 
 
 func _enter_build() -> void:
@@ -497,6 +501,7 @@ func _enter_build() -> void:
 	if _play_bar != null:
 		_play_bar.visible = false
 	_set_edit_mode(true)
+	_show_hud(false)  ## no game HUD while editing - only the editor UI
 
 
 func _enter_play() -> void:
@@ -505,8 +510,15 @@ func _enter_play() -> void:
 	_set_edit_mode(false)
 	if _play_bar != null:
 		_play_bar.visible = true
+	_show_hud(true)  ## fade the HUD in as the table loads
 	if _table != null and _table.has_method("start_play"):
 		_table.start_play()
+
+
+## Show (fade in) or hide the game HUD via the table.
+func _show_hud(shown: bool) -> void:
+	if _table != null and _table.has_method("set_hud_shown"):
+		_table.set_hud_shown(shown, shown)
 
 
 func _set_edit_mode(on: bool) -> void:

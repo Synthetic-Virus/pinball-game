@@ -100,6 +100,19 @@ func start_play() -> void:
 		game_flow.start_game()
 
 
+## Show / hide the game HUD per mode (hidden in the menu and BUILD mode; shown for PLAY). When `fade`
+## is true the HUD eases in - used as play starts so it loads in with the table.
+func set_hud_shown(shown: bool, fade: bool = false) -> void:
+	if hud == null:
+		return
+	if shown and fade and hud.has_method("fade_in"):
+		hud.fade_in()
+	elif hud.has_method("set_shown"):
+		hud.set_shown(shown)
+	else:
+		hud.visible = shown
+
+
 ## Build the presentation layer: a camera to view the table, a light to lit the gray-box meshes,
 ## and an environment for ambient fill + background. WHY THIS EXISTS: the table elements build their
 ## own MeshInstance3D geometry, but a 3D scene with no Camera3D renders only the clear color (the

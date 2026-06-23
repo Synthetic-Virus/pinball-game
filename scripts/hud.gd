@@ -50,6 +50,7 @@ const HUD_FONT_PATH: String = "res://assets/fonts/hud.otf"  ## OPTIPinBall, deve
 const GAME_OVER_FONT_SIZE: int = 34
 
 # --- Node references (assigned in _ready) ---
+var _root: Control          ## the full-rect root control; visibility + fade are applied here
 var _lbl_score: Label
 var _lbl_balls: Label
 var _lbl_msg: Label
@@ -63,11 +64,13 @@ func _ready() -> void:
 ## Build the entire UI tree in code. This keeps the HUD self-contained (no separate .tscn to
 ## maintain) and makes the node references explicit and easy to follow for a non-expert reader.
 func _build_ui() -> void:
-	# Root control that fills the viewport so anchored children position correctly.
+	# Root control that fills the viewport so anchored children position correctly. Stored so the HUD
+	# can be shown/hidden per game mode and faded in when play starts.
 	var root_ctrl := Control.new()
 	root_ctrl.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root_ctrl.mouse_filter = Control.MOUSE_FILTER_IGNORE  # HUD should not eat mouse events.
 	add_child(root_ctrl)
+	_root = root_ctrl
 
 	# -- SCORE label (top-left) --
 	_lbl_score = Label.new()
@@ -160,6 +163,27 @@ func _apply_font_size(label: Label, size: int) -> void:
 	var font: Resource = load(HUD_FONT_PATH)
 	if font is Font:
 		label.add_theme_font_override("font", font)
+
+
+## Show or instantly hide the whole HUD. Hidden in the main menu and BUILD mode so only the editor UI
+## is visible there; shown for PLAY. Modulate is reset to fully opaque when shown without a fade.
+func set_shown(shown: bool) -> void:
+	if _root == null:
+		return
+	_root.visible = shown
+	if shown:
+		_root.modulate.a = 1.0
+
+
+## Fade the HUD in from transparent - used when play starts so the display eases in with the table.
+func fade_in(duration: float = 0.6) -> void:
+	if _root == null:
+		return
+	_root.visible = true
+	_root.modulate.a = 0.0
+	var tween: Tween = create_tween()
+	tween.tween_property(_root, "modulate:a", 1.0, duration)
+
 
 ## Update the score display. Receives score_changed(score) from GameFlow. STABLE SIGNATURE.
 func set_score(score: int) -> void:
