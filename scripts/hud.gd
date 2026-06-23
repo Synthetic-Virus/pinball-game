@@ -46,6 +46,7 @@ const METER_OUTLINE_WIDTH: float = 2.0
 ## at a glance on the deployed build. Bump every HUD label to this size. The game-over panel uses a
 ## slightly larger size (GAME_OVER_FONT_SIZE) so it reads as the headline.
 const HUD_FONT_SIZE: int = 28
+const HUD_FONT_PATH: String = "res://assets/fonts/hud.otf"  ## OPTIPinBall, developer-supplied
 const GAME_OVER_FONT_SIZE: int = 34
 
 # --- Node references (assigned in _ready) ---
@@ -154,6 +155,11 @@ func _build_ui() -> void:
 ## shipping a font resource. Centralizing it keeps the size policy in one place.
 func _apply_font_size(label: Label, size: int) -> void:
 	label.add_theme_font_size_override("font_size", size)
+	# The developer-supplied pinball typeface (OPTIPinBall). load() so a missing font degrades to the
+	# engine default instead of failing the scene.
+	var font: Resource = load(HUD_FONT_PATH)
+	if font is Font:
+		label.add_theme_font_override("font", font)
 
 ## Update the score display. Receives score_changed(score) from GameFlow. STABLE SIGNATURE.
 func set_score(score: int) -> void:

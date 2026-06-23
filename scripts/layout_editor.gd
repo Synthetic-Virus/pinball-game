@@ -23,6 +23,10 @@ const SELECT_RADIUS: float = 2.5              ## a click within this many table 
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
 const SELECT_LIFT: float = 0.6                ## how far the selected element lifts (visual cue only)
 
+## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for button text.
+const TITLE_FONT_PATH: String = "res://assets/fonts/title.ttf"
+const BUTTON_FONT_PATH: String = "res://assets/fonts/button.ttf"
+
 var _table: Node = null
 var _camera: Camera3D = null
 var _playfield: Node3D = null
@@ -375,17 +379,20 @@ func _build_main_menu() -> void:
 	var title := Label.new()
 	title.text = "PINBALL"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 48)
+	title.add_theme_font_size_override("font_size", 72)
+	_apply_font(title, TITLE_FONT_PATH)  ## the banner typeface (CHLORINP)
 	col.add_child(title)
 	var build_btn := Button.new()
 	build_btn.text = "BUILD"
 	build_btn.custom_minimum_size = Vector2(200.0, 48.0)
 	build_btn.pressed.connect(_enter_build)
+	_apply_font(build_btn, BUTTON_FONT_PATH)
 	col.add_child(build_btn)
 	var play_btn := Button.new()
 	play_btn.text = "PLAY"
 	play_btn.custom_minimum_size = Vector2(200.0, 48.0)
 	play_btn.pressed.connect(_enter_play)
+	_apply_font(play_btn, BUTTON_FONT_PATH)
 	col.add_child(play_btn)
 
 
@@ -419,9 +426,11 @@ func _build_build_panel() -> void:
 	_object_dropdown.custom_minimum_size = Vector2(196.0, 0.0)
 	for i: int in range(_placeables.size()):
 		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
+	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
 	column.add_child(_object_dropdown)
 	_mirror_check = CheckBox.new()
 	_mirror_check.text = "Mirror L/R (linked)"
+	_apply_font(_mirror_check, BUTTON_FONT_PATH)
 	column.add_child(_mirror_check)
 	_add_action(column, "PLACE", _place_from_dropdown)
 
@@ -452,6 +461,7 @@ func _build_play_bar() -> void:
 	var b := Button.new()
 	b.text = "Menu"
 	b.pressed.connect(_enter_menu)
+	_apply_font(b, BUTTON_FONT_PATH)
 	_play_bar.add_child(b)
 
 
@@ -459,7 +469,16 @@ func _add_action(parent: Node, text: String, cb: Callable) -> void:
 	var b := Button.new()
 	b.text = text
 	b.pressed.connect(cb)
+	_apply_font(b, BUTTON_FONT_PATH)
 	parent.add_child(b)
+
+
+## Apply a developer-supplied font to a control. load() (not preload) so a missing font degrades to
+## the engine default instead of failing the scene.
+func _apply_font(ctrl: Control, path: String) -> void:
+	var font: Resource = load(path)
+	if font is Font:
+		ctrl.add_theme_font_override("font", font)
 
 
 # --- Modes ---------------------------------------------------------------------------------------
