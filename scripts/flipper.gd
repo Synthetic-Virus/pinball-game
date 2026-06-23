@@ -185,6 +185,20 @@ func configure(action_name: String, mirrored: bool) -> void:
 		_apply_handedness()
 
 
+## Move the flipper to a new playfield-local pivot. The bat is a RigidBody driven by the physics
+## server, so moving this node alone leaves the simulated body behind; we TELEPORT the body to the new
+## pivot and zero its motion so the whole flipper (node + hinge + bat) lands together. Used by the
+## layout editor (a plain position set does not move a flipper). STABLE SIGNATURE.
+func editor_move(local_pos: Vector3) -> void:
+	position = local_pos
+	if _body != null:
+		_body.linear_velocity = Vector3.ZERO
+		_body.angular_velocity = Vector3.ZERO
+		var xf: Transform3D = _body.global_transform
+		xf.origin = global_transform.origin
+		_body.global_transform = xf
+
+
 ## Build the RigidBody bat + HingeJoint3D from TableConfig dimensions. Idempotent: only builds once.
 func _build_flipper() -> void:
 	if _body != null:

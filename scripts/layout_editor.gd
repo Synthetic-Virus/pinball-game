@@ -45,6 +45,7 @@ var _grab_origin: Vector3 = Vector3.ZERO  ## where the grabbed element started (
 var _cam_panning: bool = false    ## middle-mouse held: dragging pans the build camera
 var _collapsed: bool = false      ## build panel collapsed to just its header bar
 var _panel_body: Control = null   ## the part of the build panel hidden when collapsed
+var _sel_marker: MeshInstance3D = null  ## bright ring under the selected element (clear selection cue)
 
 var _hud: CanvasLayer = null
 var _menu: Control = null          ## the main menu (Build / Play), shown at boot
@@ -71,6 +72,7 @@ func setup(table: Node, camera: Camera3D, playfield: Node3D) -> void:
 	_camera = camera
 	_playfield = playfield
 	_build_hud()
+	_build_sel_marker()
 	_load_saved()
 	set_process_unhandled_input(true)
 	set_process(true)  ## drives the long-press launch timer during play
@@ -119,14 +121,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and (_dragging or _grabbing) and _selected != null:
 		var hit: Variant = _ray_to_field(event.position)
 		if hit != null:
-			_selected.position.x = hit.x
-			_selected.position.z = hit.z
-			# Moving a rail's point-handle reshapes that rail live.
-			if _selected.has_meta("rail"):
-				var rail: Node = _selected.get_meta("rail")
-				if is_instance_valid(rail):
-					rail.rebuild()
-			_update_twin(_selected)
+			_apply_move(_selected, hit.x, hit.z)
 
 
 func _handle_mouse_button(event: InputEventMouseButton) -> void:
@@ -213,7 +208,56 @@ func _select(node: Node3D) -> void:
 	if _selected != null:
 		_selected_base_y = _selected.position.y
 		_selected.position.y = _selected_base_y + SELECT_LIFT
+	_update_sel_marker()
 	_refresh_status()
+
+
+## A bright ring on the surface, parented to the (tilted) playfield, that marks the selected element.
+func _build_sel_marker() -> void:
+	if _playfield == null:
+		return
+	_sel_marker = MeshInstance3D.new()
+	_sel_marker.name = "SelectionMarker"
+	var ring := TorusMesh.new()
+	ring.inner_radius = 1.2
+	ring.outer_radius = 1.7
+	_sel_marker.mesh = ring
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.9, 0.1)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.8, 0.0)
+	mat.emission_energy_multiplier = 2.0
+	mat.no_depth_test = true  ## draw on top so the ring is always visible around the element
+	_sel_marker.material_override = mat
+	_sel_marker.visible = false
+	_playfield.add_child(_sel_marker)
+
+
+## Move the selection ring under the selected element (or hide it when nothing is selected).
+func _update_sel_marker() -> void:
+	if _sel_marker == null:
+		return
+	if _selected == null:
+		_sel_marker.visible = false
+		return
+	_sel_marker.visible = true
+	_sel_marker.position = Vector3(_selected.position.x, 0.12, _selected.position.z)
+
+
+## Move a selected node to a new (x, z), handling the cases the editor cares about: flippers need a
+## physics teleport (editor_move), rails rebuild from their handle, and a mirror twin follows.
+func _apply_move(node: Node3D, x: float, z: float) -> void:
+	if node.has_method("editor_move"):
+		node.editor_move(Vector3(x, node.position.y, z))
+	else:
+		node.position.x = x
+		node.position.z = z
+	if node.has_meta("rail"):
+		var rail: Node = node.get_meta("rail")
+		if is_instance_valid(rail):
+			rail.rebuild()
+	_update_twin(node)
+	_update_sel_marker()
 
 
 func _delete_selected() -> void:
@@ -248,12 +292,7 @@ func _toggle_grab() -> void:
 ## Cancel a grab: snap the element back to where it started and stop following the cursor.
 func _cancel_grab() -> void:
 	if _selected != null:
-		_selected.position = _grab_origin
-		if _selected.has_meta("rail"):
-			var rail: Node = _selected.get_meta("rail")
-			if is_instance_valid(rail):
-				rail.rebuild()
-		_update_twin(_selected)
+		_apply_move(_selected, _grab_origin.x, _grab_origin.z)
 	_grabbing = false
 	_refresh_status()
 
