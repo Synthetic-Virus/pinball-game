@@ -17,14 +17,9 @@ extends Node3D
 const WIRE_SIDES: int = 8
 const SAMPLES_PER_SEG: int = 8        ## path samples between control points (smoothness of the sweep)
 
-## Collision trough proportions (world units): wide enough to cradle the ball (radius 0.6), with low
-## side rails so it cannot roll off on a curve.
-const TROUGH_HALF_WIDTH: float = 0.7
-const RAIL_HEIGHT: float = 0.55
-
-var strands: int = 1                  ## 1, 2, or 4 chrome wires
+var strands: int = 2                  ## 1, 2, or 4 chrome wires (2 = the ball-track default)
 var _wire_radius: float = 0.071       ## 1/8" in world units (0.003175 m * real_to_world)
-var _spacing: float = 0.113           ## 1/10" in world units (strand offset, used for 2/4 wires)
+var _gauge: float = 1.2               ## wire spacing, MATCHED to the ball (see configure)
 
 var _seg_root: Node3D = null          ## holds the rebuilt visual + collision (cleared each rebuild)
 var _handles: Array[MeshInstance3D] = []
@@ -36,8 +31,11 @@ var _handles_visible: bool = false
 ## Set up from a list of 3D points (Vector3, playfield-local; y is the height above the surface).
 func configure(points: Array, strand_count: int) -> void:
 	strands = strand_count
-	_wire_radius = 0.003175 * 0.5 * TableConfig.real_to_world()
-	_spacing = 0.00254 * TableConfig.real_to_world()
+	_wire_radius = 0.003175 * 0.5 * TableConfig.real_to_world()  ## 1/8" wire, to world units
+	# GAUGE matched to the ball: the two rails sit ~one ball-DIAMETER apart, so the ball nestles
+	# between them and the inner gap (gauge - 2*wire_radius) stays narrower than the ball - it cradles
+	# and rides the rails instead of dropping through or balancing on top.
+	_gauge = 2.0 * TableConfig.BALL_RADIUS
 	_seg_root = Node3D.new()
 	_seg_root.name = "WireRamp"
 	add_child(_seg_root)
@@ -143,59 +141,39 @@ func _path_frames(path: Array[Vector3]) -> Array:
 	return frames
 
 
-## Sweep the chrome tube(s) along the path. Multiple strands are offset sideways along the binormal.
-func _build_wires(path: Array[Vector3], frames: Array) -> void:
-	var offsets: Array[float] = [0.0]
+## The sideways offsets of each strand from the path centerline, set by the ball-matched gauge so the
+## two rails sit a ball-diameter apart (the ball rides between them).
+func _strand_offsets() -> Array[float]:
 	if strands == 2:
-		offsets = [-_spacing * 0.5, _spacing * 0.5]
-	elif strands == 4:
-		offsets = [-_spacing * 1.5, -_spacing * 0.5, _spacing * 0.5, _spacing * 1.5]
-	for off: float in offsets:
-		var mesh := _sweep_tube(path, frames, off)
+		return [-_gauge * 0.5, _gauge * 0.5]
+	if strands == 4:
+		return [-_gauge * 0.75, -_gauge * 0.25, _gauge * 0.25, _gauge * 0.75]
+	return [0.0]
+
+
+## Sweep the chrome tube(s) along the path - one MeshInstance per strand.
+func _build_wires(path: Array[Vector3], frames: Array) -> void:
+	for off: float in _strand_offsets():
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_add_tube(st, path, frames, off)
+		st.generate_normals()
+		var mesh := ArrayMesh.new()
+		st.commit(mesh)
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
 		mi.material_override = _chrome
 		_seg_root.add_child(mi)
 
 
-## Build one tube mesh: a ring of WIRE_SIDES verts at each sample (offset sideways by `lateral`),
-## connected sample-to-sample into a tube.
-func _sweep_tube(path: Array[Vector3], frames: Array, lateral: float) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var n: int = path.size()
-	for i: int in range(n - 1):
-		var c0: Vector3 = path[i] + frames[i][2] * lateral
-		var c1: Vector3 = path[i + 1] + frames[i + 1][2] * lateral
-		for k: int in range(WIRE_SIDES):
-			var a0: float = TAU * float(k) / float(WIRE_SIDES)
-			var a1: float = TAU * float(k + 1) / float(WIRE_SIDES)
-			var v00: Vector3 = c0 + _ring_pt(frames[i], a0)
-			var v01: Vector3 = c0 + _ring_pt(frames[i], a1)
-			var v10: Vector3 = c1 + _ring_pt(frames[i + 1], a0)
-			var v11: Vector3 = c1 + _ring_pt(frames[i + 1], a1)
-			st.add_vertex(v00); st.add_vertex(v10); st.add_vertex(v01)
-			st.add_vertex(v01); st.add_vertex(v10); st.add_vertex(v11)
-	st.generate_normals()
-	var mesh := ArrayMesh.new()
-	st.commit(mesh)
-	return mesh
-
-
-## A point on the tube ring at angle a, in the sample's frame [tan, normal, binormal].
-func _ring_pt(frame: Array, a: float) -> Vector3:
-	return (frame[1] * cos(a) + frame[2] * sin(a)) * _wire_radius
-
-
-## Carrying COLLISION: a floor ribbon at the path height plus two low side rails, following the path,
-## as one static body the ball rides in. Decoupled from the thin visual wires so the ball is held
-## reliably. The ball's continuous_cd plus this static trough keep it from tunnelling at speed.
+## COLLISION = the rails themselves. The ball rides ON the wires (gauge matched to the ball), so the
+## collider is the SAME swept tubes, as one static trimesh body. With the ball's continuous_cd this is
+## tunnel-safe; the gauge keeps the inner gap narrower than the ball so it cannot drop through.
 func _build_collision(path: Array[Vector3], frames: Array) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var n: int = path.size()
-	for i: int in range(n - 1):
-		_trough_quads(st, path[i], frames[i], path[i + 1], frames[i + 1])
+	for off: float in _strand_offsets():
+		_add_tube(st, path, frames, off)
 	st.generate_normals()
 	var mesh := ArrayMesh.new()
 	st.commit(mesh)
@@ -208,30 +186,25 @@ func _build_collision(path: Array[Vector3], frames: Array) -> void:
 	_seg_root.add_child(body)
 
 
-## One segment of the trough: a floor quad (cradle bottom) and two side-rail quads.
-func _trough_quads(st: SurfaceTool, p0: Vector3, f0: Array, p1: Vector3, f1: Array) -> void:
-	var b0: Vector3 = f0[2]
-	var b1: Vector3 = f1[2]
-	var up0: Vector3 = f0[1]
-	var up1: Vector3 = f1[1]
-	# Floor edges (left/right of the path).
-	var fl0: Vector3 = p0 - b0 * TROUGH_HALF_WIDTH
-	var fr0: Vector3 = p0 + b0 * TROUGH_HALF_WIDTH
-	var fl1: Vector3 = p1 - b1 * TROUGH_HALF_WIDTH
-	var fr1: Vector3 = p1 + b1 * TROUGH_HALF_WIDTH
-	_quad(st, fl0, fr0, fl1, fr1)
-	# Left + right side rails rising from the floor edges.
-	var tl0: Vector3 = fl0 + up0 * RAIL_HEIGHT
-	var tl1: Vector3 = fl1 + up1 * RAIL_HEIGHT
-	var tr0: Vector3 = fr0 + up0 * RAIL_HEIGHT
-	var tr1: Vector3 = fr1 + up1 * RAIL_HEIGHT
-	_quad(st, tl0, fl0, tl1, fl1)
-	_quad(st, fr0, tr0, fr1, tr1)
+## Append one tube (a ring of WIRE_SIDES verts per sample, offset sideways by `lateral`) to a surface.
+func _add_tube(st: SurfaceTool, path: Array[Vector3], frames: Array, lateral: float) -> void:
+	for i: int in range(path.size() - 1):
+		var c0: Vector3 = path[i] + frames[i][2] * lateral
+		var c1: Vector3 = path[i + 1] + frames[i + 1][2] * lateral
+		for k: int in range(WIRE_SIDES):
+			var a0: float = TAU * float(k) / float(WIRE_SIDES)
+			var a1: float = TAU * float(k + 1) / float(WIRE_SIDES)
+			var v00: Vector3 = c0 + _ring_pt(frames[i], a0)
+			var v01: Vector3 = c0 + _ring_pt(frames[i], a1)
+			var v10: Vector3 = c1 + _ring_pt(frames[i + 1], a0)
+			var v11: Vector3 = c1 + _ring_pt(frames[i + 1], a1)
+			st.add_vertex(v00); st.add_vertex(v10); st.add_vertex(v01)
+			st.add_vertex(v01); st.add_vertex(v10); st.add_vertex(v11)
 
 
-func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
-	st.add_vertex(a); st.add_vertex(c); st.add_vertex(b)
-	st.add_vertex(b); st.add_vertex(c); st.add_vertex(d)
+## A point on the tube ring at angle a, in the sample's frame [tan, normal, binormal].
+func _ring_pt(frame: Array, a: float) -> Vector3:
+	return (frame[1] * cos(a) + frame[2] * sin(a)) * _wire_radius
 
 
 func _to_v3(p: Variant) -> Vector3:
