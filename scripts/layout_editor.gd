@@ -650,13 +650,15 @@ func _build_main_menu() -> void:
 	col.add_child(title)
 	var build_btn := Button.new()
 	build_btn.text = "BUILD"
-	build_btn.custom_minimum_size = Vector2(200.0, 48.0)
+	build_btn.custom_minimum_size = Vector2(320.0, 72.0)
+	build_btn.add_theme_font_size_override("font_size", 44)
 	build_btn.pressed.connect(_enter_build)
 	_apply_font(build_btn, BUTTON_FONT_PATH)
 	col.add_child(build_btn)
 	var play_btn := Button.new()
 	play_btn.text = "PLAY"
-	play_btn.custom_minimum_size = Vector2(200.0, 48.0)
+	play_btn.custom_minimum_size = Vector2(320.0, 72.0)
+	play_btn.add_theme_font_size_override("font_size", 44)
 	play_btn.pressed.connect(_enter_play)
 	_apply_font(play_btn, BUTTON_FONT_PATH)
 	col.add_child(play_btn)
@@ -683,6 +685,7 @@ func _build_build_panel() -> void:
 	_header.text = "= = =  drag to move  = = ="
 	_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_header.mouse_filter = Control.MOUSE_FILTER_STOP
+	_header.add_theme_font_size_override("font_size", 18)
 	_header.add_theme_color_override("font_color", Color(0.55, 0.8, 1.0))
 	_header.gui_input.connect(_on_header_input)
 	column.add_child(_header)
@@ -690,6 +693,8 @@ func _build_build_panel() -> void:
 	# Collapse toggle (stays visible) so the panel can shrink to just the header + this button.
 	var collapse_btn := Button.new()
 	collapse_btn.text = "collapse"
+	collapse_btn.custom_minimum_size = Vector2(0.0, 40.0)
+	collapse_btn.add_theme_font_size_override("font_size", 22)
 	_apply_font(collapse_btn, BUTTON_FONT_PATH)
 	collapse_btn.pressed.connect(_toggle_collapse)
 	column.add_child(collapse_btn)
@@ -708,28 +713,31 @@ func _build_build_panel() -> void:
 	var cam_hint := Label.new()
 	cam_hint.text = "view: middle-drag pan, wheel zoom"
 	cam_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	cam_hint.custom_minimum_size = Vector2(196.0, 0.0)
-	cam_hint.add_theme_font_size_override("font_size", 13)
+	cam_hint.custom_minimum_size = Vector2(230.0, 0.0)
+	cam_hint.add_theme_font_size_override("font_size", 18)
 	cam_hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.85))
 	body.add_child(cam_hint)
 	_add_action(body, "Reset view", _reset_view)
 
 	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
 	_object_dropdown = OptionButton.new()
-	_object_dropdown.custom_minimum_size = Vector2(196.0, 0.0)
+	_object_dropdown.custom_minimum_size = Vector2(230.0, 40.0)
+	_object_dropdown.add_theme_font_size_override("font_size", 22)
 	for i: int in range(_placeables.size()):
 		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
 	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
 	body.add_child(_object_dropdown)
 	_mirror_check = CheckBox.new()
 	_mirror_check.text = "Mirror LR linked"
+	_mirror_check.add_theme_font_size_override("font_size", 22)
 	_apply_font(_mirror_check, BUTTON_FONT_PATH)
 	body.add_child(_mirror_check)
 	_add_action(body, "PLACE", _place_from_dropdown)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.custom_minimum_size = Vector2(196.0, 0.0)
+	_status.custom_minimum_size = Vector2(230.0, 0.0)
+	_status.add_theme_font_size_override("font_size", 18)
 	_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	body.add_child(_status)
 
@@ -767,6 +775,8 @@ func _build_play_bar() -> void:
 func _add_action(parent: Node, text: String, cb: Callable) -> void:
 	var b := Button.new()
 	b.text = text
+	b.custom_minimum_size = Vector2(0.0, 40.0)
+	b.add_theme_font_size_override("font_size", 24)  ## readable on a 720-wide base; scales with stretch
 	b.pressed.connect(cb)
 	_apply_font(b, BUTTON_FONT_PATH)
 	parent.add_child(b)
