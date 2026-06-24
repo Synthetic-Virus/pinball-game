@@ -463,6 +463,13 @@ const POP_BUMPER_RADIUS: float = 1.6  ## REAL-SCALE: ~2.7 ball-diameters across 
 const POP_BUMPER_HEIGHT: float = WALL_HEIGHT
 ## POP_BUMPER_SCORE: flat points per kick (placeholder, no multipliers - DESIGN scope).
 const POP_BUMPER_SCORE: int = 100
+## POP_BUMPER_CAP_OVERHANG: how much WIDER the visible mushroom cap is rendered than the collision
+## post, as a fraction of POP_BUMPER_RADIUS. The collider (the ball's true contact) stays at
+## POP_BUMPER_RADIUS; only the cap art is scaled out by this lip so the ball rolls UNDER the
+## overhanging lid and strikes the narrower body - the real pop-bumper look (developer: "slightly
+## less than the cap size so the ball appears to go under the lid"). 0.18 matches the
+## collider-to-cap ratio of the source model (0.30 / 0.355). Purely cosmetic: physics is unchanged.
+const POP_BUMPER_CAP_OVERHANG: float = 0.18
 ## Cluster centers (local playfield coords, Y resolved on the surface by table.gd). Three bumpers in
 ## a triangle in the upper-middle: two lower spread across the width, one higher at center. Z is
 ## up-table (negative). Chosen ABOVE the standup bank and BELOW the arch start so the cluster is the
