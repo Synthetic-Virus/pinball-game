@@ -239,7 +239,10 @@ func _select(node: Node3D) -> void:
 	_selected = node
 	if _selected != null:
 		_selected_base_y = _selected.position.y
-		_selected.position.y = _selected_base_y + SELECT_LIFT
+		# Furniture lifts a little as a selection cue; rail/wire HANDLES do not - their y is the path
+		# height, so lifting them would distort the curve. The marker ring is their cue instead.
+		if not _is_handle(_selected):
+			_selected.position.y = _selected_base_y + SELECT_LIFT
 	_update_sel_marker()
 	_refresh_status()
 
@@ -288,6 +291,10 @@ func _apply_move(node: Node3D, x: float, z: float) -> void:
 		var rail: Node = node.get_meta("rail")
 		if is_instance_valid(rail):
 			rail.rebuild()
+	if node.has_meta("wire"):
+		var wire: Node = node.get_meta("wire")
+		if is_instance_valid(wire):
+			wire.rebuild()  ## the wire ramp follows its dragged point
 	_update_twin(node)
 	_update_sel_marker()
 
@@ -352,6 +359,13 @@ func _editables() -> Array:
 	if _table != null and _table.has_method("editor_editables"):
 		return _table.editor_editables()
 	return []
+
+
+## A rail or wire point-handle (its y is meaningful path height), not a furniture piece.
+func _is_handle(node: Node3D) -> bool:
+	if node == null or not node.has_meta("etype"):
+		return false
+	return String(node.get_meta("etype")).ends_with("_handle")
 
 
 ## Track the WIRE-RAMP point nearest the cursor, so + / - raise/lower whatever part is under the mouse.
