@@ -46,8 +46,8 @@ const CORNER_SEGMENTS: int = 4
 
 ## Extra rotation applied to the whole sling (its kick direction, and therefore its visible triangle
 ## and collision, all follow this). Tuning knob for "rotate the slings more" - mirrored per side, so
-## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the other
-## way. The kick still points INTO play (a modest rotation keeps the up-table component).
+## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the
+## other way. The kick still points INTO play (a modest rotation keeps the up-table component).
 const EXTRA_KICK_ROT_DEG: float = 0.0
 
 ## SLICE "Low-poly slingshot asset" (2026-06-24): the imported low-poly model that REPLACES the
@@ -99,8 +99,9 @@ var _kick_dir: Vector3 = TableConfig.SLINGSHOT_LEFT_KICK_DIR
 ## Handedness, for the kick direction. table.gd sets it via configure().
 var _mirrored: bool = false
 ## The THREE triangle corners in ABSOLUTE table coords (x, z), from TableConfig. The sling node sits
-## at the origin, so these place the triangle exactly where specified - read straight off the in-game
-## grid. This REPLACES the old parametric length/angle/apex shape (which could not honor exact coords).
+## at the origin, so these place the triangle exactly where specified - read straight off the
+## in-game grid. This REPLACES the old parametric length/angle/apex shape (which could not honor
+## exact coords).
 var _corners: PackedVector2Array = PackedVector2Array()
 
 
@@ -117,7 +118,7 @@ func configure(mirrored: bool) -> void:
 		TableConfig.SLINGSHOT_RIGHT_CORNERS if _mirrored else TableConfig.SLINGSHOT_LEFT_CORNERS
 	)
 	_corners = PackedVector2Array(src)
-	# KICK direction (separate from the shape): the load-bearing "into play, never the drain" guarantee.
+	# KICK direction (separate from the shape): the "into play, never the drain" guarantee.
 	var raw_dir: Vector3 = (
 		TableConfig.SLINGSHOT_RIGHT_KICK_DIR if _mirrored else TableConfig.SLINGSHOT_LEFT_KICK_DIR
 	)
@@ -144,17 +145,17 @@ func _make_body_shape() -> Shape3D:
 
 
 ## Detector = the EXACT triangle body (same hull as _make_body_shape), so body_entered fires at real
-## contact anywhere on the triangle. WHERE the contact landed is then judged by _contact_should_kick:
-## only a contact on the kicking BAND fires the solenoid; the posts/back bounce passively. This is the
-## "true contact point" behavior the developer asked for, with no proximity padding to cause an early
-## cone of triggering.
+## contact anywhere on the triangle. WHERE the contact landed is then judged by
+## _contact_should_kick: only a contact on the kicking BAND fires the solenoid; the posts/back
+## bounce passively. This is the "true contact point" behavior the developer asked for, no proximity
+## padding to cause an early cone of triggering.
 func _make_detector_shape() -> Shape3D:
 	return _make_body_shape()
 
 
 ## CONTACT GATE: kick ONLY when the ball contacts the kicking BAND (the face edge), not the posts or
 ## the back of the triangle. We judge from the ball's contact position in the sling's local X-Z: it
-## must be on the FRONT (play) side of the face line AND projected within the face span (post to post),
+## must be on the FRONT (play) side of the face line AND projected within the face span (post-post),
 ## allowing ~half a ball past each end so a genuine end-of-band hit still kicks (QA BUG-018) while a
 ## ball out past a post (the top post the developer circled) does not.
 func _contact_should_kick(ball_pos: Vector3) -> bool:
@@ -177,7 +178,7 @@ func _contact_should_kick(ball_pos: Vector3) -> bool:
 
 
 ## The KICKING FACE among the three corner posts: the edge whose OUTWARD normal best aligns with the
-## kick direction. Returns [a, b, normal] in local X-Z, the normal a unit vector pointing toward play.
+## kick direction. Returns [a, b, normal] in local X-Z, the normal a unit vector toward play.
 ## This is the band the ball strikes; the apex/back edges are not active.
 func _kicking_face() -> Array:
 	var c: PackedVector2Array = _raw_corners()
@@ -214,15 +215,15 @@ func _make_mesh() -> MeshInstance3D:
 	mesh_instance.mesh = _build_triangle_mesh(_triangle_outline(), _height)
 	# The solid body is yawed by _body_yaw() in the base; yaw the visible mesh the same so they agree.
 	mesh_instance.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
-	# A real slingshot is THREE rubber posts with bands stretched between them. Add those as children of
-	# the (yawed) mesh so they inherit its orientation and sit exactly on the collider's three corners.
+	# A real slingshot is THREE rubber posts with bands stretched between them. Add those as children
+	# of the (yawed) mesh so they inherit its orientation and sit exactly on the collider's corners.
 	_add_posts_and_rubber(mesh_instance)
 	return mesh_instance
 
 
-## Build the visible 3-post-and-rubber assembly (posts at the triangle corners, bands along the edges)
-## as children of the yawed mesh. PURELY visual - the collider and active kick are unchanged - so this
-## gives the slingshot its real look without touching the proven physics.
+## Build the visible 3-post-and-rubber assembly (posts at the triangle corners, bands along the
+## edges) as children of the yawed mesh. PURELY visual - the collider and active kick are unchanged,
+## so this gives the slingshot its real look without touching the proven physics.
 func _add_posts_and_rubber(parent: Node3D) -> void:
 	var corners: PackedVector2Array = _raw_corners()
 	var rubber := StandardMaterial3D.new()
@@ -269,8 +270,8 @@ func _triangle_outline() -> PackedVector2Array:
 
 ## The THREE raw corners of the slingshot triangle (local X-Z, before rounding) - A and B are the
 ## kicking-face ends at +Z, C is the apex back on -Z. These are also where the visible rubber POSTS
-## stand (a real slingshot is three posts with rubber stretched between them), so the collider and the
-## posts share one definition. Apex X is offset per handedness so the pointed corner aims at the
+## stand (a real slingshot is three posts with rubber stretched between them), so the collider and
+## the posts share one definition. Apex X is offset per handedness so the pointed corner aims at the
 ## GUTTER (outer end): hand_sign +1 for the left sling, -1 for the right (mirror).
 func _raw_corners() -> PackedVector2Array:
 	# The three corner posts exactly as specified in TableConfig (absolute table coords). No parametric
@@ -280,8 +281,8 @@ func _raw_corners() -> PackedVector2Array:
 
 ## Replace each sharp corner of a CCW (x, z) polygon with a rounded arc. For each vertex we trim in
 ## along both adjacent edges by `radius` (clamped so we never overrun a short edge) and sweep a
-## quadratic-Bezier arc through the original corner. Winding (CCW/CW) is preserved, so the cap-orient
-## and signed-area logic still work. Returns the expanded outline (more points, same convex shape).
+## quadratic-Bezier arc through the original corner. Winding (CCW/CW) is preserved, so the
+## cap-orient and signed-area logic still work. Returns the expanded outline (same convex shape).
 func _round_corners(poly: PackedVector2Array, radius: float, seg: int) -> PackedVector2Array:
 	var n: int = poly.size()
 	var out := PackedVector2Array()
