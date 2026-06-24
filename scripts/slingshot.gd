@@ -507,21 +507,27 @@ func _derive_scale(visual_root: Node3D) -> float:
 	return collider_span / visual_width
 
 
-## The collider's top-down footprint span - the LONGEST distance between any two of the triangle's
-## corner posts (the kicking face A-B is the long edge). Read live from _raw_corners (which come
-## from TableConfig.SLINGSHOT_LEFT/RIGHT_CORNERS), so the derived visual scale tracks the real
-## collider footprint and never a magic literal. WHY the max pairwise distance and not just |B - A|:
-## it is the true bounding span of the collider shape, robust to which corner pair is longest.
+## The collider's top-down footprint span - the LONGEST distance between any two points of the REAL
+## collision hull outline (the kicking face A-B is the long edge). WHY _triangle_outline() and NOT
+## _raw_corners(): the ConvexPolygonShape3D body the ball collides with is built from
+## _extrude_triangle_to_hull(_triangle_outline(), ...), i.e. the ROUNDED outline - the sharp corner
+## posts are trimmed in by CORNER_RADIUS. Measuring the raw (pre-rounding) posts overshoots the real
+## hull span by ~14% (raw 5.15 vs rounded 4.52 for the left sling), which would scale the imported
+## visual ~14% WIDER than the shape that actually fires kicks, so a ball grazing the visual near the
+## rounded corners would appear to touch the sling but fall outside the collision hull. Reading the
+## rounded outline keeps the derived scale matched to the gameplay collider, not a magic literal.
+## WHY the max pairwise distance and not just |B - A|: it is the true bounding span of the hull,
+## robust to which point pair is longest.
 func _collider_footprint_span() -> float:
-	var corners: PackedVector2Array = _raw_corners()
-	if corners.size() < 2:
-		return SLINGSHOT_LENGTH  # degenerate guard: fall back to the nominal face length
+	var outline: PackedVector2Array = _triangle_outline()
+	if outline.size() < 2:
+		return _length  # degenerate guard: fall back to the nominal face length
 	var span: float = 0.0
-	for i: int in range(corners.size()):
-		for j: int in range(i + 1, corners.size()):
-			span = maxf(span, (corners[j] - corners[i]).length())
+	for i: int in range(outline.size()):
+		for j: int in range(i + 1, outline.size()):
+			span = maxf(span, (outline[j] - outline[i]).length())
 	if span < 0.0001:
-		return SLINGSHOT_LENGTH
+		return _length
 	return span
 
 
