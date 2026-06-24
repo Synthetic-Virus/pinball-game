@@ -846,6 +846,9 @@ func _toggle_collapse() -> void:
 	_collapsed = not _collapsed
 	if _panel_body != null:
 		_panel_body.visible = not _collapsed
+	# Shrink the panel's shadow box to fit the now-hidden body (otherwise the dark box stays full size).
+	if _panel != null:
+		_panel.reset_size()
 
 
 ## Reset the build camera (pan + zoom) to the default gameplay framing.
