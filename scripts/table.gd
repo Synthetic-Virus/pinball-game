@@ -84,6 +84,7 @@ var targets: Array[Area3D] = []
 var pop_bumpers: Array[Area3D] = []
 var slingshots: Array[Area3D] = []
 var rails: Array = []  ## editor-managed EditRail nodes (guides/walls/chutes); see layout_editor.gd
+var wires: Array = []  ## editor-managed EditWire nodes (3D wire ramps the ball travels on)
 var assets: Array = []  ## editor-placed imported part .glb nodes (wire guides, rails, targets)
 var _camera: Camera3D
 var _play_view: bool = false  ## true = PLAY framing (table panned left for the backbox); see _frame_camera
@@ -461,6 +462,9 @@ func editor_editables() -> Array:
 	for rail: Node in rails:
 		if is_instance_valid(rail):
 			arr.append_array(rail.handles())
+	for wire: Node in wires:
+		if is_instance_valid(wire):
+			arr.append_array(wire.handles())
 	for a: Node in assets:
 		if is_instance_valid(a):
 			arr.append(a)
@@ -470,6 +474,21 @@ func editor_editables() -> Array:
 ## The editor-managed rail nodes (for serialising their points).
 func editor_rails() -> Array:
 	return rails
+
+
+## The editor-managed wire-ramp nodes (for serialising their 3D points).
+func editor_wires() -> Array:
+	return wires
+
+
+## Spawn a 3D WIRE RAMP from a list of 3D points (Vector3, y = height). strands = 1/2/4.
+func editor_spawn_wire(points: Array, strands: int) -> Node3D:
+	var wire: Node3D = preload("res://scripts/edit_wire.gd").new()
+	wire.name = "WireRamp"
+	playfield.add_child(wire)
+	wire.configure(points, strands)
+	wires.append(wire)
+	return wire
 
 
 ## The editor-placed part assets (for serialising id + transform).
@@ -588,6 +607,9 @@ func editor_set_rail_handles_visible(v: bool) -> void:
 	for rail: Node in rails:
 		if is_instance_valid(rail):
 			rail.set_handles_visible(v)
+	for wire: Node in wires:
+		if is_instance_valid(wire):
+			wire.set_handles_visible(v)
 
 
 ## Free all editor-managed point furniture and rails (NOT the flippers, which are repositioned). Used
@@ -603,6 +625,10 @@ func editor_clear() -> void:
 		if is_instance_valid(rail):
 			rail.queue_free()
 	rails.clear()
+	for wire: Node in wires:
+		if is_instance_valid(wire):
+			wire.queue_free()
+	wires.clear()
 	for a: Node in assets:
 		if is_instance_valid(a):
 			a.queue_free()
@@ -619,6 +645,12 @@ func editor_remove(node: Node3D) -> void:
 		if is_instance_valid(rail):
 			rails.erase(rail)
 			rail.queue_free()
+		return
+	if node.has_meta("etype") and String(node.get_meta("etype")) == "wire_handle":
+		var wire: Node = node.get_meta("wire")
+		if is_instance_valid(wire):
+			wires.erase(wire)
+			wire.queue_free()
 		return
 	if node == left_flipper or node == right_flipper:
 		return

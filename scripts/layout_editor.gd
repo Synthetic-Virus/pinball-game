@@ -23,6 +23,7 @@ const SELECT_RADIUS: float = 1.6              ## a click within this many table 
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
 const SELECT_LIFT: float = 0.6                ## how far the selected element lifts (visual cue only)
 const LONG_PRESS_MS: float = 350.0            ## a play touch held this long also fires launch (spacebar)
+const HEIGHT_STEP: float = 0.4                ## how much + / - raise/lower a wire-ramp point per press
 const UNDO_DEPTH: int = 40                    ## how many edit snapshots Undo can step back through
 
 ## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for button text.
@@ -38,8 +39,10 @@ var _selected: Node3D = null
 var _selected_base_y: float = 0.0
 var _dragging: bool = false
 
-var _drawing: bool = false        ## true while laying down a new rail point-by-point
+var _drawing: bool = false        ## true while laying down a new rail/wire point-by-point
 var _draw_rail: Node3D = null     ## the rail being drawn
+var _draw_wire: Node3D = null     ## the wire ramp being drawn (3D points)
+var _hover_handle: Node3D = null  ## wire-ramp handle nearest the cursor (target for + / - height)
 
 var _grabbing: bool = false       ## Blender-style GRAB: selected follows the cursor, no button held
 var _grab_origin: Vector3 = Vector3.ZERO  ## where the grabbed element started (restored on cancel)
@@ -109,6 +112,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_push_undo()  ## one snapshot per drag, on the first move
 				_drag_undo_pushed = true
 			_apply_move(_selected, hit.x, hit.z)
+	elif event is InputEventMouseMotion:
+		_update_hover(event.position)  ## track the wire-ramp point under the cursor for + / - height
 
 
 ## Handle an edit-mode keyboard shortcut. Returns true if the key was consumed. Pulled out of
@@ -132,6 +137,10 @@ func _handle_edit_key(event: InputEventKey) -> bool:
 		_toggle_grab()
 	elif event.keycode == KEY_ESCAPE and _grabbing:
 		_cancel_grab()
+	elif event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:
+		_adjust_height(HEIGHT_STEP)   ## raise the wire-ramp point under the cursor
+	elif event.keycode == KEY_MINUS or event.keycode == KEY_KP_SUBTRACT:
+		_adjust_height(-HEIGHT_STEP)  ## lower it
 	else:
 		return false
 	return true
@@ -157,11 +166,14 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			# While drawing a rail, each click DROPS A POINT instead of selecting/dragging.
-			if _drawing and _draw_rail != null:
+			# While drawing a rail/wire, each click DROPS A POINT instead of selecting/dragging.
+			if _drawing:
 				var hit: Variant = _ray_to_field(event.position)
 				if hit != null:
-					_draw_rail.add_point(Vector3(hit.x, 0.0, hit.z))
+					if _draw_wire != null:
+						_draw_wire.add_point(Vector3(hit.x, 0.0, hit.z))
+					elif _draw_rail != null:
+						_draw_rail.add_point(Vector3(hit.x, 0.0, hit.z))
 				return
 			_select(_pick(event.position))
 			_dragging = _selected != null
@@ -342,6 +354,35 @@ func _editables() -> Array:
 	return []
 
 
+## Track the WIRE-RAMP point nearest the cursor, so + / - raise/lower whatever part is under the mouse.
+func _update_hover(screen_pos: Vector2) -> void:
+	var local: Variant = _ray_to_field(screen_pos)
+	if local == null:
+		return
+	var click := Vector2(local.x, local.z)
+	var best: Node3D = null
+	var best_dist: float = 3.0
+	for node: Node3D in _editables():
+		if not node.has_meta("etype") or String(node.get_meta("etype")) != "wire_handle":
+			continue
+		var d: float = click.distance_to(Vector2(node.position.x, node.position.z))
+		if d < best_dist:
+			best_dist = d
+			best = node
+	_hover_handle = best
+
+
+## Raise (+) or lower (-) the height of the wire-ramp point under the cursor.
+func _adjust_height(delta: float) -> void:
+	if _hover_handle == null or not is_instance_valid(_hover_handle) or not _hover_handle.has_meta("wire"):
+		_flash("hover a wire-ramp point, then + / -")
+		return
+	var wire: Node = _hover_handle.get_meta("wire")
+	if is_instance_valid(wire):
+		_push_undo()
+		wire.set_handle_height(_hover_handle, delta)
+
+
 # --- Touch controls (PLAY mode only) -------------------------------------------------------------
 
 ## A screen touch in play: LEFT half presses left_flipper, RIGHT half presses right_flipper. The
@@ -441,10 +482,11 @@ func _serialize() -> Array:
 	for node: Node3D in _editables():
 		if not node.has_meta("etype"):
 			continue
-		if String(node.get_meta("etype")) == "rail_handle":
-			continue
+		var et: String = String(node.get_meta("etype"))
+		if et == "rail_handle" or et == "wire_handle":
+			continue  ## the rail/wire carries its own points; the handles are not furniture
 		out.append({
-			"type": node.get_meta("etype"),
+			"type": et,
 			"x": snappedf(node.position.x, 0.01),
 			"z": snappedf(node.position.z, 0.01),
 			"rot_deg": snappedf(rad_to_deg(node.rotation.y), 0.1),
@@ -457,6 +499,14 @@ func _serialize() -> Array:
 			for p: Vector3 in rail.points():
 				pts.append([snappedf(p.x, 0.01), snappedf(p.z, 0.01)])
 			out.append({"type": "rail", "kind": rail.kind, "smooth": rail.smooth, "points": pts})
+	if _table != null and _table.has_method("editor_wires"):
+		for wire: Node in _table.editor_wires():
+			if not is_instance_valid(wire):
+				continue
+			var wpts: Array = []
+			for p: Vector3 in wire.points():
+				wpts.append([snappedf(p.x, 0.01), snappedf(p.y, 0.01), snappedf(p.z, 0.01)])
+			out.append({"type": "wire", "strands": wire.strands, "points": wpts})
 	return out
 
 
@@ -515,6 +565,11 @@ func _apply_layout(entries: Array) -> void:
 			for p: Variant in entry.get("points", []):
 				pts.append(Vector2(float(p[0]), float(p[1])))
 			_table.editor_spawn_rail(String(entry.get("kind", "guide")), bool(entry.get("smooth", true)), pts)
+		elif etype == "wire":
+			var wpts: Array = []
+			for p: Variant in entry.get("points", []):
+				wpts.append(Vector3(float(p[0]), float(p[1]), float(p[2])))
+			_table.editor_spawn_wire(wpts, int(entry.get("strands", 1)))
 		elif etype.begins_with("asset:"):
 			var pos_a := Vector3(float(entry.get("x", 0.0)), 0.0, float(entry.get("z", 0.0)))
 			_table.editor_spawn_asset(
@@ -680,7 +735,11 @@ func _build_build_panel() -> void:
 
 	_add_action(body, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
 	_add_action(body, "Draw WALL", func() -> void: _begin_draw("wall", false))
+	_add_action(body, "Draw WIRE ramp", func() -> void: _begin_draw_wire(2))
 	_add_action(body, "DONE drawing", _finish_draw)
+	# Wire-ramp height: raise/lower the point under the cursor (or use the + / - keys).
+	_add_action(body, "Raise point  +", func() -> void: _adjust_height(HEIGHT_STEP))
+	_add_action(body, "Lower point  -", func() -> void: _adjust_height(-HEIGHT_STEP))
 	_add_action(body, "Grab move  G", _toggle_grab)
 	_add_action(body, "Undo  Ctrl Z", _undo)
 	_add_action(body, "Delete selected", _delete_selected)
@@ -836,14 +895,34 @@ func _begin_draw(kind: String, smooth: bool) -> void:
 	_refresh_status()
 
 
-## Finish the in-progress rail. A rail with fewer than 2 points is discarded.
+## Start laying down a WIRE RAMP (3D points). strands = 1/2/4; raise/lower points with + / - after.
+func _begin_draw_wire(strands: int) -> void:
+	if _table == null or not _table.has_method("editor_spawn_wire"):
+		return
+	_finish_draw()
+	_select(null)
+	_push_undo()
+	_draw_wire = _table.editor_spawn_wire([], strands)
+	if _table.has_method("editor_set_rail_handles_visible"):
+		_table.editor_set_rail_handles_visible(true)
+	_drawing = true
+	_refresh_status()
+
+
+## Finish the in-progress rail/wire. One with fewer than 2 points is discarded.
 func _finish_draw() -> void:
 	if _draw_rail != null and is_instance_valid(_draw_rail):
 		if _draw_rail.points().size() < 2:
 			if _table.has_method("editor_rails"):
 				_table.editor_rails().erase(_draw_rail)
 			_draw_rail.queue_free()
+	if _draw_wire != null and is_instance_valid(_draw_wire):
+		if _draw_wire.points().size() < 2:
+			if _table.has_method("editor_wires"):
+				_table.editor_wires().erase(_draw_wire)
+			_draw_wire.queue_free()
 	_draw_rail = null
+	_draw_wire = null
 	_drawing = false
 	_refresh_status()
 
