@@ -711,6 +711,9 @@ func _wire_signals() -> void:
 	# is explicit and a test can tell a recovery from a fresh ball (no balls_changed accompanies it).
 	if game_flow.has_signal("request_relaunch"):
 		game_flow.request_relaunch.connect(_on_request_new_ball)
+	# STUCK-BALL WATCHDOG: GameFlow asks to nudge the live ball free with a small impulse.
+	if game_flow.has_signal("request_nudge"):
+		game_flow.request_nudge.connect(_on_request_nudge)
 	if game_flow.has_signal("score_changed") and hud.has_method("set_score"):
 		game_flow.score_changed.connect(hud.set_score)
 	if game_flow.has_signal("balls_changed") and hud.has_method("set_balls"):
@@ -733,6 +736,27 @@ func _on_request_new_ball() -> void:
 		plunger.arm()
 	if hud != null and hud.has_method("hide_game_over"):
 		hud.hide_game_over()
+
+
+## STUCK-BALL WATCHDOG: nudge the live ball with a small impulse (the "ball search" pulse) to free it
+## in place. The impulse is built in playfield-local space (up-table -Z, a slight hop +Y, a little
+## random lateral so it does not just re-wedge the same way) and rotated into global space by the
+## tilted playfield's basis, because apply_central_impulse takes a global-space vector.
+func _on_request_nudge() -> void:
+	if ball == null or playfield == null:
+		return
+	var lateral: float = (randf() - 0.5) * 2.0  ## -1..1 random left/right
+	var local_dir: Vector3 = Vector3(lateral, 0.4, -1.0).normalized()
+	var impulse: Vector3 = playfield.global_transform.basis * local_dir * TableConfig.STUCK_NUDGE_STRENGTH
+	ball.apply_central_impulse(impulse)
+
+
+## Manual RESET: re-seat the live ball in the launch lane and re-arm the plunger (no ball spent). The
+## play-bar RESET button calls this as a "just in case" the player gets a stuck ball. A no-op unless a
+## ball is live, so pressing it in the menu / before launch / at game over does nothing. STABLE SIGNATURE.
+func manual_reset_ball() -> void:
+	if game_flow != null and game_flow.has_method("force_reseat"):
+		game_flow.force_reseat()
 
 
 ## Failsafe drain hit: only the live ball counts (ignore any other body), then route to the same
@@ -765,6 +789,12 @@ func _physics_process(delta: float) -> void:
 	# soft-lock: a launch that never crosses LAUNCH_REACHED_PLAY_Z is recovered after the settle gap.
 	if ball != null and game_flow.has_method("tick_launch_watch"):
 		game_flow.tick_launch_watch(ball.position.z, delta)
+
+	# STUCK-BALL WATCHDOG: feed the ball's MEASURED playfield-local position to GameFlow's stuck watch
+	# every frame. It only acts in BALL_IN_PLAY (a no-op otherwise), so this is cheap to call always.
+	# Same independent-oracle principle as the launch watch: the real body position, not a flag.
+	if ball != null and game_flow.has_method("tick_stuck_watch"):
+		game_flow.tick_stuck_watch(ball.position, delta)
 
 	# RESTART poll (GAME_OVER only).
 	if game_flow.current_state() != game_flow.State.GAME_OVER:

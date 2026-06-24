@@ -777,13 +777,30 @@ func _build_play_bar() -> void:
 	bg.bg_color = Color(0.0, 0.0, 0.0, 0.6)
 	_play_bar.add_theme_stylebox_override("panel", bg)
 	_hud.add_child(_play_bar)
-	var b := Button.new()
-	b.text = "MENU"
-	b.custom_minimum_size = Vector2(120.0, 48.0)
-	b.add_theme_font_size_override("font_size", 26)
-	b.pressed.connect(_enter_menu)
-	_apply_font(b, BUTTON_FONT_PATH)
-	_play_bar.add_child(b)
+	# A row: MENU (back to main menu) + RESET (re-seat a stuck ball, no ball spent - "just in case").
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_play_bar.add_child(row)
+	var menu_btn := Button.new()
+	menu_btn.text = "MENU"
+	menu_btn.custom_minimum_size = Vector2(120.0, 48.0)
+	menu_btn.add_theme_font_size_override("font_size", 26)
+	menu_btn.pressed.connect(_enter_menu)
+	_apply_font(menu_btn, BUTTON_FONT_PATH)
+	row.add_child(menu_btn)
+	var reset_btn := Button.new()
+	reset_btn.text = "RESET BALL"
+	reset_btn.custom_minimum_size = Vector2(160.0, 48.0)
+	reset_btn.add_theme_font_size_override("font_size", 26)
+	reset_btn.pressed.connect(_reset_stuck_ball)
+	_apply_font(reset_btn, BUTTON_FONT_PATH)
+	row.add_child(reset_btn)
+
+
+## Play-bar RESET BALL: re-seat the live ball in the launch lane (no ball spent) in case it got stuck.
+func _reset_stuck_ball() -> void:
+	if _table != null and _table.has_method("manual_reset_ball"):
+		_table.manual_reset_ball()
 
 
 func _add_action(parent: Node, text: String, cb: Callable) -> void:

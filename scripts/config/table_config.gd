@@ -365,6 +365,34 @@ const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z - 3.5
 ## the lane, left alone once it crosses the line).
 const LAUNCH_SETTLE_TIME_S: float = 2.0
 
+## ---- STUCK-BALL WATCHDOG ------------------------------------------------------------------------
+## A ball can wedge in a corner, settle on top of a part, or jitter in place without ever draining -
+## a soft-lock during play. GameFlow.tick_stuck_watch watches the ball's NET PROGRESS while in play
+## (table.gd feeds it the measured ball position): whenever the ball travels more than
+## STUCK_PROGRESS_DIST from where it was last "making progress", the watchdog resets. If it fails to
+## travel that far for STUCK_TIMEOUT_S, the ball is judged stuck. NET distance (not instantaneous
+## speed) is the test on purpose, so a ball that is "slightly moving but going nowhere" (a slow
+## jitter inside the radius) still counts as stuck.
+##
+## Escalation, gentle first: the first STUCK_MAX_NUDGES timeouts NUDGE the ball (a small impulse, the
+## "ball search" pulse a real machine uses) to try to free it without interrupting the game. If it is
+## STILL stuck after that, the ball is RE-SEATED in the launch lane and the plunger re-armed (no ball
+## spent) - the same recovery path as a failed launch and the manual RESET button.
+##
+## STUCK_PROGRESS_DIST: world units the ball must travel to count as "progress". ~2.5 ball radii, so
+## a ball genuinely rolling resets it constantly but a ball trembling in a wedge never does.
+const STUCK_PROGRESS_DIST: float = 1.5
+## STUCK_TIMEOUT_S: seconds of no progress before one stuck escalation fires. Generous enough that a
+## brief flipper cradle (the player re-flips, moving the ball, which resets the watch) is never
+## tripped, short enough that a real soft-lock is broken in a few seconds.
+const STUCK_TIMEOUT_S: float = 4.0
+## STUCK_MAX_NUDGES: how many nudge attempts before the hard re-seat. Two ball-search pulses, then
+## the guaranteed recovery.
+const STUCK_MAX_NUDGES: int = 2
+## STUCK_NUDGE_STRENGTH: impulse magnitude for a nudge (applied up-table with a little random lateral
+## and a slight hop, oriented to the tilted playfield). Enough to roll the ball a couple of widths.
+const STUCK_NUDGE_STRENGTH: float = 4.0
+
 ## ================================================================================================
 ## SLICE "real pinball furniture" placement + feel constants (2026-06-19).
 ## ADDED by the lead-programmer; NO existing value above this block changed (the world-scale

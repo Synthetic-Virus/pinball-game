@@ -61,6 +61,10 @@ signal message(text: String)
 signal game_over(final_score: int)
 signal request_new_ball()
 signal request_relaunch()
+## STUCK-BALL WATCHDOG: ask table.gd to NUDGE the live ball (a small "ball search" impulse) to try to
+## free it without interrupting play. Emitted by tick_stuck_watch for the first STUCK_MAX_NUDGES
+## stuck escalations; if the ball is still stuck after that, the watchdog re-seats it (request_relaunch).
+signal request_nudge()
 
 enum State { READY_TO_LAUNCH, LAUNCHING, BALL_IN_PLAY, GAME_OVER }
 
@@ -73,6 +77,15 @@ var _balls: int = STARTING_BALLS
 ## when it passes TableConfig.LAUNCH_SETTLE_TIME_S with the ball still in the lane, the launch is
 ## judged FAILED and the ball is recovered (re-armed for the same ball, no ball spent).
 var _launch_watch_elapsed: float = 0.0
+## STUCK-BALL WATCHDOG state (only meaningful in BALL_IN_PLAY).
+## _stuck_ref_pos: the last position from which the ball was judged to be "making progress".
+## _stuck_ref_valid: false until the first tick after entering play seeds the reference.
+## _stuck_elapsed: seconds since the ball last travelled STUCK_PROGRESS_DIST from the reference.
+## _stuck_nudges: how many nudge escalations have fired this stuck episode (re-seat after the cap).
+var _stuck_ref_pos: Vector3 = Vector3.ZERO
+var _stuck_ref_valid: bool = false
+var _stuck_elapsed: float = 0.0
+var _stuck_nudges: int = 0
 
 ## Begin a fresh game: reset score and ball count, emit initial state, and request the first ball.
 ## Called by table.gd _ready() to kick off gameplay. STABLE SIGNATURE.
@@ -148,6 +161,62 @@ func notify_ball_reached_play() -> void:
 	if _state != State.LAUNCHING:
 		return
 	_state = State.BALL_IN_PLAY
+	_reset_stuck_watch()  ## start the stuck watchdog fresh for this ball's time in play
+
+
+## STUCK-BALL WATCHDOG: clear the watch so the next time in play starts from zero. Called whenever the
+## ball (re-)enters play or is re-seated, so a fresh ball is never judged against a stale reference.
+func _reset_stuck_watch() -> void:
+	_stuck_ref_valid = false
+	_stuck_elapsed = 0.0
+	_stuck_nudges = 0
+
+
+## STUCK-BALL WATCHDOG, the in-play analogue of tick_launch_watch. table.gd feeds the ball's MEASURED
+## playfield-local position and the frame delta every physics frame; this only acts in BALL_IN_PLAY.
+##
+## Net-progress test (NOT instantaneous speed, so a "slightly moving but going nowhere" ball counts):
+## while the ball stays within STUCK_PROGRESS_DIST of the reference point, the timer runs. The moment
+## it travels further than that, it is making progress - reseed the reference and reset the timer.
+## When the timer passes STUCK_TIMEOUT_S the ball is judged stuck and one escalation fires: a NUDGE
+## for the first STUCK_MAX_NUDGES episodes, then a hard RE-SEAT (no ball spent). STABLE SIGNATURE.
+func tick_stuck_watch(ball_local_pos: Vector3, delta: float) -> void:
+	if _state != State.BALL_IN_PLAY:
+		return
+	# Seed the reference on the first tick after entering play.
+	if not _stuck_ref_valid:
+		_stuck_ref_pos = ball_local_pos
+		_stuck_ref_valid = true
+		_stuck_elapsed = 0.0
+		return
+	# Progress made: the ball left the no-progress radius. Reseed and reset the timer.
+	if ball_local_pos.distance_to(_stuck_ref_pos) > TableConfig.STUCK_PROGRESS_DIST:
+		_stuck_ref_pos = ball_local_pos
+		_stuck_elapsed = 0.0
+		return
+	# No progress: run the timer; escalate when it expires, then restart the timer for the next round.
+	_stuck_elapsed += delta
+	if _stuck_elapsed < TableConfig.STUCK_TIMEOUT_S:
+		return
+	_stuck_elapsed = 0.0
+	if _stuck_nudges < TableConfig.STUCK_MAX_NUDGES:
+		_stuck_nudges += 1
+		request_nudge.emit()  ## try to free it in place first
+	else:
+		force_reseat("BALL STUCK\nHOLD LAUNCH - release to fire")  ## guaranteed recovery
+
+
+## Re-seat the live ball in the launch lane and re-arm the plunger WITHOUT spending a ball. Shared by
+## the stuck watchdog's hard recovery and the manual RESET button (table.gd). Only meaningful while a
+## ball is live (BALL_IN_PLAY or LAUNCHING) - ignored at READY_TO_LAUNCH (nothing to recover) and
+## GAME_OVER. Returns to READY_TO_LAUNCH and reuses the request_relaunch re-seat path. STABLE SIGNATURE.
+func force_reseat(prompt: String = "HOLD LAUNCH - release to fire") -> void:
+	if _state != State.BALL_IN_PLAY and _state != State.LAUNCHING:
+		return
+	_state = State.READY_TO_LAUNCH
+	_reset_stuck_watch()
+	message.emit(prompt)
+	request_relaunch.emit()
 
 
 ## SOFT-LOCK FIX: the launch FAILED (the ball never reached play within the settle window). Recover:
