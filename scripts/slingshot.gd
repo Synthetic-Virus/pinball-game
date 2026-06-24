@@ -49,6 +49,45 @@ const CORNER_SEGMENTS: int = 4
 ## way. The kick still points INTO play (a modest rotation keeps the up-table component).
 const EXTRA_KICK_ROT_DEG: float = 0.0
 
+## SLICE "Low-poly slingshot asset" (2026-06-24): the imported low-poly model that REPLACES the
+## procedural gray-box triangle + posts/rubber as the VISIBLE art. Visual-only: the ball still
+## collides with the ConvexPolygonShape3D body built by _make_body_shape (see ARCHITECTURE.md 14.1).
+## If the .glb fails to import, the gray-box triangle (_make_mesh / _add_posts_and_rubber) STAYS so
+## the sling never vanishes (copy of the pop_bumper.gd fallback guard). The model is authored as the
+## LEFT slingshot; the RIGHT instance mirrors the visual by a negative-X scale (see _mirror_visual).
+const SLINGSHOT_ASSET_PATH: String = "res://assets/models/left_slingshot.glb"
+
+## The node name the imported .glb visual is instanced under. Tests resolve the imported visual by
+## this name; the procedural fallback keeps its base name "KickerMesh" (built by active_kicker.gd).
+const SLINGSHOT_VISUAL_NODE_NAME: String = "SlingshotVisual"
+
+## Object names inside the .glb the cosmetic flex animation drives (visual-only; see _play_flex).
+## The kicker finger + its red tip jab outward and snap back; the rubber ring flexes and snaps back.
+const KICKER_FINGER_NODE: String = "Kicker_Finger"
+const KICKER_TIP_NODE: String = "Kicker_Tip"
+const RUBBER_RING_NODE: String = "Sling_Rubber_Ring"
+
+## Flex animation timing (seconds): a quick jab out, then a snap back. Cosmetic only - decoupled
+## from the impulse (the behavioral test asserts the ball velocity is identical with this anim or
+## stubbed). Total round-trip ~110 ms reads as a crisp solenoid jab without lingering.
+const FLEX_JAB_TIME_S: float = 0.045
+const FLEX_RETURN_TIME_S: float = 0.065
+## How far (world units) the kicker finger jabs along the kick direction at full extension. Small -
+## the finger only pokes; the rubber band does the visible work. Sized off the ball radius so it
+## scales with the world, never a bare literal.
+const FLEX_JAB_DISTANCE: float = TableConfig.BALL_RADIUS * 0.6
+## How far the rubber ring stretches (extra scale on its long axis) at the peak of the flex.
+const FLEX_RUBBER_STRETCH: float = 0.18
+
+## TEST SEAM (copy of pop_bumper.gd): force the imported-asset load to use a different path so a
+## test can drive the fallback branch (a bad path leaves the gray-box visible). "" means "use
+## SLINGSHOT_ASSET_PATH" (the production path).
+var _asset_path_override: String = ""
+
+## The instanced .glb visual root (null until _install_art succeeds). The flex animation drives the
+## nodes UNDER this; the mirror (negative-X scale) is applied to this node for the RIGHT sling.
+var _visual: Node3D = null
+
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
 var _thickness: float = TableConfig.SLINGSHOT_THICKNESS
@@ -383,3 +422,81 @@ func _body_yaw() -> float:
 	# _raw_corners), so no extra rotation is applied - the shape is exactly what was specified. The
 	# kick direction (_kick_direction_for) is separate and still fires into play.
 	return 0.0
+
+
+# ==================================================================================================
+# SLICE "Low-poly slingshot asset" (2026-06-24): VISUAL + cosmetic anim ONLY (physics untouched).
+# Mirrors the proven pop_bumper.gd / flipper.gd discipline: art mesh never a collider, scale DERIVED
+# from the collider, gray-box fallback never vanishes, cosmetic anim decoupled from the ball.
+# Ownership: LEAD scaffolds; LEAD+PHYSICS fill install/scale/mirror; GAMEPLAY fills the flex anim.
+# ==================================================================================================
+
+
+## After the base builds the body / detector / gray-box triangle (super._ready), swap in the
+## imported low-poly art, mirror it for the right sling, and wire the cosmetic flex animation to the
+## SAME kick event as the impulse - on a separate path that never moves the ball. super._ready() is
+## first so the gray-box "KickerMesh" exists to hide.
+func _ready() -> void:
+	super._ready()
+	_install_art()
+	if _mirrored:
+		_mirror_visual()
+	# Cosmetic flex: the SAME kicked(direction) signal the impulse fires also drives _play_flex, on a
+	# SEPARATE path that touches only the visual meshes. Removing this connection leaves the kick
+	# byte-for-byte identical (the behavioral decoupling oracle).
+	kicked.connect(_play_flex)
+
+
+## LEAD + PHYSICS HALF (TODO): load the low-poly .glb as the visible art and hide the gray-box
+## triangle. COPY pop_bumper.gd._install_art EXACTLY (the proven pattern):
+##   1. path = SLINGSHOT_ASSET_PATH unless _asset_path_override is set (the test seam).
+##   2. load(path); if it is null or NOT a PackedScene, RETURN - the gray-box KickerMesh + the
+##      procedural posts/rubber STAY visible (the sling never vanishes on a bad asset). Fallback.
+##   3. instantiate under a child named SLINGSHOT_VISUAL_NODE_NAME; store it in _visual.
+##   4. scale = _derive_scale(_visual) (uniform; DERIVED from the collider footprint, no literal).
+##   5. on success, hide the gray-box "KickerMesh" (the procedural triangle + posts/rubber).
+## The structural test asserts: _visual exists and is pure MeshInstance3D (zero CollisionShape3D),
+## and its footprint TRACKS the collider (not a constant). See ARCHITECTURE.md 14.2.
+func _install_art() -> void:
+	# TODO(lead+physics): fill per the steps above, copied from pop_bumper.gd._install_art.
+	pass
+
+
+## LEAD + PHYSICS HALF (TODO): uniform scale so the imported model's top-down footprint matches the
+## collider's kicking-face span (SLINGSHOT_LENGTH). COPY pop_bumper.gd._derive_scale/_merged_aabb:
+## measure the visual's merged-AABB width from the MESH (an independent oracle on the scale), and
+## return (collider_span / visual_width). DERIVED, never hardcoded. The structural test asserts the
+## returned scale TRACKS SLINGSHOT_LENGTH (change the constant, the scale changes), not a literal.
+func _derive_scale(_visual_root: Node3D) -> float:
+	# TODO(lead+physics): merged-AABB measure vs SLINGSHOT_LENGTH, copied from pop_bumper.gd.
+	return 1.0
+
+
+## LEAD + PHYSICS HALF (TODO): mirror the RIGHT sling's VISUAL by a NEGATIVE-X SCALE on _visual (the
+## mesh node) - NOT a negative-scale on any CollisionShape3D (the collider mirror is already done by
+## SLINGSHOT_RIGHT_CORNERS in configure(), a position/rotation mirror). GOTCHA: a negative-X scale
+## flips the basis determinant negative, inverting triangle winding so the model can render
+## INSIDE-OUT. GUARD: set every imported material's cull_mode = CULL_DISABLED on _visual so the
+## double-sided render survives the determinant flip with correct-looking faces. The structural test
+## asserts _visual's basis determinant < 0 (the mirror is really applied) AND the KickerBody basis
+## determinant stays > 0 (the collider was NOT negative-scaled). If the cull-disabled mirror still
+## reads wrong in the deployed web shot, FLAG the producer for a baked mirrored .glb (do NOT
+## hand-tune per-mesh normals). See ARCHITECTURE.md 14.3.
+func _mirror_visual() -> void:
+	# TODO(lead+physics): scale.x = -abs(scale.x) on _visual; set CULL_DISABLED on its materials.
+	pass
+
+
+## GAMEPLAY HALF (TODO): the cosmetic flex animation. Triggered by the SAME kicked(direction) signal
+## as the impulse, but on a SEPARATE path that animates ONLY the visual meshes under _visual - it
+## must NEVER touch the ball (no ball method call, no ball state read). Jab Kicker_Finger + the tip
+## outward along `direction` by FLEX_JAB_DISTANCE over FLEX_JAB_TIME_S, then snap back over
+## FLEX_RETURN_TIME_S; flex Sling_Rubber_Ring by FLEX_RUBBER_STRETCH and snap back. Use a Tween that
+## targets only nodes resolved from _visual (KICKER_FINGER_NODE, KICKER_TIP_NODE, RUBBER_RING_NODE);
+## if _visual is null (fallback art), this is a safe no-op. The behavioral DECOUPLING test asserts
+## the ball velocity off a kick is IDENTICAL with this anim present and with this body stubbed out.
+## See ARCHITECTURE.md 14.4.
+func _play_flex(_direction: Vector3) -> void:
+	# TODO(gameplay): Tween the kicker finger/tip jab + rubber-ring flex on the VISUAL meshes only.
+	# Guard: if _visual == null, return (the gray-box fallback has no nodes to animate).
+	pass
