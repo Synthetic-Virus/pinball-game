@@ -525,6 +525,10 @@ func _install_art() -> void:
 	# the model's own AABB (independent oracle) and divides the collider span by it.
 	var factor: float = _derive_scale(_visual)
 	_visual.scale = Vector3(factor, factor, factor)
+	# COLLISION = VISUAL: rebuild the solid body + detector from the imported model's own geometry so
+	# the ball bounces off EXACTLY the slingshot you see (the corner hull was a different shape, so the
+	# ball passed through the visual - developer report).
+	_rebuild_collider_from_visual()
 	# On success, hide the gray-box placeholder (the procedural triangle + posts/rubber) so only
 	# the imported model is seen. The collider is untouched - this is purely the VISIBLE swap.
 	var gray_box: Node = get_node_or_null("KickerMesh")
@@ -533,6 +537,41 @@ func _install_art() -> void:
 	# Capture the AUTHORED rest state of the flex nodes ONCE, now, before any kick can animate them
 	# (QA BUG-044). Every flex snaps back to THESE values, never to a live (possibly mid-jab) read.
 	_capture_flex_rest()
+
+
+## Rebuild the solid bounce body AND the detector hull from the imported model's own vertices, in
+## this node's frame (valid because _body_yaw is 0, so the model frame == the collider frame). The
+## ball then collides with exactly the visible slingshot. The fixed kick direction is unchanged.
+func _rebuild_collider_from_visual() -> void:
+	if _visual == null or _body == null:
+		return
+	var pts := PackedVector3Array()
+	for mi: MeshInstance3D in _mesh_instances(_visual):
+		if mi.mesh == null:
+			continue
+		var xf: Transform3D = _visual.transform * TableConfig.relative_xform(_visual, mi)
+		for v: Vector3 in mi.mesh.get_faces():
+			pts.append(xf * v)
+	if pts.size() < 4:
+		return
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = pts
+	# Swap the SOLID body's shape (the ball bounces off this) and the DETECTOR's (fires the kick).
+	for c: Node in _body.get_children():
+		if c is CollisionShape3D:
+			(c as CollisionShape3D).shape = hull
+	for c2: Node in get_children():
+		if c2 is CollisionShape3D:
+			(c2 as CollisionShape3D).shape = hull
+	# TEMP DEBUG (remove after verifying): draw the rebuilt hull bright red so a screenshot confirms
+	# it now overlays the visible slingshot.
+	var dbg := MeshInstance3D.new()
+	dbg.mesh = hull.get_debug_mesh()
+	var dm := StandardMaterial3D.new()
+	dm.albedo_color = Color(1.0, 0.1, 0.1)
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dbg.material_override = dm
+	_body.add_child(dbg)
 
 
 ## Cache the authored rest position/scale of the three flex-animated sub-nodes (QA BUG-044). Called
