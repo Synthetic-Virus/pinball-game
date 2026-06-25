@@ -41,6 +41,8 @@ const PlungerScene := preload("res://scenes/elements/Plunger.tscn")
 const TargetScene := preload("res://scenes/elements/Target.tscn")
 const PopBumperScene := preload("res://scenes/elements/PopBumper.tscn")
 const SlingshotScene := preload("res://scenes/elements/Slingshot.tscn")
+const MiniFlipperScene := preload("res://scenes/elements/MiniFlipper.tscn")
+const WallScene := preload("res://scenes/elements/Wall.tscn")
 
 ## The standup target bank positions now come from TableConfig.STANDUP_BANK_POSITIONS (SLICE "real
 ## pinball furniture"): the 3 physical targets are re-homed into a readable mid-field bank a
@@ -69,6 +71,13 @@ var playfield: Node3D
 var ball: RigidBody3D
 var left_flipper: Node3D
 var right_flipper: Node3D
+## Upper-field MINI flipper (scripts/mini_flipper.gd). A REAL flipper at ~60% size, bound to the
+## existing "left_flipper" action (no new input). One instance this slice (the smaller, preferred
+## option). Kept as a typed handle so tests and the editor can address it.
+var mini_flipper: Node3D
+## Placeable WALL elements (scripts/wall_element.gd): static primitive-collider bodies with custom
+## wall.glb art. One demo instance this slice; the full wall-draw editor is future scope.
+var walls: Array[StaticBody3D] = []
 var plunger: Node
 var drain: Area3D
 var oob_drain: Area3D
@@ -335,6 +344,32 @@ func _build_dynamic_elements() -> void:
 	right_flipper.position = Vector3(spread, 0.0, pivot_z)
 	playfield.add_child(right_flipper)
 	right_flipper.configure("right_flipper", true)
+
+	# --- Mini flipper (upper-left, custom asset) --------------------------------------------------
+	# A REAL flipper at ~60% size (scripts/mini_flipper.gd) that bats the ball up toward the bumper
+	# cluster. Bound to the EXISTING "left_flipper" action so it flips with the lower-left flipper and
+	# needs NO new input (designer's preferred small option). Same physics drive + continuous_cd as the
+	# main flippers; only the geometry getters + asset are overridden.
+	mini_flipper = MiniFlipperScene.instantiate()
+	mini_flipper.name = "MiniFlipper"
+	mini_flipper.position = TableConfig.MINI_FLIPPER_PIVOT
+	playfield.add_child(mini_flipper)
+	mini_flipper.configure("left_flipper", false)
+
+	# --- Wall element (demo instance, custom asset) -----------------------------------------------
+	# A basic placeable wall (scripts/wall_element.gd): a PRIMITIVE BoxShape3D collider (never the art
+	# mesh) with high restitution, wearing the custom wall.glb (dark body + blue cap). ONE demo
+	# instance this slice so the asset is in-game and bouncing; the full wall-draw editor is future
+	# scope. Placed in the upper-left field clear of the lanes/bumpers.
+	walls.clear()
+	var wall: StaticBody3D = WallScene.instantiate()
+	wall.name = "WallDemo"
+	if wall.has_method("configure"):
+		wall.configure()
+	wall.position = TableConfig.WALL_DEMO_POS
+	wall.rotation.y = TableConfig.WALL_DEMO_YAW
+	playfield.add_child(wall)
+	walls.append(wall)
 
 	# --- Furniture: rebuilding from the developer's markup, ONE verified piece at a time ----------
 	# After the 2026-06-21 reset (flat play area + borders) we add furniture back per the hand-drawn

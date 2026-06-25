@@ -58,8 +58,47 @@ signal power_changed(power: float)
 signal ball_launched()
 
 ## Stroke phase machine. IDLE = parked at rest; FORWARD = driving up-table into the ball; RETURN =
-## driving back down-table to the rest position.
+## driving back down-table to the rest position. (Declared here so the gdlint definitions-order rule
+## is satisfied: enums precede consts.)
 enum StrokeState { IDLE, FORWARD, RETURN }
+
+## --- IMPORTED LAUNCHER ART + COSMETIC JUICE (SLICE "Custom low-poly asset integration") ----------
+## The launch lane now shows our custom low-poly launcher.glb: a static blue-lidded HOUSING plus a
+## moving plunger GROUP (rod + spring + tip + clip). The art is VISUAL ONLY and DECOUPLED from the
+## physics strike: the AnimatableBody3D _face (above) is the ONLY thing that touches the ball,
+## as before (QA BUG-017/025 honored - no ball.launch(), no code velocity set). The juice below
+## animates only nodes UNDER the imported subtree; a behavioral test asserts the launched ball's
+## velocity is IDENTICAL with the juice on vs off (the decoupling oracle).
+##
+## CHARGE/RELEASE JUICE (script-driven from the charge value, interactive, NOT an AnimationPlayer):
+##   - While charging, the moving group slides BACK (down-table) proportional to the live power, and
+##     the spring compresses (scales down its long axis). The player sees the plunger pull back
+##     they charge - the visible analogue of the meter.
+##   - On release, a HARD fast SNAP forward with a slight OVERSHOOT past rest, then a settle back to
+##     rest. This reads as the solenoid/spring firing. Decoupled: it cannot move the ball.
+const LAUNCHER_ASSET_PATH: String = "res://assets/models/launcher.glb"
+
+## The node name the imported launcher .glb is instanced under (tests resolve the visual by this).
+const LAUNCHER_VISUAL_NODE_NAME: String = "LauncherVisual"
+
+## Names of the imported objects the juice drives (visual only). Plunger_Anim is the empty parenting
+## the moving rod/tip/clip; Plunger_Spring is the coil that compresses. If a re-export renames
+## or strips them, the juice degrades to a safe no-op (the art still renders, launch unchanged).
+const PLUNGER_ANIM_NODE: String = "Plunger_Anim"
+const PLUNGER_SPRING_NODE: String = "Plunger_Spring"
+
+## How far (world units) the moving plunger group slides BACK at full charge. Sized off the ball
+## radius so it scales with the world, never a bare literal. The slide is purely cosmetic.
+const JUICE_PULL_BACK: float = TableConfig.BALL_RADIUS * 1.6
+## Release-snap overshoot as a fraction of the pull-back: the group shoots slightly PAST rest
+## (forward, up-table) before settling, reading as a punchy spring release.
+const JUICE_OVERSHOOT_FRACTION: float = 0.25
+## How much the spring compresses (fraction of its rest long-axis scale removed) at full charge.
+const JUICE_SPRING_COMPRESS: float = 0.45
+## Release-snap timing (seconds): a hard fast jab forward, then a soft settle from overshoot
+## to rest. Total ~120 ms reads as a crisp release without lingering.
+const JUICE_SNAP_TIME_S: float = 0.05
+const JUICE_SETTLE_TIME_S: float = 0.07
 
 ## How fast the meter oscillates. CHARGE_RATE of 2.5 makes a full 0->1->0 sweep take 0.8 s,
 ## which sits comfortably in the DESIGN feel target of 0.5-1.0 s.
@@ -69,6 +108,24 @@ const CHARGE_RATE: float = 2.5
 ## already left, and slow enough that the returning face cannot tunnel anything (it moves into an
 ## empty lane). Half the max stroke speed is a safe, simple choice.
 const RETURN_SPEED: float = TableConfig.PLUNGER_STROKE_SPEED_MAX * 0.5
+
+## TEST SEAM (copy of the pop_bumper / slingshot pattern): force the imported-asset load to use a
+## different path so a test can drive the fallback branch (a bad path leaves the gray-box face).
+## "" means "use LAUNCHER_ASSET_PATH" (the production path).
+var _asset_path_override: String = ""
+## DECOUPLING SEAM: when true, the cosmetic juice is suppressed (the visual never animates). A
+## behavioral test launches once with this false and once with it true and asserts the launched ball
+## velocity is IDENTICAL, proving the juice never moves the ball. INERT in play (never set).
+var _suppress_juice: bool = false
+## The instanced launcher .glb root (null until install / on fallback). The juice drives the
+## moving group + spring UNDER this; nothing here is ever a collider.
+var _launcher_visual: Node3D = null
+## Resolved handles to the moving group + spring (null if the model lacks them). Their AUTHORED
+## local transforms are captured as the rest baseline the juice animates from and returns to.
+var _anim_group: Node3D = null
+var _spring: Node3D = null
+var _anim_rest_pos: Vector3 = Vector3.ZERO
+var _spring_rest_scale: Vector3 = Vector3.ONE
 
 var _armed: bool = false
 var _charging: bool = false
@@ -97,6 +154,7 @@ var _impulse_applied: bool = false
 
 func _ready() -> void:
 	_build_face()
+	_install_launcher_art()
 
 
 ## Build the physical plunger face: an AnimatableBody3D box on the KINEMATIC_OBSTACLES layer, seated
@@ -174,6 +232,8 @@ func arm() -> void:
 	_release_seen = not Input.is_action_pressed("launch")
 	# Emit immediately so the HUD meter resets to zero on the same frame the ball resets.
 	power_changed.emit(0.0)
+	# Cosmetic: seat the moving plunger group at rest (no pull-back) when a fresh ball arms.
+	_apply_charge_visual(0.0)
 
 
 ## Disarm the plunger. Called if the ball drains before it was launched (rare but possible if a
@@ -220,6 +280,9 @@ func _physics_process(delta: float) -> void:
 		_power = pingpong(_charge_phase, 1.0)
 		# Emit every frame so the HUD meter animates smoothly.
 		power_changed.emit(_power)
+		# COSMETIC: slide the moving plunger group back + compress the spring proportional to the live
+		# power. Visual only - this drives nodes under the imported subtree, never the ball.
+		_apply_charge_visual(_power)
 	elif _charging:
 		# The player just released (was holding last frame, no longer holding this frame).
 		# This is the launch moment: use whatever power the meter is at right now.
@@ -247,6 +310,11 @@ func _do_launch() -> void:
 	_stroke_travelled = 0.0
 	_impulse_applied = false
 	_stroke_state = StrokeState.FORWARD
+
+	# COSMETIC release JUICE: snap the moving group forward (from its charged pull-back position) with
+	# a slight overshoot past rest, then settle. Sized from the power that was just released so a hard
+	# release reads punchier. Decoupled: it animates only the imported visual, never the ball.
+	_play_release_snap(clamped_power)
 
 	# Wake the ball if it has fallen asleep resting against the face, so the moving face's contact is
 	# registered this step. This does NOT set the ball's velocity (the contact still does that, keeping
@@ -379,3 +447,156 @@ func is_stroking() -> bool:
 ## dependent and is measured against the real ball in tests/test_plunger_launch.gd. Inert in play.
 func stroke_speed() -> float:
 	return _stroke_speed
+
+
+## TEST HOOK: suppress the cosmetic juice so a behavioral test can launch with the juice OFF and
+## compare the resulting ball velocity to a launch with it ON. Must be IDENTICAL (the decoupling
+## oracle). Inert in play (table.gd never calls it). Mirrors the slingshot flex decoupling proof.
+func set_suppress_juice_for_test(on: bool) -> void:
+	_suppress_juice = on
+
+
+## TEST HOOK: override the launcher .glb path so a test can drive the graceful-fallback branch
+## WITHOUT deleting the real file (a bogus path leaves only the gray-box face visible). Call before
+## _ready builds the plunger. INERT in production (table.gd never calls it).
+func set_asset_path_for_test(path: String) -> void:
+	_asset_path_override = path
+
+
+## TEST HOOK: the instanced launcher visual root (null on fallback). Lets a structural test assert
+## the art is pure mesh (zero CollisionShape3D under it) and resolve the moving group / spring.
+func launcher_visual() -> Node3D:
+	return _launcher_visual
+
+
+# ==================================================================================================
+# IMPORTED LAUNCHER ART + COSMETIC JUICE (visual only; the physical _face strike is untouched).
+# Mirrors the proven pop_bumper.gd / slingshot.gd discipline: art mesh never a collider, scale
+# DERIVED from the lane geometry, gray-box face survives a load failure, juice decoupled.
+# ==================================================================================================
+
+
+## Install the imported launcher.glb as the visible launch hardware: the static housing (Box_*), the
+## blue translucent lid (Box_Top), and the moving plunger group (Plunger_Anim + Plunger_Spring). The
+## subtree is parented to THIS Plunger node (seated at the playfield origin by table.gd), NOT to the
+## moving physical _face - art and collider are independent. On ANY load failure the gray-box
+## _face mesh stays visible (the launch hardware never vanishes). Idempotent via _launcher_visual
+## null guard.
+func _install_launcher_art() -> void:
+	if _launcher_visual != null:
+		return
+	var path: String = LAUNCHER_ASSET_PATH if _asset_path_override == "" else _asset_path_override
+	if path == "" or not ResourceLoader.exists(path):
+		return  ## fallback: the gray-box PlungerMesh on _face stays visible
+	var scene: Resource = load(path)
+	if scene == null or not (scene is PackedScene):
+		return  ## fallback (bad/absent asset): gray-box face stays visible
+	_launcher_visual = (scene as PackedScene).instantiate()
+	_launcher_visual.name = LAUNCHER_VISUAL_NODE_NAME
+	add_child(_launcher_visual)
+
+	# Orient: the model's moving rod points along its LOCAL +X; our launch lane runs up-table along
+	# local -Z. A +90-degree yaw about +Y maps model +X -> world -Z (rod forward = up-table) while the
+	# blue lid (+Y) stays up. Then scale uniformly so the housing length matches the lane chute, and
+	# position it at the plunger rest so the rod sits behind the resting ball. All cosmetic.
+	var factor: float = _derive_launcher_scale(_launcher_visual)
+	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
+	_launcher_visual.transform = Transform3D(
+		yaw.scaled(Vector3.ONE * factor), TableConfig.PLUNGER_REST_POS
+	)
+
+	# Resolve the moving group + spring and capture their AUTHORED rest transforms as the juice
+	# baseline. Absent nodes leave the juice a safe no-op (the static art still renders).
+	_anim_group = _launcher_visual.get_node_or_null(PLUNGER_ANIM_NODE) as Node3D
+	_spring = _launcher_visual.get_node_or_null(PLUNGER_SPRING_NODE) as Node3D
+	if _anim_group != null:
+		_anim_rest_pos = _anim_group.position
+	if _spring != null:
+		_spring_rest_scale = _spring.scale
+
+
+## Uniform scale so the imported housing's LONG axis matches the launch-lane chute the plunger works
+## in. DERIVED from the merged mesh AABB (an independent oracle), never a hardcoded model size: the
+## launcher should read as long as the stroke region of the lane. We fit the model's long axis to a
+## few stroke lengths so the housing spans the lane bottom sensibly. The structural test asserts the
+## scale TRACKS the merged AABB (change the model size, the scale follows), not a literal.
+func _derive_launcher_scale(root: Node3D) -> float:
+	var box: AABB = _merged_aabb(root)
+	var longest: float = maxf(box.size.x, maxf(box.size.y, box.size.z))
+	if longest < 0.0001:
+		return 1.0
+	# Target span = a small multiple of the stroke length so the housing reads as the lane bottom
+	# hardware without overrunning the chute. PLUNGER_STROKE_LENGTH is the gameplay constant the art
+	# tracks; this keeps the visual proportional to the actual launch travel, not a magic number.
+	var target_span: float = TableConfig.PLUNGER_STROKE_LENGTH * 3.0
+	return target_span / longest
+
+
+## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).
+func _merged_aabb(root: Node3D) -> AABB:
+	var out := AABB()
+	var first: bool = true
+	for mi: MeshInstance3D in _mesh_instances(root):
+		var local: Transform3D = root.global_transform.affine_inverse() * mi.global_transform
+		var a: AABB = local * mi.get_aabb()
+		if first:
+			out = a
+			first = false
+		else:
+			out = out.merge(a)
+	return out
+
+
+## Every MeshInstance3D under `node` (recursive).
+func _mesh_instances(node: Node) -> Array:
+	var found: Array = []
+	if node is MeshInstance3D:
+		found.append(node)
+	for c: Node in node.get_children():
+		found.append_array(_mesh_instances(c))
+	return found
+
+
+## COSMETIC: set the moving plunger group + spring to the visual state for `power` in [0,1]. At
+## power 0 they sit at the authored rest; at power 1 the group is pulled BACK by JUICE_PULL_BACK and
+## the spring is compressed by JUICE_SPRING_COMPRESS. WHY model-LOCAL -X for pull-back: the model
+## rod points along +X (forward = up-table after the install yaw), so retracting it is -X. This
+## reads as the player drawing the plunger back as the meter charges. Pure visual: no ball touched.
+func _apply_charge_visual(power: float) -> void:
+	if _suppress_juice:
+		return
+	var p: float = clampf(power, 0.0, 1.0)
+	if _anim_group != null:
+		# Pull back along the model's local -X (forward is +X), so the rod retracts as charge rises.
+		_anim_group.position = _anim_rest_pos + Vector3(-JUICE_PULL_BACK * p, 0.0, 0.0)
+	if _spring != null:
+		# Compress the coil on its long axis (model X) toward the housing as charge rises.
+		var s: Vector3 = _spring_rest_scale
+		s.x = _spring_rest_scale.x * (1.0 - JUICE_SPRING_COMPRESS * p)
+		_spring.scale = s
+
+
+## COSMETIC release SNAP: from the charged pull-back, jab the moving group fast FORWARD past rest
+## (overshoot), then settle back to the authored rest; the spring snaps to full length. Driven by
+## a Tween on the imported visual nodes ONLY - no ball method called, no ball state read, so the
+## launched ball velocity is identical whether this runs or not (decoupling oracle). A no-op when
+## the juice is suppressed or the model lacks the moving nodes.
+func _play_release_snap(power: float) -> void:
+	if _suppress_juice:
+		return
+	if _anim_group == null and _spring == null:
+		return
+	var overshoot: float = JUICE_PULL_BACK * JUICE_OVERSHOOT_FRACTION * clampf(power, 0.0, 1.0)
+	var tween: Tween = create_tween()
+	tween.set_parallel(true)
+	if _anim_group != null:
+		# Phase 1: hard jab forward PAST rest (overshoot is +X = forward in model space).
+		var peak: Vector3 = _anim_rest_pos + Vector3(overshoot, 0.0, 0.0)
+		tween.tween_property(_anim_group, "position", peak, JUICE_SNAP_TIME_S)
+		# Phase 2: settle from the overshoot back to the authored rest.
+		tween.tween_property(
+			_anim_group, "position", _anim_rest_pos, JUICE_SETTLE_TIME_S
+		).set_delay(JUICE_SNAP_TIME_S)
+	if _spring != null:
+		# The coil snaps back to full rest length over the same window.
+		tween.tween_property(_spring, "scale", _spring_rest_scale, JUICE_SNAP_TIME_S)

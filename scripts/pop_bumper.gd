@@ -23,12 +23,14 @@ extends "res://scripts/active_kicker.gd"
 ## and _build_detector_and_mesh can read a single resolved value. The detector is built one
 ## BALL_RADIUS
 ## larger than this so body_entered fires as the ball arrives.
-## MUSHROOM art (custom model, see CREDITS.md). The body+cap is the visible mushroom, scaled
-## by a factor DERIVED from the collider radius (never a magic number) so the art follows the
-## physics, and rendered slightly WIDER than the collider (POP_BUMPER_CAP_OVERHANG) so the ball
-## tucks under the lid. If the .glb fails to import, the gray-box cylinder (_make_mesh) stays - the
-## bumper never vanishes.
-const BODY_ASSET_PATH: String = "res://assets/models/bumper_body.glb"
+## POP BUMPER art (custom low-poly model, SLICE "Custom low-poly asset integration", 2026-06-24).
+## The imported pop_bumper.glb is the matched-family stack of Bumper_Base + Bumper_Body + Bumper_Cap
+## (replacing the older borrowed bumper_body.glb). It is the visible mushroom, scaled by a factor
+## DERIVED from the collider radius (never a magic number) so the art follows the physics, and
+## rendered slightly WIDER than the collider (POP_BUMPER_CAP_OVERHANG) so the ball tucks under the
+## lid. If the .glb fails to import, the gray-box cylinder (_make_mesh) stays - the bumper never
+## vanishes. The whole .glb subtree (all three named parts) is instanced, so no part is dropped.
+const BODY_ASSET_PATH: String = "res://assets/models/pop_bumper.glb"
 
 var _radius: float = TableConfig.POP_BUMPER_RADIUS
 var _height: float = TableConfig.POP_BUMPER_HEIGHT
@@ -69,8 +71,8 @@ func _make_body_shape() -> Shape3D:
 
 
 ## Detector = the EXACT body cylinder (no proximity padding), so body_entered fires when the ball
-## SURFACE touches the bumper, not a ball-radius early (developer: "a true contact point ... same for
-## the bumpers"). The Area-vs-ball overlap already accounts for the ball's own radius.
+## SURFACE touches the bumper, not a ball-radius early (developer: "a true contact point ...
+## same for the bumpers"). The Area-vs-ball overlap already accounts for the ball's own radius.
 func _make_detector_shape() -> Shape3D:
 	var shape := CylinderShape3D.new()
 	shape.radius = _radius

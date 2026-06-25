@@ -130,6 +130,50 @@ const FLIPPER_BAT_MAX_Z: float = 23.66
 ## drain). Increase if a future flipper resize pushes the bat zone further down-table.
 const DRAIN_BAT_CLEARANCE: float = 0.6
 
+## ---- MINI FLIPPER (SLICE "Custom low-poly asset integration", 2026-06-24) -----------------------
+## A small upper-field flipper that bats the ball up toward the bumper cluster (DESIGN: "a mini
+## flipper bats the ball up top"). It is a REAL flipper (scripts/mini_flipper.gd extends flipper.gd:
+## same force/hinge/return-spring drive, continuous_cd, no-tunnel gate), only SMALLER. The smaller,
+## preferred option (designer's call): ONE upper-LEFT mini flipper, bound to the EXISTING
+## "left_flipper" action so it needs NO new input wiring (it flips together with the lower-left
+## flipper, the classic upper-flipper convention). NO new input system was added.
+##
+## Geometry: ~60% of the main flipper so it reads as a mini. Placed up in the field, outboard-left,
+## angled to feed the bumper cluster. Y is resolved on the surface by table.gd. Z is up-table (-Z).
+const MINI_FLIPPER_LENGTH: float = FLIPPER_LENGTH * 0.6
+const MINI_FLIPPER_WIDTH: float = FLIPPER_WIDTH * 0.85
+const MINI_FLIPPER_HEIGHT: float = FLIPPER_HEIGHT
+## Rest/up angles for the mini. It sits up-field and swings up toward center to bat the ball at the
+## bumper cluster. Same sign convention as the main flippers (handedness negates for a mirror).
+const MINI_FLIPPER_REST_ANGLE: float = -0.50
+const MINI_FLIPPER_UP_ANGLE: float = 0.30
+## Pivot of the single upper-left mini flipper (playfield-local). Up in the field on the left, clear
+## of the bumper cluster (POP_BUMPER_POSITIONS sit around z -5..-10) and inside the side wall.
+const MINI_FLIPPER_PIVOT: Vector3 = Vector3(-7.5, 0.0, -2.0)
+
+## ---- WALL ELEMENT (SLICE "Custom low-poly asset integration", 2026-06-24) -----------------------
+## A basic PLACEABLE wall element built from our custom wall.glb (dark Wall_Body + blue translucent
+## Wall_Cap). The art is VISUAL ONLY; the collider is a PRIMITIVE BoxShape3D (never the art) with
+## HIGH restitution so the ball bounces off it with life and never tunnels (>= ball-diameter tall,
+## continuous_cd on the ball). The full draw-along-curve / closed-solid editor is OUT OF SCOPE; this
+## just makes the wall asset instanced/placeable in the game now. table.gd places one demo instance.
+##
+## Default wall segment dimensions (world units). LENGTH is the long span; THICKNESS the slab depth;
+## HEIGHT must exceed the ball DIAMETER (1.2) so the ball cannot ride over it. The art is scaled to
+## these from its own AABB (derived, never hardcoded), so re-exporting the model self-corrects.
+const WALL_ELEMENT_LENGTH: float = 6.0
+const WALL_ELEMENT_THICKNESS: float = WALL_THICKNESS
+const WALL_ELEMENT_HEIGHT: float = WALL_HEIGHT
+## Wall bounce: high restitution so the ball rebounds with life (DESIGN: "walls bounce the ball with
+## life"). Below 1.0 so it never manufactures energy; well above the dead BALL_BOUNCE 0.15.
+const WALL_ELEMENT_BOUNCE: float = 0.6
+const WALL_ELEMENT_FRICTION: float = 0.2
+## Demo placement of the single instanced wall (playfield-local) + its yaw (radians about +Y). A
+## short angled wall in the upper-left field, clear of the lanes, so the demo shows the asset
+## bouncing a ball. Cosmetic placement only; the editor will own real wall placement later.
+const WALL_DEMO_POS: Vector3 = Vector3(-9.0, 0.0, -13.0)
+const WALL_DEMO_YAW: float = 0.6
+
 ## ---- DRAIN -------------------------------------------------------------------------------------
 ## Open center drain: a trigger volume below the flippers. A ball entering it is lost.
 ## DRAIN_Z sits BELOW the flipper bat catch zone (the drain up-table edge clears FLIPPER_BAT_MAX_Z)
