@@ -537,7 +537,7 @@ func _merged_aabb(root: Node3D) -> AABB:
 	var out := AABB()
 	var first: bool = true
 	for mi: MeshInstance3D in _mesh_instances(root):
-		var local: Transform3D = root.global_transform.affine_inverse() * mi.global_transform
+		var local: Transform3D = TableConfig.relative_xform(root, mi)
 		var a: AABB = local * mi.get_aabb()
 		if first:
 			out = a
