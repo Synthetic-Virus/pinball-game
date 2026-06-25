@@ -757,12 +757,9 @@ func _build_build_panel() -> void:
 	column.add_child(_panel_body)
 	var body: VBoxContainer = _panel_body
 
-	# Navigation up top so it is always obvious how to leave BUILD mode (the game HUD is hidden here).
-	# NOTE: the button font (Schwarzenberg-Italic) lacks < > / ( ) glyphs, so labels avoid them.
-	_add_action(body, "MAIN MENU", _enter_menu)
-	_add_action(body, "PLAY", _enter_play)
-
-	# Camera: middle-drag pans, wheel (with nothing selected) zooms; a button resets to the play view.
+	# WIDE layout, not a long vertical strip down the playfield (developer: "make it wide not long, it
+	# blocks too much of the play field"). A short header, the picker, then every tool button in a
+	# 2-column grid: roughly half the height, twice the width.
 	var cam_hint := Label.new()
 	cam_hint.text = "view: middle-drag pan, wheel zoom"
 	cam_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -770,44 +767,51 @@ func _build_build_panel() -> void:
 	cam_hint.add_theme_font_size_override("font_size", 18)
 	cam_hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.85))
 	body.add_child(cam_hint)
-	_add_action(body, "Reset view", _reset_view)
-	_add_action(body, "Grid show hide", _toggle_grid)
-	_add_action(body, "Snap to grid", _toggle_snap)
 
-	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
+	# Object picker: dropdown (full width) with the mirror toggle + PLACE sharing the row below it.
 	_object_dropdown = OptionButton.new()
-	_object_dropdown.custom_minimum_size = Vector2(300.0, 48.0)
+	_object_dropdown.custom_minimum_size = Vector2(460.0, 48.0)
 	_object_dropdown.add_theme_font_size_override("font_size", 28)
 	for i: int in range(_placeables.size()):
 		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
 	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
 	body.add_child(_object_dropdown)
+	var pick_row := HBoxContainer.new()
+	body.add_child(pick_row)
 	_mirror_check = CheckBox.new()
 	_mirror_check.text = "Mirror LR linked"
 	_mirror_check.add_theme_font_size_override("font_size", 28)
 	_apply_font(_mirror_check, BUTTON_FONT_PATH)
-	body.add_child(_mirror_check)
-	_add_action(body, "PLACE", _place_from_dropdown)
+	pick_row.add_child(_mirror_check)
+	_add_grid_action(pick_row, "PLACE", _place_from_dropdown)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.custom_minimum_size = Vector2(230.0, 0.0)
+	_status.custom_minimum_size = Vector2(460.0, 0.0)
 	_status.add_theme_font_size_override("font_size", 18)
 	_status.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	body.add_child(_status)
 
-	_add_action(body, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
-	_add_action(body, "Draw WALL", func() -> void: _begin_draw("wall", false))
-	_add_action(body, "Draw WIRE ramp", func() -> void: _begin_draw_wire(2))
-	_add_action(body, "DONE drawing", _finish_draw)
-	# Wire-ramp height: raise/lower the point under the cursor (or use the + / - keys).
-	# Labels avoid + / - : the button font (Schwarzenberg-Italic) lacks those glyphs and renders them
-	# as tofu boxes (developer report). The = / - keys still raise/lower the point under the cursor.
-	_add_action(body, "Raise point", func() -> void: _adjust_height(HEIGHT_STEP))
-	_add_action(body, "Lower point", func() -> void: _adjust_height(-HEIGHT_STEP))
-	_add_action(body, "Grab move  G", _toggle_grab)
-	_add_action(body, "Undo  Ctrl Z", _undo)
-	_add_action(body, "Delete selected", _delete_selected)
+	# Every navigation + tool button in a 2-column grid.
+	# NOTE: the button font (Schwarzenberg-Italic) lacks < > / ( ) + - glyphs, so labels avoid them
+	# (they render as tofu boxes - developer report). The = / - keys still raise/lower wire points.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	body.add_child(grid)
+	_add_grid_action(grid, "MAIN MENU", _enter_menu)
+	_add_grid_action(grid, "PLAY", _enter_play)
+	_add_grid_action(grid, "Reset view", _reset_view)
+	_add_grid_action(grid, "Grid show hide", _toggle_grid)
+	_add_grid_action(grid, "Snap to grid", _toggle_snap)
+	_add_grid_action(grid, "Draw GUIDE", func() -> void: _begin_draw("guide", true))
+	_add_grid_action(grid, "Draw WALL", func() -> void: _begin_draw("wall", false))
+	_add_grid_action(grid, "Draw WIRE ramp", func() -> void: _begin_draw_wire(2))
+	_add_grid_action(grid, "DONE drawing", _finish_draw)
+	_add_grid_action(grid, "Raise point", func() -> void: _adjust_height(HEIGHT_STEP))
+	_add_grid_action(grid, "Lower point", func() -> void: _adjust_height(-HEIGHT_STEP))
+	_add_grid_action(grid, "Grab move  G", _toggle_grab)
+	_add_grid_action(grid, "Undo  Ctrl Z", _undo)
+	_add_grid_action(grid, "Delete selected", _delete_selected)
 	_add_action(body, "SAVE", _save)
 	_add_action(body, "RESET saved", _reset_saved)
 
@@ -851,6 +855,18 @@ func _add_action(parent: Node, text: String, cb: Callable) -> void:
 	b.text = text
 	b.custom_minimum_size = Vector2(300.0, 48.0)  ## wider panel + taller hit target (developer request)
 	b.add_theme_font_size_override("font_size", 30)  ## larger, readable; min width widens the whole panel
+	b.pressed.connect(cb)
+	_apply_font(b, BUTTON_FONT_PATH)
+	parent.add_child(b)
+
+
+## A narrower action button for the 2-column tool grid, so the panel reads WIDE rather than long.
+## Two of these per row (~225 each) keep the panel about 460 wide and roughly half as tall.
+func _add_grid_action(parent: Node, text: String, cb: Callable) -> void:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(225.0, 46.0)
+	b.add_theme_font_size_override("font_size", 24)
 	b.pressed.connect(cb)
 	_apply_font(b, BUTTON_FONT_PATH)
 	parent.add_child(b)

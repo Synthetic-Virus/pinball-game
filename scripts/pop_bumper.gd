@@ -150,9 +150,9 @@ func _apply_blue_material(root: Node3D) -> void:
 func _flash_on_hit() -> void:
 	if _bumper_mat == null:
 		return
-	_bumper_mat.emission_energy_multiplier = 0.6  ## a gentle glow, not a strobe
+	_bumper_mat.emission_energy_multiplier = 2.0  ## a clear pop on hit (0.6 was too faint to see)
 	var tw: Tween = create_tween()
-	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.18)
+	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.25)
 
 
 ## Uniform scale so the cap's footprint matches the CAP diameter (2 * cap_radius), where cap_radius

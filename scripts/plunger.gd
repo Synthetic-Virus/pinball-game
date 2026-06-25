@@ -120,6 +120,9 @@ var _suppress_juice: bool = false
 ## The instanced launcher .glb root (null until install / on fallback). The juice drives the
 ## moving group + spring UNDER this; nothing here is ever a collider.
 var _launcher_visual: Node3D = null
+## The uniform scale applied to the launcher model, kept so the launch animation can move the rod by
+## the right amount in the model's own (scaled) local space.
+var _launcher_scale: float = 1.0
 ## Resolved handles to the moving group + spring (null if the model lacks them). Their AUTHORED
 ## local transforms are captured as the rest baseline the juice animates from and returns to.
 var _anim_group: Node3D = null
@@ -376,6 +379,21 @@ func _advance_stroke(delta: float) -> void:
 			_stroke_state = StrokeState.IDLE
 		else:
 			_face.position += to_rest.normalized() * step
+	# Drive the VISIBLE rod/tip/clip + spring to follow the stroke (developer: the push rod must move
+	# WITH the spring during the launch, not stay still while only the collision face moves).
+	_drive_launch_visual()
+
+
+## Make the visible rod/tip/clip group + spring follow the launch stroke, so the plunger moves WITH
+## the spring instead of staying still while only the invisible collision face strokes. Driven from
+## the face's forward offset from rest, divided by the model scale into the model's local +X.
+func _drive_launch_visual() -> void:
+	if _anim_group == null or _face == null or _launcher_scale < 0.0001:
+		return
+	var fwd_world: float = TableConfig.PLUNGER_REST_POS.z - _face.position.z
+	_anim_group.position = _anim_rest_pos + Vector3(fwd_world / _launcher_scale, 0.0, 0.0)
+	if _spring != null:
+		_spring.scale = _spring_rest_scale  ## the coil relaxes back to its rest length as it fires
 
 
 ## Apply the launch impulse to the ball ONCE per forward stroke, the first frame the face is
@@ -500,6 +518,7 @@ func _install_launcher_art() -> void:
 	# blue lid (+Y) stays up. Then scale uniformly so the housing length matches the lane chute, and
 	# position it at the plunger rest so the rod sits behind the resting ball. All cosmetic.
 	var factor: float = _derive_launcher_scale(_launcher_visual)
+	_launcher_scale = factor  ## kept so the launch animation can move the rod in the model's scale
 	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
 	# Place the model so its TIP (model-local +X max) lands at the plunger face contact point, with the
 	# housing extending DOWN-table behind it. This makes the VISIBLE plunger tip the thing that meets
@@ -533,14 +552,16 @@ func _install_launcher_art() -> void:
 ## scale TRACKS the merged AABB (change the model size, the scale follows), not a literal.
 func _derive_launcher_scale(root: Node3D) -> float:
 	var box: AABB = _merged_aabb(root)
-	var longest: float = maxf(box.size.x, maxf(box.size.y, box.size.z))
-	if longest < 0.0001:
+	# Fit the housing CROSS-SECTION (not the long lane axis) so the BALL actually fits inside the
+	# launcher channel (developer: "the ball should sit inside the front bit"; it was scaled too small).
+	# Cross-section = the MIDDLE of the three sorted dims (the lane length is the largest). Target it at
+	# ~2.2 ball diameters so the ball rides in the channel with margin; the lane length then follows.
+	var dims: Array[float] = [box.size.x, box.size.y, box.size.z]
+	dims.sort()
+	var cross: float = dims[1]
+	if cross < 0.0001:
 		return 1.0
-	# Target span = a small multiple of the stroke length so the housing reads as the lane bottom
-	# hardware without overrunning the chute. PLUNGER_STROKE_LENGTH is the gameplay constant the art
-	# tracks; this keeps the visual proportional to the actual launch travel, not a magic number.
-	var target_span: float = TableConfig.PLUNGER_STROKE_LENGTH * 3.0
-	return target_span / longest
+	return (TableConfig.BALL_RADIUS * 2.0 * 2.2) / cross
 
 
 ## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).
