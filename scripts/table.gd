@@ -500,6 +500,8 @@ func editor_editables() -> Array:
 		arr.append(left_flipper)
 	if right_flipper != null:
 		arr.append(right_flipper)
+	if mini_flipper != null:
+		arr.append(mini_flipper)  ## the mini flipper is editable too (was missing - could not select it)
 	for rail: Node in rails:
 		if is_instance_valid(rail):
 			arr.append_array(rail.handles())
