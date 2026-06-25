@@ -221,11 +221,16 @@ func _pick(screen_pos: Vector2) -> Node3D:
 		return null
 	var click := Vector2(local.x, local.z)
 	var best: Node3D = null
-	var best_dist: float = SELECT_RADIUS
+	var best_dist: float = INF
 	for node: Node3D in _editables():
 		var here := Vector2(node.position.x, node.position.z)
 		var d: float = click.distance_to(here)
-		if d < best_dist:
+		# Per-element pick radius: most furniture uses SELECT_RADIUS, but a flipper sits at its pivot
+		# while the bat reaches a full length away, so it reports a larger radius (editor_pick_radius).
+		var r: float = SELECT_RADIUS
+		if node.has_method("editor_pick_radius"):
+			r = node.editor_pick_radius()
+		if d <= r and d < best_dist:
 			best_dist = d
 			best = node
 	return best

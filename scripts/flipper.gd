@@ -199,6 +199,14 @@ func editor_move(local_pos: Vector3) -> void:
 		_body.global_transform = xf
 
 
+## Editor click radius. The flipper node sits at the PIVOT, but the BAT extends a full flipper-length
+## away from it, so a pivot-only pick (SELECT_RADIUS) makes the flipper feel unselectable when you
+## click the bat. Returning the bat length lets a click anywhere along the bat select the flipper.
+## STABLE SIGNATURE (the layout editor calls this if present). Mini flipper inherits it (smaller len).
+func editor_pick_radius() -> float:
+	return _flipper_length()
+
+
 ## Build the RigidBody bat + HingeJoint3D from TableConfig dimensions. Idempotent: only builds once.
 func _build_flipper() -> void:
 	if _body != null:
