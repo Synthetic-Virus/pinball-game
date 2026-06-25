@@ -83,17 +83,20 @@ func set_ball(ball: RigidBody3D) -> void:
 ## (subclass), apply the impulse (physics half), emit kicked + scored. The cooldown gates BOTH so a
 ## resting ball is pushed off once, not strobed (no machine-gun farming - DESIGN must-feel #2).
 func _on_body_entered(body: Node) -> void:
+	print("[KDBG] ", name, " entered=", body.name, " ball=", _ball.name if _ball != null else "null")  ## DIAGNOSTIC
 	if body != _ball:
 		return
 
 	var now_ms: float = float(Time.get_ticks_msec())
 	if now_ms < _cooldown_until_ms:
+		print("[KDBG] ", name, " cooldown-skip")  ## DIAGNOSTIC
 		return
 
 	# CONTACT GATE: the detector is now the EXACT body shape (no proximity padding), so body_entered
 	# fires at real contact. A subclass may still REJECT a contact by where it landed - a slingshot
 	# only kicks off its band, not its posts/back (developer: "it should be a true contact point").
 	if not _contact_should_kick(_ball.global_position):
+		print("[KDBG] ", name, " contact-rejected")  ## DIAGNOSTIC
 		return
 
 	_cooldown_until_ms = now_ms + TableConfig.KICK_COOLDOWN_S * 1000.0
@@ -102,6 +105,7 @@ func _on_body_entered(body: Node) -> void:
 	var direction: Vector3 = _kick_direction_for(_ball.global_position)
 	_apply_kick(direction)
 	kicked.emit(direction)
+	print("[KDBG] ", name, " KICKED dir=", direction)  ## DIAGNOSTIC
 	scored.emit(points)
 
 
