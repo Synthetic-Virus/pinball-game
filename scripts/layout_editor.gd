@@ -21,6 +21,7 @@ extends Node
 const LAYOUT_KEY: String = "pinball_layout"   ## browser localStorage key the layout is saved under
 const SELECT_RADIUS: float = 1.6              ## a click within this many table units grabs an element
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
+const ANGLE_SNAP_DEG: float = 15.0            ## with SHIFT held, rotation snaps to this increment
 const SELECT_LIFT: float = 0.6                ## how far the selected element lifts (visual cue only)
 const LONG_PRESS_MS: float = 350.0            ## a play touch held this long also fires launch (spacebar)
 const HEIGHT_STEP: float = 0.4                ## how much + / - raise/lower a wire-ramp point per press
@@ -62,6 +63,8 @@ var _hud_dragging: bool = false
 var _status: Label = null
 var _object_dropdown: OptionButton = null  ## the placeable-object picker (replaces the button list)
 var _mirror_check: CheckBox = null         ## when ticked, a placed object gets a linked L/R mirror
+var _snap_to_grid: bool = false            ## when on, dragging snaps element position to the grid step
+var _grid_visible: bool = true             ## coord-grid show/hide state, toggled from the panel
 
 ## Every object the dropdown can place: furniture + the imported parts. kind "furniture" routes to
 ## editor_spawn, "asset" routes to editor_spawn_asset. Built in _build_hud from TableConfig.
@@ -183,15 +186,13 @@ func _handle_mouse_button(event: InputEventMouseButton) -> void:
 	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
 		if _selected != null:
 			_push_undo()
-			_selected.rotation.y += deg_to_rad(ROTATE_STEP_DEG)  ## rotate the selection
-			_update_twin(_selected)
+			_rotate_selected(1, event.shift_pressed)  ## SHIFT = snap to 15-degree increments
 		elif _table != null and _table.has_method("camera_zoom"):
 			_table.camera_zoom(1.1)  ## nothing selected: zoom the camera IN (capped in the table)
 	elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 		if _selected != null:
 			_push_undo()
-			_selected.rotation.y -= deg_to_rad(ROTATE_STEP_DEG)
-			_update_twin(_selected)
+			_rotate_selected(-1, event.shift_pressed)
 		elif _table != null and _table.has_method("camera_zoom"):
 			_table.camera_zoom(1.0 / 1.1)  ## zoom OUT
 
@@ -282,6 +283,12 @@ func _update_sel_marker() -> void:
 ## Move a selected node to a new (x, z), handling the cases the editor cares about: flippers need a
 ## physics teleport (editor_move), rails rebuild from their handle, and a mirror twin follows.
 func _apply_move(node: Node3D, x: float, z: float) -> void:
+	# Snap-to-grid: round the drop to the visible grid step when the toggle is on.
+	if _snap_to_grid and _table != null and _table.has_method("grid_step"):
+		var step: float = _table.grid_step()
+		if step > 0.0:
+			x = snappedf(x, step)
+			z = snappedf(z, step)
 	if node.has_method("editor_move"):
 		node.editor_move(Vector3(x, node.position.y, z))
 	else:
@@ -353,6 +360,33 @@ func _update_twin(node: Node3D) -> void:
 		var rail: Node = twin.get_meta("rail")
 		if is_instance_valid(rail):
 			rail.rebuild()
+
+
+## Rotate the selection one wheel tick. Normal = ROTATE_STEP_DEG; with SHIFT, snap the result to the
+## nearest ANGLE_SNAP_DEG (15-degree) increment for clean alignment. The mirror twin follows.
+func _rotate_selected(dir: int, shift: bool) -> void:
+	if _selected == null:
+		return
+	if shift:
+		var cur_deg: float = rad_to_deg(_selected.rotation.y)
+		_selected.rotation.y = deg_to_rad(snappedf(cur_deg + float(dir) * ANGLE_SNAP_DEG, ANGLE_SNAP_DEG))
+	else:
+		_selected.rotation.y += float(dir) * deg_to_rad(ROTATE_STEP_DEG)
+	_update_twin(_selected)
+
+
+## Toggle the coord grid on/off (the table owns the grid node).
+func _toggle_grid() -> void:
+	_grid_visible = not _grid_visible
+	if _table != null and _table.has_method("set_grid_visible"):
+		_table.set_grid_visible(_grid_visible)
+	_flash("Grid %s" % ("ON" if _grid_visible else "OFF"))
+
+
+## Toggle snap-to-grid for dragging. When on, _apply_move rounds the drop to the visible grid step.
+func _toggle_snap() -> void:
+	_snap_to_grid = not _snap_to_grid
+	_flash("Snap to grid %s" % ("ON" if _snap_to_grid else "OFF"))
 
 
 func _editables() -> Array:
@@ -732,18 +766,20 @@ func _build_build_panel() -> void:
 	cam_hint.add_theme_color_override("font_color", Color(0.6, 0.7, 0.85))
 	body.add_child(cam_hint)
 	_add_action(body, "Reset view", _reset_view)
+	_add_action(body, "Grid show hide", _toggle_grid)
+	_add_action(body, "Snap to grid", _toggle_snap)
 
 	# Object picker: a dropdown (so the long list does not crowd the screen) + a Place button.
 	_object_dropdown = OptionButton.new()
-	_object_dropdown.custom_minimum_size = Vector2(230.0, 40.0)
-	_object_dropdown.add_theme_font_size_override("font_size", 22)
+	_object_dropdown.custom_minimum_size = Vector2(300.0, 48.0)
+	_object_dropdown.add_theme_font_size_override("font_size", 28)
 	for i: int in range(_placeables.size()):
 		_object_dropdown.add_item(String(_placeables[i]["label"]), i)
 	_apply_font(_object_dropdown, BUTTON_FONT_PATH)
 	body.add_child(_object_dropdown)
 	_mirror_check = CheckBox.new()
 	_mirror_check.text = "Mirror LR linked"
-	_mirror_check.add_theme_font_size_override("font_size", 22)
+	_mirror_check.add_theme_font_size_override("font_size", 28)
 	_apply_font(_mirror_check, BUTTON_FONT_PATH)
 	body.add_child(_mirror_check)
 	_add_action(body, "PLACE", _place_from_dropdown)
@@ -760,8 +796,10 @@ func _build_build_panel() -> void:
 	_add_action(body, "Draw WIRE ramp", func() -> void: _begin_draw_wire(2))
 	_add_action(body, "DONE drawing", _finish_draw)
 	# Wire-ramp height: raise/lower the point under the cursor (or use the + / - keys).
-	_add_action(body, "Raise point  +", func() -> void: _adjust_height(HEIGHT_STEP))
-	_add_action(body, "Lower point  -", func() -> void: _adjust_height(-HEIGHT_STEP))
+	# Labels avoid + / - : the button font (Schwarzenberg-Italic) lacks those glyphs and renders them
+	# as tofu boxes (developer report). The = / - keys still raise/lower the point under the cursor.
+	_add_action(body, "Raise point", func() -> void: _adjust_height(HEIGHT_STEP))
+	_add_action(body, "Lower point", func() -> void: _adjust_height(-HEIGHT_STEP))
 	_add_action(body, "Grab move  G", _toggle_grab)
 	_add_action(body, "Undo  Ctrl Z", _undo)
 	_add_action(body, "Delete selected", _delete_selected)
@@ -806,8 +844,8 @@ func _reset_stuck_ball() -> void:
 func _add_action(parent: Node, text: String, cb: Callable) -> void:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(0.0, 40.0)
-	b.add_theme_font_size_override("font_size", 24)  ## readable on a 720-wide base; scales with stretch
+	b.custom_minimum_size = Vector2(300.0, 48.0)  ## wider panel + taller hit target (developer request)
+	b.add_theme_font_size_override("font_size", 30)  ## larger, readable; min width widens the whole panel
 	b.pressed.connect(cb)
 	_apply_font(b, BUTTON_FONT_PATH)
 	parent.add_child(b)

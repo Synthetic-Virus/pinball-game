@@ -275,6 +275,12 @@ func set_grid_visible(v: bool) -> void:
 		_grid_node.visible = v
 
 
+## The current grid unit (world units between grid lines). The editor's snap-to-grid rounds dragged
+## positions to this so placement lands on the visible grid. STABLE for the editor.
+func grid_step() -> float:
+	return _grid_step
+
+
 ## Pan the BUILD-mode camera by a world-space offset on the table plane.
 func camera_pan(world_delta: Vector3) -> void:
 	_cam_pan += world_delta
