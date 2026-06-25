@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballminiflip01"]
+
+; A SMALL upper-field flipper (scripts/mini_flipper.gd extends scripts/flipper.gd). It reuses the
+; frozen force/hinge/return-spring drive at ~60% size, bound to the existing "left_flipper" action
+; (no new input). table.gd instances it at TableConfig.MINI_FLIPPER_PIVOT and calls
+; configure("left_flipper", false). The visible art is the custom mini_flipper.glb (bat + rubber).
+
+[ext_resource type="Script" path="res://scripts/mini_flipper.gd" id="1_mini_flipper"]
+
+[node name="MiniFlipper" type="Node3D"]
+script = ExtResource("1_mini_flipper")

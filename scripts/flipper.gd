@@ -272,8 +272,8 @@ func _apply_handedness() -> void:
 	# Mirror negates the angles so the right flipper is the left's mirror image about the table's
 	# centerline (it swings the opposite rotational direction).
 	var hand_sign := -1.0 if _mirrored else 1.0
-	_rest_angle = TableConfig.FLIPPER_REST_ANGLE * hand_sign
-	_up_angle = TableConfig.FLIPPER_UP_ANGLE * hand_sign
+	_rest_angle = _flipper_rest_angle() * hand_sign
+	_up_angle = _flipper_up_angle() * hand_sign
 
 	# Build the tapered bat geometry on the correct side of the pivot. The bat must reach FROM the
 	# pivot (fat end) TOWARD the table center (thin tip): +X for the left flipper, -X for the mirrored
@@ -396,7 +396,38 @@ func tip_speed() -> float:
 		return 0.0
 	var axis_world: Vector3 = (global_transform.basis * _HINGE_AXIS_LOCAL).normalized()
 	var ang_vel_about_axis: float = _body.angular_velocity.dot(axis_world)
-	return absf(ang_vel_about_axis) * TableConfig.FLIPPER_LENGTH
+	return absf(ang_vel_about_axis) * _flipper_length()
+
+
+## --- OVERRIDABLE GEOMETRY SEAMS (SLICE "Custom low-poly asset integration", 2026-06-24) ----------
+## A flipper's dimensions, rest/up angles, and visible asset are read through these getters so a
+## SUBCLASS (scripts/mini_flipper.gd) can make a SMALLER flipper WITHOUT duplicating the frozen
+## force/hinge/return-spring drive in this file. The defaults return the existing TableConfig
+## constants, so the two MAIN flippers behave byte-for-byte as before (the momentum/snap/rubber/
+## shape tests stay green - these getters only relocate where the same numbers are read). The mini
+## flipper is a REAL flipper: same drive, same continuous_cd, same no-tunnel gate, only smaller.
+func _flipper_length() -> float:
+	return TableConfig.FLIPPER_LENGTH
+
+
+func _flipper_width() -> float:
+	return TableConfig.FLIPPER_WIDTH
+
+
+func _flipper_height() -> float:
+	return TableConfig.FLIPPER_HEIGHT
+
+
+func _flipper_rest_angle() -> float:
+	return TableConfig.FLIPPER_REST_ANGLE
+
+
+func _flipper_up_angle() -> float:
+	return TableConfig.FLIPPER_UP_ANGLE
+
+
+func _flipper_asset_path() -> String:
+	return FLIPPER_BAT_ASSET_PATH
 
 
 ## --- TAPERED BAT GEOMETRY (the capsule/stadium shape swap) ---------------------------------------
@@ -409,8 +440,8 @@ func tip_speed() -> float:
 ## Points are ordered around the perimeter (CCW) so the mesh builder can fan-triangulate the top/
 ## bottom caps. The convex hull builder ignores order (a hull only needs the point cloud).
 func _build_bat_outline() -> PackedVector2Array:
-	var fl: float = TableConfig.FLIPPER_LENGTH
-	var base_half: float = TableConfig.FLIPPER_WIDTH * 0.5
+	var fl: float = _flipper_length()
+	var base_half: float = _flipper_width() * 0.5
 	var tip_half: float = base_half * TIP_WIDTH_FRACTION
 	var taper_x: float = fl * TAPER_START_FRACTION  ## Full width up to here, then narrow to the tip.
 	var tip_x: float = fl - tip_half  ## The rounded tip cap is centered here.
@@ -456,7 +487,7 @@ func _rebuild_bat_geometry(hand_sign: float) -> void:
 			mirrored.append(Vector2(-p.x, p.y))
 		outline = mirrored
 
-	var height: float = TableConfig.FLIPPER_HEIGHT
+	var height: float = _flipper_height()
 	if _shape != null:
 		var hull := ConvexPolygonShape3D.new()
 		hull.points = _extrude_outline_to_hull(outline, height)
@@ -491,35 +522,55 @@ func _extrude_outline_to_hull(outline: PackedVector2Array, height: float) -> Pac
 
 
 ## --- IMPORTED .glb VISUAL (the asset swap; collider/drive untouched) -----------------------------
-## Load the imported flipper bat .glb and instance its mesh under FlipperVisual, scaled to the
-## collider. On ANY failure (missing file, unimported LFS pointer, no mesh in the scene) this leaves
-## _visual_instance null and the procedural FlipperMesh shown, so play continues (DESIGN must-feel
-## #4, graceful-fallback test_fallback_to_procedural_when_asset_missing). Idempotent: builds once.
+## Load the imported flipper bat .glb and instance its WHOLE mesh subtree under FlipperVisual,
+## to the collider. On ANY failure (missing file, unimported LFS pointer, no mesh in the scene) this
+## leaves _visual_instance null and the procedural FlipperMesh shown, so play continues (DESIGN
+## must-feel #4, graceful-fallback test_fallback_to_procedural_when_asset_missing). Idempotent.
+##
+## WHY THE WHOLE SCENE, NOT JUST THE FIRST MESH (SLICE "Custom low-poly asset integration",
+## 2026-06-24): our custom flipper_bat.glb is now TWO meshes - the body (Flipper_Bat) AND a separate
+## RUBBER sleeve (Flipper_Rubber). The old code took only the FIRST MeshInstance3D, dropping the
+## rubber entirely (and, on a re-export where the rubber sorts first, dropped the body). DESIGN
+## must-feel #4 requires the rubber surface on BOTH flippers. So we instance the ENTIRE imported
+## subtree (every named mesh) and parent it under one FlipperVisual node, the same proven pattern
+## pop_bumper.gd / slingshot.gd use for their multi-part .glb. The mirror is still a ROTATION (not a
+## negative-scale reflection) applied to that one parent, so the right bat shows the identical
+## body+rubber two-tone (the right-flipper rubber-drop bug cannot recur - it is the same node tree).
 func _build_visual() -> void:
 	if _visual_instance != null:
 		return
 
 	var path: String = _resolve_asset_path()
-	var source_mesh: Mesh = _load_asset_mesh(path)
-	if source_mesh == null:
+	var imported: Node3D = _load_asset_subtree(path)
+	if imported == null:
 		# Fallback: keep the procedural mesh visible, no imported visual. NOT a crash.
 		_mesh_instance.visible = true
 		return
 
-	# Build the imported visual node. The .glb is modelled in REAL METRES (~0.080 units on its long
-	# axis); the game world is LARGE scale (FLIPPER_LENGTH = 7.0 units pivot-to-tip), so we enlarge it
-	# by a factor DERIVED from the collider, never a hand-typed literal (see _derive_visual_scale).
+	# The .glb has MULTIPLE named meshes (the bat body + the rubber sleeve). The NODE CONTRACT
+	# (test_flipper_asset_visual) expects FlipperVisual to BE a MeshInstance3D with a non-null mesh, so
+	# we make FlipperVisual the FIRST imported mesh (the body) and RE-PARENT every OTHER imported mesh
+	# (the rubber) as a child of it. That way: (a) FlipperVisual.mesh is non-null (contract held), and
+	# (b) the rubber renders too (no drop) and inherits FlipperVisual's scale+mirror as one unit. The
+	# .glb is modelled in REAL METRES; we enlarge by a factor DERIVED from the merged mesh AABB, never
+	# a hand-typed literal.
+	var meshes: Array = _mesh_instances(imported)
 	_visual_instance = MeshInstance3D.new()
 	_visual_instance.name = FLIPPER_VISUAL_NODE_NAME
-	_visual_instance.mesh = source_mesh
-	var factor: float = _derive_visual_scale(source_mesh)
-	# ONE uniform factor on all three axes: the bat keeps its modelled proportions, only its size
-	# changes. WHY uniform: a per-axis stretch would distort the bat; the asset already matches the
-	# collider FRAME (long axis +X, up +Y), so a single scalar fits it to FLIPPER_LENGTH. This is
-	# COSMETIC ONLY - it touches the visual node, never the collider, so a wrong scale can only look
-	# off, never play wrong. The next imported asset uses this same derive-from-collider pattern.
-	_visual_instance.scale = Vector3.ONE * factor
+	_visual_instance.mesh = (meshes[0] as MeshInstance3D).mesh  ## the body = the long-axis mesh
 	_body.add_child(_visual_instance)
+	# Re-parent the remaining imported meshes (the rubber sleeve etc.) under FlipperVisual at their
+	# ORIGINAL local transforms relative to the imported root, so they sit correctly on the body and
+	# follow the wrapper's scale+mirror. We dup each as a fresh MeshInstance3D to avoid moving nodes
+	# that are still parented in the throwaway imported tree.
+	for i in range(1, meshes.size()):
+		var src: MeshInstance3D = meshes[i] as MeshInstance3D
+		var extra := MeshInstance3D.new()
+		extra.mesh = src.mesh
+		extra.transform = imported.global_transform.affine_inverse() * src.global_transform
+		_visual_instance.add_child(extra)
+	# The throwaway imported tree has served its purpose (we copied its meshes); free it.
+	imported.queue_free()
 
 	# On a successful import the imported visual is the shown bat; the procedural mesh becomes the
 	# hidden fallback (kept in the tree so a later failure can re-show it with one visibility toggle).
@@ -532,14 +583,15 @@ func _build_visual() -> void:
 func _resolve_asset_path() -> String:
 	if _asset_path_override != _ASSET_PATH_NO_OVERRIDE:
 		return _asset_path_override
-	return FLIPPER_BAT_ASSET_PATH
+	return _flipper_asset_path()
 
 
-## Load the .glb and pull out its first MeshInstance3D's mesh. Returns null on ANY failure so the
-## caller falls back to the procedural mesh. Godot imports a .glb to a PackedScene; we instantiate
-## it, walk for a MeshInstance3D, take that mesh. Reading the real instanced node (not a flag) is
-## the independent oracle that the asset actually loaded.
-func _load_asset_mesh(path: String) -> Mesh:
+## Load the .glb and instantiate its WHOLE node subtree (body + rubber sleeve + any future parts).
+## Returns null on ANY failure so the caller falls back to the procedural mesh. Reading the real
+## instanced node (not a flag) is the independent oracle that the asset actually loaded. WHY return
+## the subtree (not a single Mesh): our model has multiple named meshes; taking one would drop the
+## rest (the rubber-drop bug). The caller scales/mirrors this whole subtree as one unit.
+func _load_asset_subtree(path: String) -> Node3D:
 	if path == "" or not ResourceLoader.exists(path):
 		return null
 	var res: Resource = load(path)
@@ -549,13 +601,16 @@ func _load_asset_mesh(path: String) -> Mesh:
 	var inst: Node = packed.instantiate()
 	if inst == null:
 		return null
-	var mesh: Mesh = _first_mesh_in(inst)
-	# We only needed the Mesh resource; free the throwaway instance to avoid leaking it.
-	inst.queue_free()
-	return mesh
+	# Guard: a .glb with no mesh at all is treated as a failed load (fall back to the gray box) so a
+	# truncated/empty asset cannot leave an invisible flipper.
+	if _first_mesh_in(inst) == null:
+		inst.queue_free()
+		return null
+	return inst as Node3D
 
 
 ## Depth-first search for the first MeshInstance3D with a non-null mesh in an instanced scene tree.
+## Used only as a presence guard (does the asset contain ANY mesh) - the whole subtree is kept.
 func _first_mesh_in(node: Node) -> Mesh:
 	if node is MeshInstance3D:
 		var mi: MeshInstance3D = node as MeshInstance3D
@@ -568,28 +623,56 @@ func _first_mesh_in(node: Node) -> Mesh:
 	return null
 
 
-## Derive the uniform scale factor that fits the imported mesh to the collider, from the mesh's own
-## AABB - NEVER a hand-typed literal. factor = FLIPPER_LENGTH / (asset AABB longest axis). This
+## Merge every descendant MeshInstance3D's AABB into `root`'s local space. The merged box is the
+## independent oracle on the imported model's true footprint (across body + rubber), used to derive
+## the uniform scale. Copy of the pop_bumper.gd / slingshot.gd discipline.
+func _merged_aabb(root: Node3D) -> AABB:
+	var out := AABB()
+	var first: bool = true
+	for mi: MeshInstance3D in _mesh_instances(root):
+		var local: Transform3D = root.global_transform.affine_inverse() * mi.global_transform
+		var a: AABB = local * mi.get_aabb()
+		if first:
+			out = a
+			first = false
+		else:
+			out = out.merge(a)
+	return out
+
+
+## Every MeshInstance3D under `node` (recursive). The imported .glb has named sub-meshes (bat,
+## rubber); the merged AABB needs them all.
+func _mesh_instances(node: Node) -> Array:
+	var found: Array = []
+	if node is MeshInstance3D:
+		found.append(node)
+	for c: Node in node.get_children():
+		found.append_array(_mesh_instances(c))
+	return found
+
+
+## Derive the uniform scale factor that fits the imported model to the collider, from the merged
+## AABB - NEVER a hand-typed literal. factor = FLIPPER_LENGTH / (merged AABB longest axis). This
 ## self-corrects if the asset is re-exported at a different size or if FLIPPER_LENGTH changes: the
 ## measured AABB drives the fit. The structural test asserts the RESULTING world-space mesh length
 ## equals the collider length within tolerance, which a magic constant cannot satisfy.
-func _derive_visual_scale(source_mesh: Mesh) -> float:
-	var aabb: AABB = source_mesh.get_aabb()
+func _derive_visual_scale(root: Node3D) -> float:
+	var aabb: AABB = _merged_aabb(root)
 	var longest: float = maxf(aabb.size.x, maxf(aabb.size.y, aabb.size.z))
 	if longest <= 0.0001:
 		# Degenerate AABB (should never happen for a real bat); 1.0 keeps the mesh visible, not zeroed.
 		return 1.0
-	return TableConfig.FLIPPER_LENGTH / longest
+	return _flipper_length() / longest
 
 
-## Orient the imported visual for the given handedness sign (+1 left, -1 right). The asset is built
-## with its long axis +X and its up axis +Y, matching the LEFT collider frame, so the left visual
-## needs NO rotation. The RIGHT (mirrored) bat is a clean 180-degree ROTATION about the surface
-## normal (local +Y), so the bat reaches toward center on -X like its collider, blue rubber still on
-## TOP. WHY a rotation, not a negative-scale reflection: a reflection inverts the mesh normals and
-## buries/flips the blue rubber (test_right_flipper_visual_is_not_inside_out asserts the visual
-## basis determinant stays POSITIVE - a proper rotation). The uniform scale set in _build_visual is
-## kept (we set the basis rotation, then re-apply the scale).
+## Orient + scale the imported visual for the handedness sign (+1 left, -1 right). The asset is
+## built with its long axis +X and its up axis +Y, matching the LEFT collider frame, so the left
+## visual needs NO rotation. The RIGHT (mirrored) bat is a clean 180-degree ROTATION about the
+## surface normal (local +Y), so the bat reaches toward center on -X like its collider, blue rubber
+## still on TOP. WHY a rotation, not a negative-scale reflection: a reflection inverts the mesh
+## normals and buries/flips the blue rubber (test_right_flipper_visual_is_not_inside_out asserts the
+## visual basis determinant stays POSITIVE - a proper rotation). The uniform scale (derived from the
+## merged AABB) is composed with the rotation so both sides keep identical proportions.
 func _orient_visual(hand_sign: float) -> void:
 	if _visual_instance == null:
 		return
@@ -597,7 +680,7 @@ func _orient_visual(hand_sign: float) -> void:
 	if hand_sign < 0.0:
 		# 180 degrees about +Y flips +X to -X while keeping +Y up (a proper rotation, det = +1).
 		rot = Basis(Vector3(0.0, 1.0, 0.0), PI)
-	var factor: float = _derive_visual_scale(_visual_instance.mesh)
+	var factor: float = _derive_visual_scale(_visual_instance)
 	# Compose rotation then uniform scale; setting transform.basis directly keeps the determinant
 	# positive (rotation * positive-uniform-scale), the independent oracle the mirror test reads.
 	_visual_instance.transform = Transform3D(rot.scaled(Vector3.ONE * factor), Vector3.ZERO)

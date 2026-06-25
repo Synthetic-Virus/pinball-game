@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0pinballwallelem01"]
+
+; A basic placeable WALL element (scripts/wall_element.gd). Root is a StaticBody3D with a PRIMITIVE
+; BoxShape3D collider (high restitution, never the art mesh) on STATIC_OBSTACLES; the visible art is
+; the custom wall.glb (dark body + blue translucent cap) instanced in code, scaled from the collider.
+; table.gd places one demo instance; the full wall-draw editor is out of scope for this slice.
+
+[ext_resource type="Script" path="res://scripts/wall_element.gd" id="1_wall"]
+
+[node name="Wall" type="StaticBody3D"]
+script = ExtResource("1_wall")

@@ -6,21 +6,19 @@ goes into assets/ without a line in this file.
 
 ## 3D models
 
-### Flipper bat (assets/models/flipper_bat.glb)
-- Derived from: github.com/vbousquet/pinball-parts
-- License: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0)
-- Modified: yes (re-modelled / adjusted in Blender, then exported to glTF 2.0 .glb)
-- Terms honored: commercial use is permitted; attribution is given here; ShareAlike means any
-  further-modified derivative of THIS model is itself licensed CC BY-SA 4.0. The two embedded
-  materials ("Bat - Plastic White" body, "Bat - Rubber Blue" rubber) ship with the model.
-
-### Pop bumper (assets/models/bumper_body.glb)
-- Source: original model created in Blender for this project (PinballBumperModel.blend).
+### Custom low-poly element family (assets/models/)
+Files: `flipper_bat.glb`, `mini_flipper.glb`, `pop_bumper.glb`, `launcher.glb`, `wall.glb`,
+`left_slingshot.glb`.
+- Source: original low-poly models created in Blender for this project (the matched stylized
+  flat-shaded blue-cap family). They REPLACE the earlier borrowed art (the vbousquet/pinball-parts
+  flipper bat and the older bumper_body.glb, both removed from the repo).
 - License: original project work; no third-party attribution required.
-- Modified: exported to glTF 2.0 .glb (mushroom body+cap; origin at the base, cap up). Replaced the
-  earlier vbousquet/pinball-parts bumper. The collision shape is a native CylinderShape3D built in
-  code (scripts/pop_bumper.gd), so no collision mesh ships with this model, and the cap is rendered
-  slightly wider than that collider so the ball tucks under the lid.
+- Modified: exported to glTF 2.0 .glb. The art carries NO collision geometry: every element's collider
+  is a primitive shape built in code (the flipper / mini-flipper convex hull, the pop bumper
+  CylinderShape3D, the wall BoxShape3D, the slingshot ConvexPolygonShape3D) or, for the launcher, the
+  AnimatableBody3D strike face. Object names: flipper_bat (Flipper_Bat, Flipper_Rubber); mini_flipper
+  (Flipper_Bat_Mini, Flipper_Rubber_Mini); pop_bumper (Bumper_Base, Bumper_Body, Bumper_Cap); launcher
+  (Box_* housing + Plunger_Anim{Rod,Tip,Clip} + Plunger_Spring); wall (Wall_Body, Wall_Cap).
 
 ### Imported parts (wire guides, flat rails, bottom lane guides, drop/react targets)
 Files: `wire_guide_1in_thin.glb`, `wire_guide_1in_thick.glb`, `wire_guide_2in_thin.glb`,
