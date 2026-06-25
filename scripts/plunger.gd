@@ -552,16 +552,16 @@ func _install_launcher_art() -> void:
 ## scale TRACKS the merged AABB (change the model size, the scale follows), not a literal.
 func _derive_launcher_scale(root: Node3D) -> float:
 	var box: AABB = _merged_aabb(root)
-	# Fit the housing CROSS-SECTION (not the long lane axis) so the BALL actually fits inside the
-	# launcher channel (developer: "the ball should sit inside the front bit"; it was scaled too small).
-	# Cross-section = the MIDDLE of the three sorted dims (the lane length is the largest). Target it at
-	# ~2.2 ball diameters so the ball rides in the channel with margin; the lane length then follows.
+	# Fit the housing CROSS-SECTION to the SHOOTER LANE width, so the launcher lines up wall-to-wall in
+	# the chute (developer: "it should line up with the wall distance"; 2.2 ball diameters was too wide).
+	# Cross-section = the MIDDLE of the three sorted dims (the lane length is the largest); the lane
+	# length then follows proportionally. BALL_START.z is tuned so the housing seats at the lane bottom.
 	var dims: Array[float] = [box.size.x, box.size.y, box.size.z]
 	dims.sort()
 	var cross: float = dims[1]
 	if cross < 0.0001:
 		return 1.0
-	return (TableConfig.BALL_RADIUS * 2.0 * 2.2) / cross
+	return TableConfig.LANE_WIDTH / cross
 
 
 ## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).

@@ -272,10 +272,11 @@ const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perime
 ## tools/table_viz.py parser, which reads single-line Vector3 literals, stays simple; the derivation
 ## is the comment above.
 const BALL_START: Vector3 = Vector3(
-	(LANE_INNER_X + HALF_WIDTH) * 0.5, BALL_RADIUS + 0.2, HALF_LENGTH - 17.0
-)  ## x = lane center; z moved UP the lane (was -2.0) so the long launcher housing fits BELOW the
-## resting ball and the ball nests near the launcher mouth instead of floating above a tip (developer
-## choice: "move the ball start up the lane"). The plunger rest pos below is derived from this z.
+	(LANE_INNER_X + HALF_WIDTH) * 0.5, BALL_RADIUS + 0.2, HALF_LENGTH - 13.0
+)  ## x = lane center; z moved UP the lane (was -2.0) so the launcher housing fits BELOW the resting
+## ball and the ball nests near the launcher mouth (developer: "move the ball start up the lane").
+## Tuned to HALF_LENGTH-13 to seat the lane-width launcher (~11.6 long) at the lane bottom. The
+## plunger rest pos below is derived from this z.
 
 ## Resulting ball speed range we WANT a launch to produce, mapped from the power meter (0..1). Tuned
 ## at this scale/gravity so a min launch dribbles and a max launch clears the arch. This is the FEEL
