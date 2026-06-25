@@ -41,6 +41,8 @@ var _asset_path_override: String = ""  ## test seam: force a bad path to drive t
 ## hit-flash can pulse its emission. Same family blue as the posts/flippers. Emission idles at 0 and
 ## flashes briefly when the bumper is struck - a SUBTLE light, not a strobe (developer's note).
 var _bumper_mat: StandardMaterial3D = null
+## The rest (idle) albedo, captured so the hit-flash can brighten the albedo and ease back to it.
+var _rest_albedo: Color = Color(0.10, 0.30, 0.90, 0.85)
 
 
 ## Pull this bumper's geometry + score from TableConfig. table.gd calls this after instancing,
@@ -134,7 +136,8 @@ func _install_art() -> void:
 ## briefly raises it. Pure cosmetic - no physics or collider touched.
 func _apply_blue_material(root: Node3D) -> void:
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.10, 0.30, 0.90, 0.85)
+	_rest_albedo = Color(0.10, 0.30, 0.90, 0.85)
+	mat.albedo_color = _rest_albedo
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.roughness = 0.2
 	mat.emission_enabled = true
@@ -150,9 +153,16 @@ func _apply_blue_material(root: Node3D) -> void:
 func _flash_on_hit() -> void:
 	if _bumper_mat == null:
 		return
-	_bumper_mat.emission_energy_multiplier = 2.0  ## a clear pop on hit (0.6 was too faint to see)
+	# Pulse the ALBEDO (the base color, always rendered), not just emission. Emission alone showed NO
+	# light in the web build (developer: "there's no light at all") because the material is translucent
+	# and there is no glow/HDR, so emission washed out. Brighten the albedo to a near-white blue, then
+	# ease back to rest. Emission is still raised for any renderer that does bloom.
+	_bumper_mat.albedo_color = Color(0.55, 0.80, 1.0, 0.95)
+	_bumper_mat.emission_energy_multiplier = 3.0
 	var tw: Tween = create_tween()
-	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.25)
+	tw.set_parallel(true)
+	tw.tween_property(_bumper_mat, "albedo_color", _rest_albedo, 0.28)
+	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.28)
 
 
 ## Uniform scale so the cap's footprint matches the CAP diameter (2 * cap_radius), where cap_radius
