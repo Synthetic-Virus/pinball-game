@@ -205,8 +205,10 @@ func _build_body() -> void:
 
 	# A slingshot's flat face must angle into play; _body_yaw() returns the yaw (0 for a round pop
 	# bumper). Rotate the SOLID body about its local Y so the face normal aligns with the kick
-	# direction. The detector shell stays axis-aligned (a larger monitoring volume; rotation is not
-	# load-bearing for detection, only for the solid the ball strikes).
+	# direction. The DETECTOR shell is rotated to MATCH (by _detector_yaw, default = _body_yaw) in
+	# _build_detector_and_mesh, so it encloses the yawed solid body at every contact angle (QA BUG-018:
+	# an axis-aligned detector let a yawed corner poke past it and miss body_entered). For a round pop
+	# bumper both yaws are 0, so nothing rotates.
 	_body.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
 
 	# LOCAL PhysicsMaterial (not shared/global): a clean contact feel. The coded kick is the active

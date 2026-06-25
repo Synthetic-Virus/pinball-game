@@ -29,26 +29,12 @@ extends "res://scripts/active_kicker.gd"
 ## STABLE CONTRACT: inherits scored(points), kicked(direction), set_ball, points from ActiveKicker.
 ##   func configure(mirrored: bool) -> void   # mirrored = true builds the RIGHT slingshot.
 
-## How far the triangle extends BACK (away from the kicking face, local -Z) from the face to its
-## apex. A real slingshot is a shallow-ish triangle; we use SLINGSHOT_THICKNESS scaled up so the
-## triangle reads clearly as a triangle (not a sliver) while staying a compact body that does not
-## intrude into the flipper/lane-guide space. WHY a local constant (not TableConfig): it is a pure
-## visual/collision proportion of the existing SLINGSHOT_LENGTH/THICKNESS, not a world-scale or
-## placement number, so it lives with the shape it describes (no TableConfig edit needed for fix 3).
-const TRIANGLE_BACK_DEPTH: float = TableConfig.SLINGSHOT_LENGTH * 0.55
-
 ## Corner rounding: a real slingshot's corners are rubber-wrapped posts, ROUNDED, not sharp triangle
 ## points. We replace each of the 3 sharp corners with a small arc. CORNER_RADIUS is how far the
 ## round trims in along each edge; CORNER_SEGMENTS is the arc resolution. Both the collider hull and
 ## the visible mesh are built from the rounded outline, so they stay in agreement.
 const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
 const CORNER_SEGMENTS: int = 4
-
-## Extra rotation applied to the whole sling (its kick direction, and therefore its visible triangle
-## and collision, all follow this). Tuning knob for "rotate the slings more" - mirrored per side, so
-## both turn symmetrically. Change this one number to dial the angle; flip its sign to turn the
-## other way. The kick still points INTO play (a modest rotation keeps the up-table component).
-const EXTRA_KICK_ROT_DEG: float = 0.0
 
 ## SLICE "Low-poly slingshot asset" (2026-06-24): the imported low-poly model that REPLACES the
 ## procedural gray-box triangle + posts/rubber as the VISIBLE art. Visual-only: the ball still
@@ -88,6 +74,22 @@ var _asset_path_override: String = ""
 ## The instanced .glb visual root (null until _install_art succeeds). The flex animation drives the
 ## nodes UNDER this; the mirror (negative-X scale) is applied to this node for the RIGHT sling.
 var _visual: Node3D = null
+
+## The currently-running flex Tween (null when idle). QA BUG-044: a node-bound Tween in Godot 4 runs
+## to completion; it is NOT garbage-collected just because the local handle is dropped. So a rapid
+## double-kick would leave the FIRST tween still driving the same node properties while the second
+## one fights it. We keep the handle and kill() the prior tween when each flex starts, so just one
+## ever animates a node, ending the stacked drift the old "orphaned, reclaimed" comment assumed.
+var _flex_tween: Tween = null
+
+## The AUTHORED rest state of the flex nodes, captured ONCE after the art installs (before any flex
+## runs). QA BUG-044: the snap-back target must be the AUTHORED rest, not the node's live position
+## when _play_flex is called - on a rapid double-kick that live read returns the mid-jab spot, so
+## the node would creep out by up to FLEX_JAB_DISTANCE per overlapping kick. Caching the true rest
+## once makes every snap-back land exactly home regardless of timing.
+var _finger_rest: Vector3 = Vector3.ZERO
+var _tip_rest: Vector3 = Vector3.ZERO
+var _ring_rest_scale: Vector3 = Vector3.ONE
 
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
@@ -177,9 +179,24 @@ func _contact_should_kick(ball_pos: Vector3) -> bool:
 	return t >= -margin and t <= elen + margin
 
 
-## The KICKING FACE among the three corner posts: the edge whose OUTWARD normal best aligns with the
-## kick direction. Returns [a, b, normal] in local X-Z, the normal a unit vector toward play.
-## This is the band the ball strikes; the apex/back edges are not active.
+## The KICKING FACE of the slingshot. Returns [a, b, normal] in local X-Z: a and b are the two ends
+## of the face band the ball strikes, normal a unit vector toward play.
+##
+## WHY the face EDGE is selected from _raw_corners() and NOT the rounded _triangle_outline(): the
+## raw triangle has exactly THREE clean edges, so "the edge whose outward normal best aligns with
+## the kick" picks the real long kicking face unambiguously. On the ROUNDED outline a short
+## corner-ARC segment can sweep a normal that aligns with the kick even BETTER than the true face
+## edge, so a best-edge search over the rounded outline would wrongly pick an arc, not the face. The
+## raw face is therefore the correct source for the face DIRECTION and NORMAL.
+##
+## QA BUG-043 FIX (2026-06-24): the SPAN (the a..b band) is then CLAMPED to the rounded hull the
+## ball actually collides with. The solid body and the detector are both built from
+## _triangle_outline() (the rounded hull); the raw corner posts sit up to CORNER_RADIUS (0.72 u)
+## OUTSIDE that hull, so using the raw corners as the band ends let a contact past the rounded post
+## pass the span gate even though the ball never touched the rounded hull there - the inverse of the
+## BUG-018 intent. We trim each raw end inward along the face by the corner-trim so the trimmed band
+## matches the rounded face the ball can really strike. _contact_should_kick still adds a half-ball
+## margin for a genuine end-of-band hit (BUG-018), now measured from the correct hull-matched ends.
 func _kicking_face() -> Array:
 	var c: PackedVector2Array = _raw_corners()
 	var centroid := Vector2.ZERO
@@ -188,7 +205,9 @@ func _kicking_face() -> Array:
 	centroid /= float(c.size())
 	var kick2 := Vector2(_kick_dir.x, _kick_dir.z)
 	var best_dot: float = -1.0e20
-	var result: Array = [c[0], c[1], Vector2(0.0, 1.0)]
+	var face_a: Vector2 = c[0]
+	var face_b: Vector2 = c[1]
+	var face_nrm := Vector2(0.0, 1.0)
 	for i: int in range(c.size()):
 		var a: Vector2 = c[i]
 		var b: Vector2 = c[(i + 1) % c.size()]
@@ -202,8 +221,20 @@ func _kicking_face() -> Array:
 		var d: float = nrm.dot(kick2)
 		if d > best_dot:
 			best_dot = d
-			result = [a, b, nrm]
-	return result
+			face_a = a
+			face_b = b
+			face_nrm = nrm
+	# Trim each end inward along the face by the corner-trim distance so the band ends land on the
+	# ROUNDED hull (which the ball collides with), not on the sharp raw posts that sit CORNER_RADIUS
+	# outside it. The trim mirrors _round_corners' own clamp (radius capped at 0.49 * the shorter
+	# adjacent edge), so a short face is never over-trimmed to a zero-length band.
+	var edge_vec: Vector2 = face_b - face_a
+	var elen: float = edge_vec.length()
+	if elen < 0.0001:
+		return [face_a, face_b, face_nrm]
+	var dir: Vector2 = edge_vec / elen
+	var trim: float = minf(CORNER_RADIUS, elen * 0.49)
+	return [face_a + dir * trim, face_b - dir * trim, face_nrm]
 
 
 ## The TRIANGULAR visible mesh (fix 3: was a box), built from the SAME outline as the collider so
@@ -485,6 +516,27 @@ func _install_art() -> void:
 	var gray_box: Node = get_node_or_null("KickerMesh")
 	if gray_box != null:
 		gray_box.visible = false
+	# Capture the AUTHORED rest state of the flex nodes ONCE, now, before any kick can animate them
+	# (QA BUG-044). Every flex snaps back to THESE values, never to a live (possibly mid-jab) read.
+	_capture_flex_rest()
+
+
+## Cache the authored rest position/scale of the three flex-animated sub-nodes (QA BUG-044). Called
+## once from _install_art after the model is instanced and before any flex runs, so the snap-back
+## targets are the true rest even when a rapid double-kick re-enters _play_flex mid-animation. Any
+## absent node keeps its default (the flex skips absent nodes anyway).
+func _capture_flex_rest() -> void:
+	if _visual == null:
+		return
+	var finger: Node3D = _visual.get_node_or_null(KICKER_FINGER_NODE) as Node3D
+	var tip: Node3D = _visual.get_node_or_null(KICKER_TIP_NODE) as Node3D
+	var ring: Node3D = _visual.get_node_or_null(RUBBER_RING_NODE) as Node3D
+	if finger != null:
+		_finger_rest = finger.position
+	if tip != null:
+		_tip_rest = tip.position
+	if ring != null:
+		_ring_rest_scale = ring.scale
 
 
 ## LEAD + PHYSICS HALF: uniform scale so the imported model's top-down footprint matches the
@@ -647,42 +699,45 @@ func _play_flex(direction: Vector3) -> void:
 	# The jab translation in LOCAL visual space: forward along jab_dir by FLEX_JAB_DISTANCE.
 	var jab_offset: Vector3 = jab_dir * FLEX_JAB_DISTANCE
 
-	# create_tween() creates a new Tween owned by this node. set_parallel(true) lets all tweeners
-	# added in this batch run simultaneously. A new Tween per flex event means a rapid double-kick
-	# naturally starts fresh: the old Tween is orphaned and GDScript reclaims it, while the new one
-	# drives the nodes from their current positions. No stacked positional drift.
+	# QA BUG-044: kill any in-flight flex first. A node-bound Tween in Godot 4 runs to completion even
+	# after the local handle is dropped, so without this kill() a rapid double-kick (interval < the
+	# ~110 ms round-trip) leaves the prior tween still driving these properties while the new one
+	# fights it. Killing the old tween, plus snapping back to the CACHED authored rest (not a live
+	# read), means every flex starts clean from a known state with no stacked positional drift.
+	if _flex_tween != null and _flex_tween.is_valid():
+		_flex_tween.kill()
 	var tween: Tween = create_tween()
 	tween.set_parallel(true)
+	_flex_tween = tween
 
 	# ---- PHASE 1: JAB OUT (FLEX_JAB_TIME_S) -------------------------------------------------------
 	# Kicker_Finger and Kicker_Tip translate forward along jab_dir by FLEX_JAB_DISTANCE.
 	# WHY .position not .global_position: these are children of _visual; their authored local
-	# position IS their rest and the correct base for a local-space animation.
+	# position IS their rest and the correct base for a local-space animation. The jab/snap-back are
+	# anchored to the CACHED rest (_finger_rest/_tip_rest), captured once in _capture_flex_rest, so an
+	# overlapping kick cannot drift the snap-back target off the true rest (QA BUG-044).
 	if finger != null:
-		var rest_f: Vector3 = finger.position
-		tween.tween_property(finger, "position", rest_f + jab_offset, FLEX_JAB_TIME_S)
-		# Phase 2: snap back to rest after the jab duration elapses.
+		tween.tween_property(finger, "position", _finger_rest + jab_offset, FLEX_JAB_TIME_S)
+		# Phase 2: snap back to the authored rest after the jab duration elapses.
 		tween.tween_property(
-			finger, "position", rest_f, FLEX_RETURN_TIME_S
+			finger, "position", _finger_rest, FLEX_RETURN_TIME_S
 		).set_delay(FLEX_JAB_TIME_S)
 
 	if tip != null:
-		var rest_t: Vector3 = tip.position
-		tween.tween_property(tip, "position", rest_t + jab_offset, FLEX_JAB_TIME_S)
+		tween.tween_property(tip, "position", _tip_rest + jab_offset, FLEX_JAB_TIME_S)
 		tween.tween_property(
-			tip, "position", rest_t, FLEX_RETURN_TIME_S
+			tip, "position", _tip_rest, FLEX_RETURN_TIME_S
 		).set_delay(FLEX_JAB_TIME_S)
 
 	# Sling_Rubber_Ring: scale the X axis (the ring's long axis in the .glb coordinate frame) by
 	# (1 + FLEX_RUBBER_STRETCH) so the rubber band visually stretches as the kicker punches out.
 	# FLEX_RUBBER_STRETCH is additive: 0.18 means 1.18x the rest scale at peak flex. The snap-back
-	# target is the captured rest_scale so the return is exact regardless of floating-point drift
-	# from an interrupted earlier tween.
+	# target is the CACHED authored rest scale (_ring_rest_scale) so the return is exact regardless of
+	# floating-point drift or an interrupted earlier tween (QA BUG-044).
 	if ring != null:
-		var rest_scale: Vector3 = ring.scale
-		var stretched: Vector3 = rest_scale
+		var stretched: Vector3 = _ring_rest_scale
 		stretched.x *= (1.0 + FLEX_RUBBER_STRETCH)
 		tween.tween_property(ring, "scale", stretched, FLEX_JAB_TIME_S)
 		tween.tween_property(
-			ring, "scale", rest_scale, FLEX_RETURN_TIME_S
+			ring, "scale", _ring_rest_scale, FLEX_RETURN_TIME_S
 		).set_delay(FLEX_JAB_TIME_S)
