@@ -501,9 +501,20 @@ func _install_launcher_art() -> void:
 	# position it at the plunger rest so the rod sits behind the resting ball. All cosmetic.
 	var factor: float = _derive_launcher_scale(_launcher_visual)
 	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
-	_launcher_visual.transform = Transform3D(
-		yaw.scaled(Vector3.ONE * factor), TableConfig.PLUNGER_REST_POS
-	)
+	# Place the model so its TIP (model-local +X max) lands at the plunger face contact point, with the
+	# housing extending DOWN-table behind it. This makes the VISIBLE plunger tip the thing that meets
+	# the ball, instead of the bare face box up-table of it (developer: "the plunger should do the
+	# work"). The collision face stays at PLUNGER_REST_POS, which now coincides with the visible tip.
+	var box: AABB = _merged_aabb(_launcher_visual)
+	var tip_local := Vector3(box.position.x + box.size.x, 0.0, 0.0)
+	var tip_offset: Vector3 = yaw.scaled(Vector3.ONE * factor) * tip_local
+	var origin: Vector3 = TableConfig.PLUNGER_REST_POS - tip_offset
+	_launcher_visual.transform = Transform3D(yaw.scaled(Vector3.ONE * factor), origin)
+	# Hide the gray-box PlungerMesh (the visible "square") - the model is the plunger now. The
+	# collision box itself stays (it is the physics striker, at the tip); only its placeholder MESH hides.
+	var face_mesh: Node = _face.get_node_or_null("PlungerMesh")
+	if face_mesh != null:
+		face_mesh.visible = false
 
 	# Resolve the moving group + spring and capture their AUTHORED rest transforms as the juice
 	# baseline. Absent nodes leave the juice a safe no-op (the static art still renders).

@@ -37,6 +37,11 @@ var _height: float = TableConfig.POP_BUMPER_HEIGHT
 
 var _asset_path_override: String = ""  ## test seam: force a bad path to drive the fallback branch
 
+## The blue translucent-plastic material applied to the imported bumper, kept as a handle so the
+## hit-flash can pulse its emission. Same family blue as the posts/flippers. Emission idles at 0 and
+## flashes briefly when the bumper is struck - a SUBTLE light, not a strobe (developer's note).
+var _bumper_mat: StandardMaterial3D = null
+
 
 ## Pull this bumper's geometry + score from TableConfig. table.gd calls this after instancing,
 ## before
@@ -118,6 +123,36 @@ func _install_art() -> void:
 	var gray_box: Node = get_node_or_null("KickerMesh")
 	if gray_box != null:
 		gray_box.visible = false  ## the real mushroom replaces the placeholder cylinder
+	# Blue plastic look + a subtle light-up on hit. The base fires `kicked` on each contact.
+	_apply_blue_material(visual)
+	if not kicked.is_connected(_flash_on_hit):
+		kicked.connect(_flash_on_hit)
+
+
+## Apply the family blue translucent-plastic material to every mesh in the imported bumper, set up
+## with emission so the hit-flash can pulse it. Idle emission is 0 (no glow at rest); _flash_on_hit
+## briefly raises it. Pure cosmetic - no physics or collider touched.
+func _apply_blue_material(root: Node3D) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.10, 0.30, 0.90, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.roughness = 0.2
+	mat.emission_enabled = true
+	mat.emission = Color(0.30, 0.55, 1.0)
+	mat.emission_energy_multiplier = 0.0  ## dark at rest; the hit-flash raises this
+	_bumper_mat = mat
+	for mi: MeshInstance3D in _mesh_instances(root):
+		mi.material_override = mat
+
+
+## SUBTLE light-up when the bumper is hit: pop the emission, then fade it back over ~0.18 s. Takes
+## no args so it can connect to `kicked` regardless of that signal's parameters. Cosmetic only.
+func _flash_on_hit() -> void:
+	if _bumper_mat == null:
+		return
+	_bumper_mat.emission_energy_multiplier = 0.6  ## a gentle glow, not a strobe
+	var tw: Tween = create_tween()
+	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.18)
 
 
 ## Uniform scale so the cap's footprint matches the CAP diameter (2 * cap_radius), where cap_radius
