@@ -37,7 +37,7 @@ signal kicked(direction: Vector3)
 ## this material only makes the instant of contact feel clean and live rather than dead. A moderate
 ## bounce gives the contact a crisp knock the same physics frame the kick fires. Not a trampoline:
 ## the velocity SET in _apply_kick is authoritative on the next step regardless.
-const KICKER_BOUNCE: float = 0.5
+const KICKER_BOUNCE: float = 0.7
 ## Solid-body friction. Low so a glancing ball slides off the face cleanly and the coded kick
 ## direction is not muddied by surface grip (a slingshot face should redirect, not grab).
 const KICKER_FRICTION: float = 0.2

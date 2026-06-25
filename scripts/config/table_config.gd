@@ -48,7 +48,8 @@ const BALL_FRICTION: float = 0.4
 ## + test_furniture_layout.gd + test_shot_geometry.gd before the slice ships.
 const HALF_WIDTH: float = 13.0      ## MATCH PINK: right edge +13 (was over-narrowed to 11.5).
 const HALF_LENGTH: float = 25.0     ## => 50 units long (UNCHANGED - widen only, not longer).
-const WALL_HEIGHT: float = 2.4      ## How tall the perimeter/arch walls stand off the surface.
+const WALL_HEIGHT: float = 1.5      ## Walls stand off the surface; lowered (was 2.4) to line up with
+                                    ## the slingshot height. Still > ball diameter (1.2) so nothing escapes.
 const WALL_THICKNESS: float = 0.35  ## REAL-SCALE: thin rails, not fat slabs (was 0.8). Guides follow.
 
 ## Launch lane up the RIGHT side. The lane is a narrow channel between the right outer wall and an
