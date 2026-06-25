@@ -223,6 +223,16 @@ func _build_body() -> void:
 	col.shape = _make_body_shape()
 	_body.add_child(col)
 
+	# TEMP DEBUG (remove after diagnosis): draw the ACTUAL collision hull as a bright unshaded mesh so
+	# it can be compared to the visual slingshot in a screenshot (the ball-pass-through report).
+	var dbg := MeshInstance3D.new()
+	dbg.mesh = col.shape.get_debug_mesh()
+	var dm := StandardMaterial3D.new()
+	dm.albedo_color = Color(1.0, 0.1, 0.1)
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dbg.material_override = dm
+	col.add_child(dbg)
+
 	add_child(_body)
 
 
