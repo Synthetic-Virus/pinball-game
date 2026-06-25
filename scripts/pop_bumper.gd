@@ -71,8 +71,8 @@ func _make_body_shape() -> Shape3D:
 
 
 ## Detector = the EXACT body cylinder (no proximity padding), so body_entered fires when the ball
-## SURFACE touches the bumper, not a ball-radius early (developer: "a true contact point ... same for
-## the bumpers"). The Area-vs-ball overlap already accounts for the ball's own radius.
+## SURFACE touches the bumper, not a ball-radius early (developer: "a true contact point ...
+## same for the bumpers"). The Area-vs-ball overlap already accounts for the ball's own radius.
 func _make_detector_shape() -> Shape3D:
 	var shape := CylinderShape3D.new()
 	shape.radius = _radius
