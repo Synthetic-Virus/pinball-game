@@ -44,6 +44,12 @@ const CORNER_SEGMENTS: int = 4
 ## LEFT slingshot; the RIGHT instance mirrors the visual by a negative-X scale (see _mirror_visual).
 const SLINGSHOT_ASSET_PATH: String = "res://assets/models/left_slingshot.glb"
 
+## The RIGHT slingshot uses a PRE-MIRRORED .glb (baked in Blender with recalculated outward
+## normals), so it renders correct-side-out without a runtime negative-X scale. The old
+## negative-scale mirror flipped the normals and shaded the right sling dark/inside-out. The
+## collider mirror stays a position/rotation mirror via SLINGSHOT_RIGHT_CORNERS in configure().
+const SLINGSHOT_RIGHT_ASSET_PATH: String = "res://assets/models/right_slingshot.glb"
+
 ## The node name the imported .glb visual is instanced under. Tests resolve the imported visual by
 ## this name; the procedural fallback keeps its base name "KickerMesh" (built by active_kicker.gd).
 const SLINGSHOT_VISUAL_NODE_NAME: String = "SlingshotVisual"
@@ -472,8 +478,10 @@ func _body_yaw() -> float:
 func _ready() -> void:
 	super._ready()
 	_install_art()
-	if _mirrored:
-		_mirror_visual()
+	# The RIGHT sling now loads a PRE-MIRRORED .glb (right_slingshot.glb) with correct outward
+	# normals, so NO runtime negative-X scale is applied here (that inverted the normals and shaded
+	# the right sling dark). The collider mirror is still the position/rotation mirror set in
+	# configure() via SLINGSHOT_RIGHT_CORNERS.
 	# Cosmetic flex: the SAME kicked(direction) signal the impulse fires also drives _play_flex, on a
 	# SEPARATE path that touches only the visual meshes. Removing this connection leaves the kick
 	# byte-for-byte identical (the behavioral decoupling oracle).
@@ -493,7 +501,13 @@ func _ready() -> void:
 func _install_art() -> void:
 	# Path: the production asset unless a test forces the fallback branch via _asset_path_override.
 	var override: String = _asset_path_override
-	var path: String = SLINGSHOT_ASSET_PATH if override == "" else override
+	var path: String
+	if override != "":
+		path = override
+	elif _mirrored:
+		path = SLINGSHOT_RIGHT_ASSET_PATH  ## pre-mirrored asset (correct normals), no negative-scale
+	else:
+		path = SLINGSHOT_ASSET_PATH
 	var scene: Resource = load(path)
 	# FALLBACK GUARD (copy of pop_bumper.gd): if the .glb is missing or is not a scene, RETURN with
 	# the gray-box triangle ("KickerMesh" + the procedural posts/rubber) STILL visible. The sling
