@@ -563,15 +563,6 @@ func _rebuild_collider_from_visual() -> void:
 	for c2: Node in get_children():
 		if c2 is CollisionShape3D:
 			(c2 as CollisionShape3D).shape = hull
-	# TEMP DEBUG (remove after verifying): draw the rebuilt hull bright red so a screenshot confirms
-	# it now overlays the visible slingshot.
-	var dbg := MeshInstance3D.new()
-	dbg.mesh = hull.get_debug_mesh()
-	var dm := StandardMaterial3D.new()
-	dm.albedo_color = Color(1.0, 0.1, 0.1)
-	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dbg.material_override = dm
-	_body.add_child(dbg)
 
 
 ## Cache the authored rest position/scale of the three flex-animated sub-nodes (QA BUG-044). Called
