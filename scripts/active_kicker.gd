@@ -106,9 +106,9 @@ func _on_body_entered(body: Node) -> void:
 
 
 ## SUBCLASS OVERRIDE: given where the ball is at contact (global), should this contact fire a kick?
-## The base accepts every contact (a pop bumper kicks off any point of its round body). The slingshot
-## overrides this to accept only contacts on its kicking BAND, so a ball touching the posts or the
-## back of the triangle bounces passively instead of triggering the solenoid.
+## The base accepts every contact (a pop bumper kicks off any point of its round body). The
+## slingshot overrides this to accept only contacts on its kicking BAND, so a ball touching the
+## posts or the back of the triangle bounces passively instead of triggering the solenoid.
 func _contact_should_kick(_ball_pos: Vector3) -> bool:
 	return true
 
