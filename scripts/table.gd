@@ -60,8 +60,8 @@ const VIEW_PITCH_DEG: float = 42.0
 const FRAME_MARGIN: float = 1.08
 ## PLAY-view framing: zoom out a touch and pan the table LEFT so the right-side backbox scoreboard
 ## has room (BUILD/menu keep the centred framing). Tuned against the deployed demo.
-const PLAY_VIEW_ZOOM: float = 1.5
-const PLAY_VIEW_H_OFFSET: float = 9.5
+const PLAY_VIEW_ZOOM: float = 0.95  ## <1 zooms the play view IN (cuts a little off the bottom, ok)
+const PLAY_VIEW_H_OFFSET: float = 0.0  ## scoreboard is now a TOP strip, so the field is centred (no left pan)
 ## BUILD-mode zoom clamp: 1x = the default framing, up to 4x in (developer asked to cap the zoom).
 const CAM_ZOOM_MIN: float = 1.0
 const CAM_ZOOM_MAX: float = 4.0
@@ -273,6 +273,12 @@ func _build_static_geometry() -> void:
 func set_grid_visible(v: bool) -> void:
 	if _grid_node != null:
 		_grid_node.visible = v
+
+
+## The current grid unit (world units between grid lines). The editor's snap-to-grid rounds dragged
+## positions to this so placement lands on the visible grid. STABLE for the editor.
+func grid_step() -> float:
+	return _grid_step
 
 
 ## Pan the BUILD-mode camera by a world-space offset on the table plane.

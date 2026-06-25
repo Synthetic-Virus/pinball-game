@@ -79,10 +79,12 @@ func _build_ui() -> void:
 	# count, a message line, and the session high score. The table is panned LEFT in play mode (see
 	# table.set_play_view) so this panel does not cover the playfield.
 	var box := PanelContainer.new()
-	box.anchor_left = 0.62
-	box.anchor_right = 0.99
-	box.anchor_top = 0.03
-	box.anchor_bottom = 0.03  ## top-anchored; grows DOWN to fit its content (not a fixed long panel)
+	# Moved to a TOP-CENTER strip (was right-side) so the playfield can centre + zoom in and use the
+	# full width below it (developer: "move the scoreboard to the top to give the field more space").
+	box.anchor_left = 0.28
+	box.anchor_right = 0.72
+	box.anchor_top = 0.0
+	box.anchor_bottom = 0.0  ## top-anchored; grows DOWN to fit its content (not a fixed long panel)
 	box.grow_vertical = Control.GROW_DIRECTION_END
 	box.offset_left = 0.0
 	box.offset_right = 0.0
