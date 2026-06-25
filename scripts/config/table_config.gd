@@ -724,6 +724,22 @@ func gravity_vector_world() -> Vector3:
 	return Vector3(0.0, -GRAVITY, 0.0)
 
 
+## Transform of `node` relative to `root`, accumulated from LOCAL transforms (NOT global_transform).
+## WHY: global_transform returns IDENTITY for a node that is not yet inside the SceneTree, which
+## silently collapses every sub-mesh to the origin and yields a wrong merged AABB - and therefore a
+## wrong DERIVED scale (the asset-integration "scaling all wrong" bug, with the spammed
+## "!is_inside_tree()" errors). Walking local transforms is correct whether or not the subtree is in
+## the tree yet, so scale derivation no longer depends on when the node is added.
+func relative_xform(root: Node3D, node: Node3D) -> Transform3D:
+	var xf := Transform3D.IDENTITY
+	var n: Node = node
+	while n != null and n != root:
+		if n is Node3D:
+			xf = (n as Node3D).transform * xf
+		n = n.get_parent()
+	return xf
+
+
 ## World units per real metre, so an imported real-scale model matches the game. A real pinball ball is
 ## 1-1/16" = 0.027 m across; the game ball is BALL_RADIUS*2 world units across. So a real 1" wire guide
 ## lands ~one ball wide. Parts are LOCKED to this scale in the editor (placeable + rotatable, never

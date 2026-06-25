@@ -22,3 +22,29 @@ jobs:
           else
             echo "gdlint not installed on runner"
           fi
+
+  # Build the web export on every PR (and push) and publish it as a downloadable artifact.
+  # WHY: until now the web export was only built on the main deploy, so a broken export or a
+  # mis-scaled/mis-placed asset could not be SEEN before it reached the demo. This job lets the
+  # build be pulled from the PR run and screenshotted (served over localhost) for in-game
+  # verification BEFORE merge. It is a REAL gate: it fails if the export does not produce the
+  # wasm/pck, unlike the advisory lint above.
+  web-build:
+    runs-on: [self-hosted, godot]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Export web build (headless)
+        run: |
+          mkdir -p build/web
+          godot --headless --path . --export-release "Web" "$PWD/build/web/index.html"
+          # Hard gate: a real export must emit the wasm + pck. Fail the job if it did not.
+          test -s build/web/index.wasm
+          test -s build/web/index.pck
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: build/web/
+          retention-days: 7
