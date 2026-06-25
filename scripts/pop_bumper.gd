@@ -118,8 +118,12 @@ func _install_art() -> void:
 	var visual: Node3D = body_scene.instantiate()
 	visual.name = "BumperVisual"
 	add_child(visual)
+	# Width fits the cap diameter; HEIGHT is fit independently to POP_BUMPER_HEIGHT. Andrew's cap is
+	# FLAT (wide, short), so a uniform scale from width left it squished into a disc - fitting the
+	# height separately gives it a proper, full-height bumper profile.
 	var factor: float = _derive_scale(visual)
-	visual.scale = Vector3(factor, factor, factor)
+	var height_factor: float = _derive_height_scale(visual)
+	visual.scale = Vector3(factor, height_factor, factor)
 	var gray_box: Node = get_node_or_null("KickerMesh")
 	if gray_box != null:
 		gray_box.visible = false  ## the real mushroom replaces the placeholder cylinder
@@ -127,6 +131,16 @@ func _install_art() -> void:
 	_apply_blue_material(visual)
 	if not kicked.is_connected(_flash_on_hit):
 		kicked.connect(_flash_on_hit)
+
+
+## Vertical scale so the cap stands POP_BUMPER_HEIGHT tall instead of reading as a squished disc.
+## Derived from the model's own measured height (never hardcoded), separate from the width scale
+## because a flat cap fit uniformly from its width comes out too short.
+func _derive_height_scale(visual: Node3D) -> float:
+	var box: AABB = _merged_aabb(visual)
+	if box.size.y < 0.0001:
+		return _derive_scale(visual)
+	return POP_BUMPER_HEIGHT / box.size.y
 
 
 ## Apply the family blue translucent-plastic material to every mesh in the imported bumper, set up
