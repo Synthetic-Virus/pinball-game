@@ -62,7 +62,13 @@ func _ready() -> void:
 
 	# --- Mass and damping from the world-scale contract. ------------------------------------------
 	mass = TableConfig.BALL_MASS
-	gravity_scale = 1.0  # Uses project default_gravity (200); the table tilt is the Playfield node.
+	# 2.0, not 1.0: at the world scale here the gravity-driven roll felt FLOATY - the ball barely
+	# accelerated down-table and lingered at the top (developer: "doesn't ever get fast enough...almost
+	# floats at the top"). The launch/kick speeds (70-120) dwarf the gravity accel, so the ball zipped
+	# when struck but drifted under gravity alone. Doubling ONLY the ball's gravity (not global gravity,
+	# so the flipper bats / launch tuning are untouched) makes it fall ~2x faster and read heavier. The
+	# launch still tops out easily (max reach ~83 units vs the 50-unit table). Tune this for feel.
+	gravity_scale = 2.0  # base project default_gravity is 200; the table tilt is the Playfield node.
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	linear_damp = LINEAR_DAMP
