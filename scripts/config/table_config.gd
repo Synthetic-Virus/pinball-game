@@ -113,7 +113,9 @@ const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain t
 ## Resting and energized angles (radians) of the flipper about its pivot, measured on the playfield
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
 ## may refine these as the hinge limits, but the geometry above is the contract.
-const FLIPPER_REST_ANGLE: float = -0.55
+const FLIPPER_REST_ANGLE: float = -0.30  ## was -0.55 (~31deg droop): the bats hung limp at rest. -0.30
+                                         ## (~17deg) sits them up perkier. The bat has no gravity, so it
+                                         ## rests exactly here; the drain mouth below auto-derives from it.
 const FLIPPER_UP_ANGLE: float = 0.50  ## was 0.15 (~9deg): too shallow, the bat barely rose. 0.50
                                       ## (~29deg) gives a ~60deg full swing so it comes up properly.
 
@@ -148,7 +150,7 @@ const MINI_FLIPPER_WIDTH: float = FLIPPER_WIDTH * 0.85
 const MINI_FLIPPER_HEIGHT: float = FLIPPER_HEIGHT
 ## Rest/up angles for the mini. It sits up-field and swings up toward center to bat the ball at the
 ## bumper cluster. Same sign convention as the main flippers (handedness negates for a mirror).
-const MINI_FLIPPER_REST_ANGLE: float = -0.50
+const MINI_FLIPPER_REST_ANGLE: float = -0.30  ## perkier rest, matching the main flippers (was -0.50).
 const MINI_FLIPPER_UP_ANGLE: float = 0.30
 ## Pivot of the single upper-left mini flipper (playfield-local). Up in the field on the left, clear
 ## of the bumper cluster (POP_BUMPER_POSITIONS sit around z -5..-10) and inside the side wall.
