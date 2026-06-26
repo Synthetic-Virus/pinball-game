@@ -19,6 +19,11 @@ extends Node
 ## runs there is no browser, so the editor is completely inert and the built-in layout is used.
 
 const LAYOUT_KEY: String = "pinball_layout"   ## browser localStorage key the layout is saved under
+## The BAKED default layout (the developer's chosen table). Applied when there is no saved layout in
+## localStorage, so it ships in the build and survives a "RESET saved" / cleared browser storage. To
+## update it: build the table in the editor, SAVE, then paste the downloaded pinball_layout.json here.
+## Headless tests never run the editor (browser-only), so they still use the table_config constants.
+const DEFAULT_LAYOUT_JSON: String = """[{"rot_deg":0.0,"type":"bumper","x":-3.43,"z":-6.93},{"rot_deg":0.0,"type":"bumper","x":2.3,"z":-7.15},{"rot_deg":0.0,"type":"bumper","x":-0.17,"z":-1.32},{"rot_deg":0.0,"type":"target","x":-10.33,"z":-11.54},{"rot_deg":0.0,"type":"target","x":9.32,"z":-4.48},{"rot_deg":0.0,"type":"target","x":9.41,"z":-2.83},{"rot_deg":0.0,"type":"target","x":9.21,"z":-0.76},{"rot_deg":0.0,"type":"target","x":-8.93,"z":-12.49},{"rot_deg":45.0,"type":"sling_left","x":-5.07,"z":15.47},{"rot_deg":-45.0,"type":"sling_right","x":4.66,"z":15.27},{"rot_deg":7.5,"type":"sling_left","x":-10.7,"z":4.8},{"rot_deg":0.0,"type":"flipper_left","x":-4.5,"z":20.0},{"rot_deg":0.0,"type":"flipper_right","x":4.5,"z":20.0},{"kind":"guide","points":[[-10.52,11.87],[-9.82,18.57],[-4.97,19.7]],"smooth":true,"type":"rail"},{"kind":"guide","points":[[8.96,12.17],[8.62,18.27],[5.1,19.8]],"smooth":true,"type":"rail"},{"kind":"guide","points":[[10.12,-4.57],[9.77,-6.62],[7.38,-10.53]],"smooth":true,"type":"rail"},{"kind":"wall","points":[[-3.97,-17.36],[-4.0,-14.24]],"smooth":false,"type":"rail"},{"kind":"wall","points":[[-0.69,-17.04],[-0.67,-13.74]],"smooth":false,"type":"rail"},{"kind":"wall","points":[[2.66,-17.46],[2.71,-14.04]],"smooth":false,"type":"rail"},{"kind":"wall","points":[[10.62,-15.57],[7.25,-10.53]],"smooth":false,"type":"rail"},{"kind":"wall","points":[[9.97,-4.57],[10.11,-4.46],[10.12,-0.24],[9.25,1.81],[7.28,3.77],[10.93,8.4]],"smooth":false,"type":"rail"},{"kind":"guide","points":[[-12.46,-5.83],[-11.24,2.13],[-10.9,5.25],[-12.79,7.83]],"smooth":true,"type":"rail"},{"kind":"guide","points":[[-2.8,-24.85],[-6.79,-21.67],[-12.89,-16.92]],"smooth":true,"type":"rail"},{"kind":"wall","points":[[-9.5,0.35],[-12.07,2.54]],"smooth":false,"type":"rail"},{"kind":"guide","points":[[-7.83,-0.64],[-10.77,-6.39],[-11.23,-11.98],[-9.55,-16.55],[-3.71,-20.76]],"smooth":true,"type":"rail"},{"kind":"guide","points":[[-3.65,-20.9],[-6.11,-17.78],[-6.53,-14.69]],"smooth":true,"type":"rail"},{"points":[[-8.54,0.4,0.11],[-11.92,1.6,-7.03],[-11.17,2.0,-15.54],[-5.11,0.0,-21.77]],"strands":2,"type":"wire"}]"""
 const SELECT_RADIUS: float = 1.6              ## a click within this many table units grabs an element
 const ROTATE_STEP_DEG: float = 7.5            ## rotation applied per mouse-wheel tick
 const ANGLE_SNAP_DEG: float = 15.0            ## with SHIFT held, rotation snaps to this increment
@@ -602,12 +607,16 @@ func _load_saved() -> void:
 	var raw: Variant = JavaScriptBridge.eval(
 		"window.localStorage.getItem('%s') || ''" % LAYOUT_KEY, true
 	)
-	if not (raw is String) or raw == "":
-		return
-	var parsed: Variant = JSON.parse_string(raw)
-	if not (parsed is Array):
-		return
-	_apply_layout(parsed)
+	if raw is String and raw != "":
+		var parsed: Variant = JSON.parse_string(raw)
+		if parsed is Array:
+			_apply_layout(parsed)
+			return
+	# No saved layout in this browser: apply the BAKED default so the developer's chosen table ships
+	# and reappears after a "RESET saved" / cleared storage.
+	var baked: Variant = JSON.parse_string(DEFAULT_LAYOUT_JSON)
+	if baked is Array:
+		_apply_layout(baked)
 
 
 ## Replace the current furniture/rails with a saved layout: clear the editor-managed elements, then
