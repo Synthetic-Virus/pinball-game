@@ -113,7 +113,8 @@ const FLIPPER_PIVOT_Z: float = HALF_LENGTH - 5.0  ## How far up from the drain t
 ## plane. Left flipper points up-right at rest and swings up; right is mirrored. Physics-programmer
 ## may refine these as the hinge limits, but the geometry above is the contract.
 const FLIPPER_REST_ANGLE: float = -0.55
-const FLIPPER_UP_ANGLE: float = 0.15
+const FLIPPER_UP_ANGLE: float = 0.50  ## was 0.15 (~9deg): too shallow, the bat barely rose. 0.50
+                                      ## (~29deg) gives a ~60deg full swing so it comes up properly.
 
 ## The MAXIMUM down-table (greatest +Z) a flipper BAT reaches at any swing angle, in playfield-local
 ## Z. This is the DOWN-TABLE EDGE of the "catch zone" the drain volume must stay clear of (QA
