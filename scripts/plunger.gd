@@ -314,10 +314,10 @@ func _do_launch() -> void:
 	_impulse_applied = false
 	_stroke_state = StrokeState.FORWARD
 
-	# COSMETIC release JUICE: snap the moving group forward (from its charged pull-back position) with
-	# a slight overshoot past rest, then settle. Sized from the power that was just released so a hard
-	# release reads punchier. Decoupled: it animates only the imported visual, never the ball.
-	_play_release_snap(clamped_power)
+	# Release JUICE is now driven by _drive_launch_visual() each stroke frame: the rod + spring follow
+	# the REAL stroke (the collision face moving forward), so the visible plunger moves WITH the launch
+	# instead of a separate tween that fought it (developer: "the launcher isn't moving enough"). The
+	# old _play_release_snap tween is intentionally not called - the stroke-driven path supersedes it.
 
 	# Wake the ball if it has fallen asleep resting against the face, so the moving face's contact is
 	# registered this step. This does NOT set the ball's velocity (the contact still does that, keeping
@@ -520,12 +520,12 @@ func _install_launcher_art() -> void:
 	var factor: float = _derive_launcher_scale(_launcher_visual)
 	_launcher_scale = factor  ## kept so the launch animation can move the rod in the model's scale
 	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
-	# Place the model so its TIP (model-local +X max) lands at the plunger face contact point, with the
-	# housing extending DOWN-table behind it. This makes the VISIBLE plunger tip the thing that meets
-	# the ball, instead of the bare face box up-table of it (developer: "the plunger should do the
-	# work"). The collision face stays at PLUNGER_REST_POS, which now coincides with the visible tip.
-	var box: AABB = _merged_aabb(_launcher_visual)
-	var tip_local := Vector3(box.position.x + box.size.x, 0.0, 0.0)
+	# Align the CONTACT HEAD (the Plunger_Tip mesh's forward +X face) to the plunger face - NOT the
+	# housing's far edge. The housing mouth sits past the head, so the ball nests INSIDE the mouth and
+	# the visible tip actually meets the ball (developer: "the ball isn't touching the launcher's
+	# plunger"). The collision face stays at PLUNGER_REST_POS, which now coincides with the visible tip.
+	var contact_x: float = _tip_contact_x(_launcher_visual)
+	var tip_local := Vector3(contact_x, 0.0, 0.0)
 	var tip_offset: Vector3 = yaw.scaled(Vector3.ONE * factor) * tip_local
 	var origin: Vector3 = TableConfig.PLUNGER_REST_POS - tip_offset
 	_launcher_visual.transform = Transform3D(yaw.scaled(Vector3.ONE * factor), origin)
@@ -564,6 +564,19 @@ func _derive_launcher_scale(root: Node3D) -> float:
 	return TableConfig.LANE_WIDTH / cross
 
 
+## The model-local +X (forward) face of the Plunger_Tip mesh - the point that strikes the ball. Used
+## to seat the visible tip at the plunger face. Falls back to the merged-AABB far edge if the tip mesh
+## is absent (the launcher never mis-seats catastrophically). DERIVED from the mesh, not hardcoded.
+func _tip_contact_x(root: Node3D) -> float:
+	for mi: MeshInstance3D in _mesh_instances(root):
+		if mi.name.contains("Tip"):
+			var local: Transform3D = TableConfig.relative_xform(root, mi)
+			var a: AABB = local * mi.get_aabb()
+			return a.position.x + a.size.x
+	var box: AABB = _merged_aabb(root)
+	return box.position.x + box.size.x
+
+
 ## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).
 func _merged_aabb(root: Node3D) -> AABB:
 	var out := AABB()
@@ -600,7 +613,11 @@ func _apply_charge_visual(power: float) -> void:
 	var p: float = clampf(power, 0.0, 1.0)
 	if _anim_group != null:
 		# Pull back along the model's local -X (forward is +X), so the rod retracts as charge rises.
-		_anim_group.position = _anim_rest_pos + Vector3(-JUICE_PULL_BACK * p, 0.0, 0.0)
+		# JUICE_PULL_BACK is a WORLD distance; divide by the model scale to move that far in the model's
+		# own (scaled-down) local space, or the retract is invisibly small (developer: "the launcher
+		# isn't moving enough with the power fluctuation").
+		var pull_local: float = JUICE_PULL_BACK / maxf(_launcher_scale, 0.0001)
+		_anim_group.position = _anim_rest_pos + Vector3(-pull_local * p, 0.0, 0.0)
 	if _spring != null:
 		# Compress the coil on its long axis (model X) toward the housing as charge rises.
 		var s: Vector3 = _spring_rest_scale
