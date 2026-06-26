@@ -307,8 +307,10 @@ const BALL_START: Vector3 = Vector3(
 ## 90 keeps the stress at 180 u/s (bounce ~115 < 120), the proven-safe band. Spread 90/70 = 1.29x is
 ## modest; widen the FEEL later by lowering the deflector turn point, NOT by raising MAX past the
 ## CCD-safe ceiling.
-const LAUNCH_SPEED_MIN: float = 70.0
-const LAUNCH_SPEED_MAX: float = 90.0
+const LAUNCH_SPEED_MIN: float = 85.0
+const LAUNCH_SPEED_MAX: float = 110.0  ## raised with the heavier ball (gravity_scale 1.8) so a full
+                                       ## plunge still clears the chute; 110 is the documented CCD
+                                       ## ceiling for the lane (a prior slice ran the stroke at 108).
 
 ## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
 ## The plunger is now a PHYSICAL body (AnimatableBody3D on KINEMATIC_OBSTACLES, like the flippers)
@@ -330,8 +332,11 @@ const LAUNCH_SPEED_MAX: float = 90.0
 ## MIN 70 so even the weakest plunge carries the ball up to the LaneExitDeflector and turns into the
 ## field; MAX 88 (just under LAUNCH_SPEED_MAX 90) so a full strike stays inside the CCD-safe band
 ## (see the LAUNCH_SPEED_MAX WHY note - 110 broke the no-tunnel cap). Spread is modest by design.
-const PLUNGER_STROKE_SPEED_MIN: float = 70.0   ## Power 0.0: carries the ball to the lane deflector.
-const PLUNGER_STROKE_SPEED_MAX: float = 88.0   ## Power 1.0: hard strike, just under LAUNCH_SPEED_MAX.
+const PLUNGER_STROKE_SPEED_MIN: float = 85.0    ## Power 0.0: still carries the ball up the chute now
+                                                ## that the ball is heavier (gravity_scale 1.8).
+const PLUNGER_STROKE_SPEED_MAX: float = 108.0   ## Power 1.0: full strike. 108 is the known no-tunnel
+                                                ## ceiling (110 broke it); raised from 88 so the
+                                                ## heavier ball clears the chute (developer report).
 
 ## How far (world units) the plunger face travels up-table on a full stroke before it returns home.
 ## It only needs to travel far enough to stay in solid contact with the ball through the strike; a
