@@ -166,14 +166,25 @@ func _make_detector_shape() -> Shape3D:
 ## must be on the FRONT (play) side of the face line AND projected within the face span (post-post),
 ## allowing ~half a ball past each end so a genuine end-of-band hit still kicks (QA BUG-018) while a
 ## ball out past a post (the top post the developer circled) does not.
-func _contact_should_kick(_ball_pos: Vector3) -> bool:
-	# Kick on ANY contact with the body. The solid + detector are now rebuilt from the VISUAL model's
-	# own hull (_rebuild_collider_from_visual), so a contact is, by construction, a real strike on the
-	# visible slingshot - there is no separate posts/back region to exclude. The old corner-face gate
-	# was computed from the RAW corner triangle, which no longer matches the hull the ball actually
-	# touches, so it rejected EVERY contact and the slingshot never kicked (diagnosed via [KDBG] logs:
-	# "contact-rejected" on every hit). The fixed kick DIRECTION still sends the ball into play.
-	return true
+func _contact_should_kick(ball_pos: Vector3) -> bool:
+	# Only the CENTER of the long FRONT face (the rubber band facing play) fires the kick - not the
+	# posts, the short sides, or the back (developer: "kicking at more than just the single kick point
+	# in the center of the long side facing the play area"). Gate in world XZ off the ACTUAL kick
+	# direction (reliable - it is what _apply_kick uses): the ball must be IN FRONT of the slingshot
+	# center along the kick, and within a lateral band of the center line. This replaces the old
+	# corner-triangle face gate, which no longer matched the visual-derived hull and rejected every hit.
+	var rel: Vector3 = ball_pos - global_position
+	rel.y = 0.0
+	var kd: Vector3 = _kick_dir
+	kd.y = 0.0
+	if kd.length() < 0.0001:
+		return true
+	kd = kd.normalized()
+	var forward: float = rel.dot(kd)
+	if forward <= 0.0:
+		return false  ## behind / beside the front face - passive bounce only
+	var lateral: float = (rel - kd * forward).length()
+	return lateral <= TableConfig.BALL_RADIUS * 2.5
 
 
 ## The KICKING FACE of the slingshot. Returns [a, b, normal] in local X-Z: a and b are the two ends

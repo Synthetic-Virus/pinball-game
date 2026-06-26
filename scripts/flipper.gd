@@ -197,6 +197,13 @@ func editor_move(local_pos: Vector3) -> void:
 		var xf: Transform3D = _body.global_transform
 		xf.origin = global_transform.origin
 		_body.global_transform = xf
+	# Re-bake the hinge at the NEW pivot. A Joint3D bakes its anchor frames from the body/joint
+	# transforms WHEN node_a is assigned and does NOT follow a moved joint node, so the constraint
+	# would otherwise drag the bat straight back to the old pivot - moving "only the pivot point"
+	# (developer report). Reassigning node_a forces the joint to rebuild at the current transforms.
+	if _hinge != null and _body != null:
+		_hinge.node_a = NodePath("")
+		_hinge.node_a = _hinge.get_path_to(_body)
 
 
 ## Editor click radius. The flipper node sits at the PIVOT, but the BAT extends a full flipper-length
