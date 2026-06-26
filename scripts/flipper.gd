@@ -56,12 +56,17 @@ const SOLENOID_TORQUE: float = 20000.0  ## was 9000: developer wanted the flip A
 ## Return-spring stiffness: restoring torque per radian of displacement from the rest angle when the
 ## action is NOT held. Strong enough to return briskly, soft enough that the return does not itself
 ## launch the ball across the table.
-const RETURN_SPRING_STIFFNESS: float = 1200.0
+const RETURN_SPRING_STIFFNESS: float = 1800.0  ## firmer return (was 1200) so the bat snaps back to
+                                               ## rest crisply instead of flopping/sagging.
 ## Angular damping torque per unit of angular velocity, applied in BOTH states. This is the shock
 ## absorber: it stops the bat oscillating against the hinge limits (a buzzing/jittering flipper) and
 ## keeps a held flipper rock-steady in a cradle. Too high kills the snap; tuned to allow the ~50 ms
 ## snap while still settling cleanly.
-const ANGULAR_DAMPING: float = 60.0
+const ANGULAR_DAMPING: float = 120.0  ## was 60: BELOW critical damping (~96 for the spring + bat
+                                      ## inertia), so the bat oscillated around rest = "floppy"
+                                      ## (developer). 120 is ~critical for the stiffer spring: firm,
+                                      ## settles without oscillating, still allows the ~50ms snap (the
+                                      ## 20000 drive dwarfs the damping during a flip).
 ## Unit hinge axis in this node's LOCAL space. The bat rotates about the surface normal (+Y).
 ## Declared here with the other constants so gdlint's class-definitions-order rule is satisfied.
 const _HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
