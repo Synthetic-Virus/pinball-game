@@ -108,26 +108,6 @@ func _make_mesh() -> MeshInstance3D:
 func _ready() -> void:
 	super._ready()
 	_install_art()
-	_debug_viz_collision()  ## TEMP: verify the detector/body actually sit on the visible bumper
-
-
-## TEMP DIAGNOSTIC (remove): draw the bumper's detector (Area shape) + solid body shape bright red so
-## a screenshot shows whether the collision actually overlaps the visible mushroom (i.e. whether a
-## ball can ever trigger the kick + hit-flash). Developer: bumpers show no light.
-func _debug_viz_collision() -> void:
-	var hosts: Array = [self, _body]
-	for host: Node in hosts:
-		if host == null:
-			continue
-		for c: Node in host.get_children():
-			if c is CollisionShape3D and (c as CollisionShape3D).shape != null:
-				var dbg := MeshInstance3D.new()
-				dbg.mesh = (c as CollisionShape3D).shape.get_debug_mesh()
-				var m := StandardMaterial3D.new()
-				m.albedo_color = Color(1.0, 0.1, 0.1)
-				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-				dbg.material_override = m
-				(c as CollisionShape3D).add_child(dbg)
 
 
 ## Load the mushroom body+cap as the visible art (scaled to overhang the collider) and hide the
