@@ -166,23 +166,14 @@ func _make_detector_shape() -> Shape3D:
 ## must be on the FRONT (play) side of the face line AND projected within the face span (post-post),
 ## allowing ~half a ball past each end so a genuine end-of-band hit still kicks (QA BUG-018) while a
 ## ball out past a post (the top post the developer circled) does not.
-func _contact_should_kick(ball_pos: Vector3) -> bool:
-	var face: Array = _kicking_face()
-	var a: Vector2 = face[0]
-	var b: Vector2 = face[1]
-	var n: Vector2 = face[2]
-	var local: Vector3 = to_local(ball_pos)
-	var p := Vector2(local.x, local.z)
-	var mid: Vector2 = (a + b) * 0.5
-	if (p - mid).dot(n) < -0.1:
-		return false  ## behind the face (apex / back) - passive bounce only
-	var edge: Vector2 = b - a
-	var elen: float = edge.length()
-	if elen < 0.0001:
-		return true
-	var t: float = (p - a).dot(edge / elen)
-	var margin: float = TableConfig.BALL_RADIUS * 0.5
-	return t >= -margin and t <= elen + margin
+func _contact_should_kick(_ball_pos: Vector3) -> bool:
+	# Kick on ANY contact with the body. The solid + detector are now rebuilt from the VISUAL model's
+	# own hull (_rebuild_collider_from_visual), so a contact is, by construction, a real strike on the
+	# visible slingshot - there is no separate posts/back region to exclude. The old corner-face gate
+	# was computed from the RAW corner triangle, which no longer matches the hull the ball actually
+	# touches, so it rejected EVERY contact and the slingshot never kicked (diagnosed via [KDBG] logs:
+	# "contact-rejected" on every hit). The fixed kick DIRECTION still sends the ball into play.
+	return true
 
 
 ## The KICKING FACE of the slingshot. Returns [a, b, normal] in local X-Z: a and b are the two ends
