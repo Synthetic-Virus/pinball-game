@@ -29,7 +29,8 @@ const TILT_DEG: float = 7.0
 
 ## ---- BALL --------------------------------------------------------------------------------------
 const BALL_RADIUS: float = 0.6      ## World units. ~0.5-1.0 per the DESIGN brief; 0.6 chosen.
-const BALL_MASS: float = 0.6        ## Kept near unity at this scale for stable solver behavior.
+const BALL_MASS: float = 0.4        ## Lighter (was 0.6) so the flippers throw it harder and it plays
+                                    ## zippier (developer). Still high enough for stable solver behavior.
 const BALL_BOUNCE: float = 0.15     ## PhysicsMaterial bounce. Low: a steel ball is not bouncy.
 const BALL_FRICTION: float = 0.4
 
@@ -308,9 +309,8 @@ const BALL_START: Vector3 = Vector3(
 ## modest; widen the FEEL later by lowering the deflector turn point, NOT by raising MAX past the
 ## CCD-safe ceiling.
 const LAUNCH_SPEED_MIN: float = 85.0
-const LAUNCH_SPEED_MAX: float = 110.0  ## raised with the heavier ball (gravity_scale 1.8) so a full
-                                       ## plunge still clears the chute; 110 is the documented CCD
-                                       ## ceiling for the lane (a prior slice ran the stroke at 108).
+const LAUNCH_SPEED_MAX: float = 116.0  ## the band the full plunge lands in; nudged up with the
+                                       ## stroke max (112). Near the chute no-tunnel ceiling.
 
 ## ---- PHYSICAL PLUNGER STROKE -------------------------------------------------------------------
 ## The plunger is now a PHYSICAL body (AnimatableBody3D on KINEMATIC_OBSTACLES, like the flippers)
@@ -334,9 +334,11 @@ const LAUNCH_SPEED_MAX: float = 110.0  ## raised with the heavier ball (gravity_
 ## (see the LAUNCH_SPEED_MAX WHY note - 110 broke the no-tunnel cap). Spread is modest by design.
 const PLUNGER_STROKE_SPEED_MIN: float = 85.0    ## Power 0.0: still carries the ball up the chute now
                                                 ## that the ball is heavier (gravity_scale 1.8).
-const PLUNGER_STROKE_SPEED_MAX: float = 108.0   ## Power 1.0: full strike. 108 is the known no-tunnel
-                                                ## ceiling (110 broke it); raised from 88 so the
-                                                ## heavier ball clears the chute (developer report).
+const PLUNGER_STROKE_SPEED_MAX: float = 112.0   ## Power 1.0: full strike. Nudged up (developer wanted
+                                                ## a slightly higher top range). NOTE: ~108-112 is the
+                                                ## chute no-tunnel ceiling (110 historically broke it);
+                                                ## going higher needs a wider/thicker chute, not a bigger
+                                                ## number.
 
 ## How far (world units) the plunger face travels up-table on a full stroke before it returns home.
 ## It only needs to travel far enough to stay in solid contact with the ball through the strike; a
