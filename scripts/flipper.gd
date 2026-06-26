@@ -49,7 +49,10 @@ const BAT_MASS: float = 0.40
 ## Drive torque applied toward the up-stop while the action is held. Sized with BAT_MASS and the
 ## bat's inertia at FLIPPER_LENGTH to reach full extension in ~50 ms (DESIGN "FLIPPER SNAP") and
 ## to firmly CRADLE the ball's weight when held against it (resist sag).
-const SOLENOID_TORQUE: float = 9000.0
+const SOLENOID_TORQUE: float = 20000.0  ## was 9000: developer wanted the flip A LOT stronger. ~2.2x
+                                        ## drive snaps the bat to the up-stop harder, throwing the
+                                        ## (now lighter) ball much faster. Swing is still capped by the
+                                        ## up-stop angle, so it is snappier, not unbounded.
 ## Return-spring stiffness: restoring torque per radian of displacement from the rest angle when the
 ## action is NOT held. Strong enough to return briskly, soft enough that the return does not itself
 ## launch the ball across the table.
