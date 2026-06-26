@@ -425,15 +425,23 @@ func _update_hover(screen_pos: Vector2) -> void:
 	_hover_handle = best
 
 
-## Raise (+) or lower (-) the height of the wire-ramp point under the cursor.
+## Raise (+) or lower (-) a wire-ramp point's height. Prefers the SELECTED point so the panel BUTTONS
+## act on the point you clicked - the cursor is over the button when you press it, not over a ramp
+## point, so a cursor-hover target raised the wrong point (developer: it raised the 3rd placed point).
+## Falls back to the point under the cursor, which is what the = / - keys use while hovering.
 func _adjust_height(delta: float) -> void:
-	if _hover_handle == null or not is_instance_valid(_hover_handle) or not _hover_handle.has_meta("wire"):
-		_flash("hover a wire-ramp point, then + / -")
+	var handle: Node3D = null
+	if _selected != null and is_instance_valid(_selected) and _selected.has_meta("wire"):
+		handle = _selected
+	elif _hover_handle != null and is_instance_valid(_hover_handle) and _hover_handle.has_meta("wire"):
+		handle = _hover_handle
+	if handle == null:
+		_flash("select a wire-ramp point, then Raise/Lower")
 		return
-	var wire: Node = _hover_handle.get_meta("wire")
+	var wire: Node = handle.get_meta("wire")
 	if is_instance_valid(wire):
 		_push_undo()
-		wire.set_handle_height(_hover_handle, delta)
+		wire.set_handle_height(handle, delta)
 
 
 # --- Touch controls (PLAY mode only) -------------------------------------------------------------
