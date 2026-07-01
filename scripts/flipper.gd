@@ -45,6 +45,10 @@ extends Node3D
 ## to 90% swing in ~3 physics frames (~12 ms, faster than the 50 ms target) and the momentum gate
 ## (full swing >> tap) stays green - verified headless. This is the genuine "rubber that keeps
 ## momentum" fix, not a weakened test.
+## UPDATE (BALL_MASS 0.6 -> 0.4, 2026): the numbers above were measured against the old 0.6 ball. The
+## bat's EFFECTIVE inertia (~4/3 * 0.40 = ~0.53) still exceeds the new 0.4 ball, so the bat still
+## resists the shove and the rubber rebound holds (if anything a lighter ball rebounds livelier).
+## Re-run test_flipper_rubber locally to confirm the rebound floor after any further ball-mass change.
 const BAT_MASS: float = 0.40
 ## Drive torque applied toward the up-stop while the action is held. Sized with BAT_MASS and the
 ## bat's inertia at FLIPPER_LENGTH to reach full extension in ~50 ms (DESIGN "FLIPPER SNAP") and
