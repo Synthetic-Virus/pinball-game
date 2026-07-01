@@ -151,6 +151,18 @@ func current_speed() -> float:
 	return linear_velocity.length()
 
 
+## TEMP TUNNEL SENTINEL (remove): logs whenever the ball nears/exceeds the 120 CCD-safe cap or leaves
+## the play bounds (a tunnel escape), so a headless aggressive-play run can quantify the launch-speed
+## safety at the raised launch values without local Godot.
+func _physics_process(_delta: float) -> void:
+	var spd: float = linear_velocity.length()
+	if spd > 115.0:
+		print("[TS] speed=%.1f pos=(%.1f,%.1f,%.1f)" % [spd, position.x, position.y, position.z])
+	if absf(position.x) > TableConfig.HALF_WIDTH + 2.5 \
+			or absf(position.z) > TableConfig.HALF_LENGTH + 2.5 or position.y < -3.0:
+		print("[TS] OOB pos=(%.1f,%.1f,%.1f) speed=%.1f" % [position.x, position.y, position.z, spd])
+
+
 ## True if the given body is currently a reported physics contact of this ball. Used by the physical
 ## plunger to confirm its face is TOUCHING the ball before applying the launch impulse, so a launch
 ## with no seated ball (or a ball that already left the face) is a no-op (ARCHITECTURE.md 11.2).
