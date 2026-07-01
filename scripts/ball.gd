@@ -67,8 +67,9 @@ func _ready() -> void:
 	# floats at the top"). The launch/kick speeds dwarf the gravity accel, so the ball zipped when
 	# struck but drifted under gravity alone. Raising ONLY the ball's gravity (not global gravity, so the
 	# flipper bats are untouched) makes it fall ~1.8x faster and read heavier. NOTE: this also slows the
-	# climb up the launch chute, so PLUNGER_STROKE_SPEED_MAX was raised to 108 (the no-tunnel ceiling)
-	# so a full plunge still clears it. 2.0 was tried first but needed a launch >108, which tunnels.
+	# climb up the launch chute, so PLUNGER_STROKE_SPEED_MAX was raised to 112 (near the chute no-tunnel
+	# ceiling ~108-112) so a full plunge still clears it. 2.0 was tried first but needed even more launch
+	# speed, above what the chute tolerates. Confirm no-tunnel with the local stress test if raised again.
 	gravity_scale = 1.8  # base project default_gravity is 200; the table tilt is the Playfield node.
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE

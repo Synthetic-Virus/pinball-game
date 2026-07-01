@@ -79,13 +79,18 @@ func _build_ui() -> void:
 	# count, a message line, and the session high score. The table is panned LEFT in play mode (see
 	# table.set_play_view) so this panel does not cover the playfield.
 	var box := PanelContainer.new()
-	# TOP-RIGHT aligned (developer: "scoreboard should be right aligned at the top"). Anchored to the
-	# right edge, top-anchored so it grows DOWN to fit its content.
-	box.anchor_left = 0.62
+	# TOP-RIGHT aligned (developer: "scoreboard should be right aligned at the top"). Pinned to the
+	# top-right CORNER (both horizontal anchors at 1.0) with a FIXED min width, growing LEFT and DOWN to
+	# fit its content. WHY a fixed width instead of a percentage span: the labels do not wrap and have no
+	# min size, so a percentage-width panel could clip a long SCORE / the banner on a narrow window; a
+	# fixed 340px panel is always wide enough and never clips (it grows left further if content exceeds).
+	box.anchor_left = 1.0
 	box.anchor_right = 1.0
 	box.anchor_top = 0.0
-	box.anchor_bottom = 0.0  ## top-anchored; grows DOWN to fit its content (not a fixed long panel)
-	box.grow_vertical = Control.GROW_DIRECTION_END
+	box.anchor_bottom = 0.0
+	box.grow_horizontal = Control.GROW_DIRECTION_BEGIN  ## expand LEFT from the right edge
+	box.grow_vertical = Control.GROW_DIRECTION_END      ## expand DOWN from the top
+	box.custom_minimum_size = Vector2(340.0, 0.0)       ## wide enough for a long SCORE at 38px
 	box.offset_left = 0.0
 	box.offset_right = -10.0  ## small margin off the right edge
 	box.offset_top = 8.0

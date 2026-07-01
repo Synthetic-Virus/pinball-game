@@ -129,6 +129,10 @@ const FLIPPER_UP_ANGLE: float = 0.50  ## was 0.15 (~9deg): too shallow, the bat 
 ## value PLUS a clearance margin so the drain edge clears the bat with room to spare regardless of
 ## which oracle is tighter. The test_world_scale config assert pins DRAIN_Z - DRAIN_DEPTH/2 above
 ## this value, so the boundary is machine-checked the way BUG-022's was.
+## NOTE (rest angle raised -0.55 -> -0.30, 2026): a PERKIER (less drooped) rest makes the bat reach
+## LESS far down-table, so 23.66 is now EXTRA conservative and the drain stays safely clear - kept as
+## a fixed pessimistic bound rather than re-derived (re-deriving would move the drain and needs the
+## local BUG-023 test to confirm). RE-DERIVE this if the rest is ever set MORE drooped than -0.55.
 const FLIPPER_BAT_MAX_Z: float = 23.66
 ## Clearance the drain's up-table edge keeps ABOVE FLIPPER_BAT_MAX_Z. Half a ball diameter is a
 ## comfortable, readable buffer (a ball whose CENTER is still above the bat zone cannot trip the
@@ -150,7 +154,9 @@ const MINI_FLIPPER_WIDTH: float = FLIPPER_WIDTH * 0.85
 const MINI_FLIPPER_HEIGHT: float = FLIPPER_HEIGHT
 ## Rest/up angles for the mini. It sits up-field and swings up toward center to bat the ball at the
 ## bumper cluster. Same sign convention as the main flippers (handedness negates for a mirror).
-const MINI_FLIPPER_REST_ANGLE: float = -0.30  ## perkier rest, matching the main flippers (was -0.50).
+const MINI_FLIPPER_REST_ANGLE: float = FLIPPER_REST_ANGLE  ## tracks the main flippers' rest (was a
+                                                          ## separate -0.50, then a copied -0.30);
+                                                          ## derive so a future rest tweak stays in sync.
 const MINI_FLIPPER_UP_ANGLE: float = 0.30
 ## Pivot of the single upper-left mini flipper (playfield-local). Up in the field on the left, clear
 ## of the bumper cluster (POP_BUMPER_POSITIONS sit around z -5..-10) and inside the side wall.
@@ -230,8 +236,10 @@ const DRAIN_Z: float = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH * 0
 ##
 ## WIDTH = the inter-tip mouth (2*(SPREAD - FLIPPER_LENGTH*cos|REST_ANGLE|)) PLUS one ball diameter
 ## of capture margin so a ball entering the mouth slightly off-center is still caught cleanly. With
-## SPREAD 7.2, reach ~5.97 the mouth is ~2.46; +1.2 gives ~3.66 (span ~ +/-1.83), comfortably inside
-## the +/-7.2 flipper zone (no catch-zone overlap) and wide enough to read as the drain mouth.
+## the current FLIPPER_PIVOT_SPREAD (4.5) and rest -0.30, reach = 3.8*cos(0.30) ~ 3.63 so the mouth is
+## ~1.74; +1.2 capture gives DRAIN_WIDTH ~2.94 (span ~ +/-1.47). The formula auto-derives from the
+## live constants, so it tracks any spread/rest-angle change (the numbers here are just the current
+## values). Perkier rest (less droop) narrows the mouth vs the old -0.55; still wider than a ball.
 const _DRAIN_MOUTH: float = 2.0 * (
 	FLIPPER_PIVOT_SPREAD - FLIPPER_LENGTH * cos(absf(FLIPPER_REST_ANGLE))
 )
@@ -302,14 +310,14 @@ const BALL_START: Vector3 = Vector3(
 ## releasing it into the open playfield so it cannot fall back down the channel. The speeds now only
 ## need to carry the ball UP TO the deflector (z ~ -13.5), a ~37-unit climb (~43 u/s frictionless).
 ##
-## SPEED FLOOR/CEILING: MIN delivered 70 (clears the ~43 u/s climb to the deflector with margin for
-## the snug-lane friction loss the diagnostic measures). MAX 90 - REVERTED from the mistaken 110.
-## WHY NOT 110: every no-tunnel stress test fires at 2.0 * LAUNCH_SPEED_MAX (read LIVE), so MAX 110
-## fired the stress at 220 u/s, and a restitution bounce off an element returned ~141 u/s - ABOVE
-## the 120 KICK_MAX_OUTGOING_SPEED CCD-safe cap, a tunneling-safety regression the suite caught. MAX
-## 90 keeps the stress at 180 u/s (bounce ~115 < 120), the proven-safe band. Spread 90/70 = 1.29x is
-## modest; widen the FEEL later by lowering the deflector turn point, NOT by raising MAX past the
-## CCD-safe ceiling.
+## SPEED FLOOR/CEILING: MIN delivered 85, MAX 116 (both RAISED for the heavier ball, gravity_scale 1.8,
+## so a full plunge still clears the ~43 u/s climb to the deflector). CAUTION - re-validate this: every
+## no-tunnel stress test fires at 2.0 * LAUNCH_SPEED_MAX (read LIVE), so MAX 116 fires the stress at
+## 232 u/s. History: at the earlier MAX 110 (stress 220) a restitution bounce returned ~141 u/s, ABOVE
+## the 120 KICK_MAX_OUTGOING_SPEED CCD-safe cap - a tunneling regression the local suite caught. 116 is
+## ABOVE that mark, so it is NOT proven-safe the way 90 was; RUN the local no-tunnel stress test, and if
+## a bounce exceeds the 120 cap, pull MAX back toward 90-110 or widen the chute. Prefer widening the
+## FEEL by lowering the deflector turn point over raising MAX further.
 const LAUNCH_SPEED_MIN: float = 85.0
 const LAUNCH_SPEED_MAX: float = 116.0  ## the band the full plunge lands in; nudged up with the
                                        ## stroke max (112). Near the chute no-tunnel ceiling.
@@ -324,16 +332,18 @@ const LAUNCH_SPEED_MAX: float = 116.0  ## the band the full plunge lands in; nud
 ## a low-restitution steel ball (BALL_BOUNCE 0.15), the ball leaves at roughly the face speed (a
 ## little more from the slight bounce, a little less from contact losses), so the stroke-speed range
 ## is set CLOSE TO the desired ball-speed range LAUNCH_SPEED_MIN..MAX but trimmed at the top so a
-## max strike does not overshoot the 90 u/s feel target. The transfer is solver-dependent, so these
+## max strike does not overshoot the launch feel target. The transfer is solver-dependent, so these
 ## are the first on-device tuning knobs: verify in the browser build that a full strike clears the
 ## arch and a min strike dribbles, and nudge these two numbers (only) if needed. Tests assert the
 ## MAPPING is monotonic and meaningful and that the ball lands in-range, not an exact value.
 ## The stroke speeds FEED the delivered ball speed (the launch impulse is mass * stroke_speed applied
 ## to a ball at rest, so the ball leaves at ~the stroke speed - see scripts/plunger.gd
 ## _try_apply_launch_impulse), so these track LAUNCH_SPEED_MIN..MAX. REVISED with the launch fix:
-## MIN 70 so even the weakest plunge carries the ball up to the LaneExitDeflector and turns into the
-## field; MAX 88 (just under LAUNCH_SPEED_MAX 90) so a full strike stays inside the CCD-safe band
-## (see the LAUNCH_SPEED_MAX WHY note - 110 broke the no-tunnel cap). Spread is modest by design.
+## MIN 85 so even the weakest plunge carries the HEAVIER ball (gravity_scale 1.8) up to the
+## LaneExitDeflector and turns into the field; MAX 112 (just under LAUNCH_SPEED_MAX 116) and near the
+## chute no-tunnel ceiling (~108-112; see the LAUNCH_SPEED_MAX CAUTION note - 110 historically broke
+## the no-tunnel cap). Confirm with the local no-tunnel stress test; do not raise further without
+## widening the chute. Spread is modest by design.
 const PLUNGER_STROKE_SPEED_MIN: float = 85.0    ## Power 0.0: still carries the ball up the chute now
                                                 ## that the ball is heavier (gravity_scale 1.8).
 const PLUNGER_STROKE_SPEED_MAX: float = 112.0   ## Power 1.0: full strike. Nudged up (developer wanted
@@ -413,7 +423,7 @@ const PLUNGER_REST_POS: Vector3 = Vector3(
 ## unambiguous split between "dribbled / draining" and "in play".
 const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z - 3.5
 ## LAUNCH_SETTLE_TIME_S: how long after ball_launched we wait before judging a launch failed. WHY
-## 2.0 s: a full-power launch (LAUNCH_SPEED_MAX 90 u/s) clears the lane and crosses the reached-play
+## 2.0 s: a full-power launch (LAUNCH_SPEED_MAX ~116 u/s) clears the lane and crosses the reached-play
 ## line in a fraction of a second; even a marginal launch that just barely clears does so well under
 ## a second. A ball that has NOT crossed the line after 2.0 s has demonstrably failed to reach play
 ## (it dribbled back or stalled). The window is generous enough that a slow-but-successful launch is
