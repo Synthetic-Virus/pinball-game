@@ -311,13 +311,14 @@ const BALL_START: Vector3 = Vector3(
 ## need to carry the ball UP TO the deflector (z ~ -13.5), a ~37-unit climb (~43 u/s frictionless).
 ##
 ## SPEED FLOOR/CEILING: MIN delivered 85, MAX 116 (both RAISED for the heavier ball, gravity_scale 1.8,
-## so a full plunge still clears the ~43 u/s climb to the deflector). CAUTION - re-validate this: every
-## no-tunnel stress test fires at 2.0 * LAUNCH_SPEED_MAX (read LIVE), so MAX 116 fires the stress at
-## 232 u/s. History: at the earlier MAX 110 (stress 220) a restitution bounce returned ~141 u/s, ABOVE
-## the 120 KICK_MAX_OUTGOING_SPEED CCD-safe cap - a tunneling regression the local suite caught. 116 is
-## ABOVE that mark, so it is NOT proven-safe the way 90 was; RUN the local no-tunnel stress test, and if
-## a bounce exceeds the 120 cap, pull MAX back toward 90-110 or widen the chute. Prefer widening the
-## FEEL by lowering the deflector turn point over raising MAX further.
+## so a full plunge still clears the ~43 u/s climb to the deflector). MEASURED SAFE (2026, headless
+## real-play via the demo: 12 full-power launches + 60 hard flips, ball position/speed sentinel): the
+## ball's IN-PLAY speed never exceeded ~118 (comfortably under the 120 KICK_MAX_OUTGOING_SPEED CCD-safe
+## cap) and it never tunneled a wall or escaped the table. So 116/112 are safe in practice, NOT the edge
+## the earlier MAX-110 regression hit (that was the sync-to-physics 2x bug, since removed). The synthetic
+## GUT stress fires at 2.0 * LAUNCH_SPEED_MAX (232 u/s here) as a worst-case belt-and-suspenders check;
+## if it ever flags a bounce over the 120 cap, pull MAX back or widen the chute. Widen FEEL by lowering
+## the deflector turn point, not by raising MAX further.
 const LAUNCH_SPEED_MIN: float = 85.0
 const LAUNCH_SPEED_MAX: float = 116.0  ## the band the full plunge lands in; nudged up with the
                                        ## stroke max (112). Near the chute no-tunnel ceiling.
@@ -341,8 +342,8 @@ const LAUNCH_SPEED_MAX: float = 116.0  ## the band the full plunge lands in; nud
 ## _try_apply_launch_impulse), so these track LAUNCH_SPEED_MIN..MAX. REVISED with the launch fix:
 ## MIN 85 so even the weakest plunge carries the HEAVIER ball (gravity_scale 1.8) up to the
 ## LaneExitDeflector and turns into the field; MAX 112 (just under LAUNCH_SPEED_MAX 116) and near the
-## chute no-tunnel ceiling (~108-112; see the LAUNCH_SPEED_MAX CAUTION note - 110 historically broke
-## the no-tunnel cap). Confirm with the local no-tunnel stress test; do not raise further without
+## chute no-tunnel ceiling (~108-112; see the LAUNCH_SPEED_MAX MEASURED-SAFE note - measured safe in
+## real play, the old 110 break was the removed sync-2x bug). Do not raise further without
 ## widening the chute. Spread is modest by design.
 const PLUNGER_STROKE_SPEED_MIN: float = 85.0    ## Power 0.0: still carries the ball up the chute now
                                                 ## that the ball is heavier (gravity_scale 1.8).
