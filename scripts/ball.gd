@@ -151,16 +151,21 @@ func current_speed() -> float:
 	return linear_velocity.length()
 
 
-## TEMP TUNNEL SENTINEL (remove): logs whenever the ball nears/exceeds the 120 CCD-safe cap or leaves
-## the play bounds (a tunnel escape), so a headless aggressive-play run can quantify the launch-speed
-## safety at the raised launch values without local Godot.
+## TEMP TUNNEL SENTINEL (remove): SIDE-ESCAPE fires ONCE when the ball leaves the table sideways (it
+## should never be past +-HALF_WIDTH; the side walls contain it), logging the speed+velocity AT the
+## crossing so we can tell a high-speed TUNNEL from a low-speed geometry GAP. FAST fires if the ball
+## ever nears the 120 CCD-safe cap in play. Center draining past the open bottom is NOT flagged.
+var _ts_out: bool = false
 func _physics_process(_delta: float) -> void:
-	var spd: float = linear_velocity.length()
-	if spd > 115.0:
-		print("[TS] speed=%.1f pos=(%.1f,%.1f,%.1f)" % [spd, position.x, position.y, position.z])
-	if absf(position.x) > TableConfig.HALF_WIDTH + 2.5 \
-			or absf(position.z) > TableConfig.HALF_LENGTH + 2.5 or position.y < -3.0:
-		print("[TS] OOB pos=(%.1f,%.1f,%.1f) speed=%.1f" % [position.x, position.y, position.z, spd])
+	var p: Vector3 = position
+	var v: Vector3 = linear_velocity
+	var escaped: bool = absf(p.x) > TableConfig.HALF_WIDTH + 1.0
+	if escaped and not _ts_out:
+		print("[TS] ESCAPE x=%.1f y=%.1f z=%.1f speed=%.1f vel=(%.1f,%.1f,%.1f)" \
+			% [p.x, p.y, p.z, v.length(), v.x, v.y, v.z])
+	_ts_out = escaped
+	if v.length() > 118.0:
+		print("[TS] FAST speed=%.1f x=%.1f z=%.1f" % [v.length(), p.x, p.z])
 
 
 ## True if the given body is currently a reported physics contact of this ball. Used by the physical
