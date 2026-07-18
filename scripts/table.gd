@@ -459,6 +459,12 @@ func _build_dynamic_elements() -> void:
 	oob_drain.position = Vector3(0.0, TableConfig.OOB_DRAIN_Y, 0.0)
 	playfield.add_child(oob_drain)
 
+	# --- Visual reskin (SLICE A2) -----------------------------------------------------------------
+	# Apply the Kenney palette AFTER every static + dynamic element exists. VISUAL ONLY: TableReskin
+	# sets material_override on visible meshes (blue playfield, white frame, red scoring accent) and
+	# touches no collider, layer, position, or kick vector. See scripts/config/palette.gd.
+	TableReskin.apply(playfield)
+
 
 # --- In-game layout editor support ---------------------------------------------------------------
 # These let scripts/layout_editor.gd build the table from the developer's own placements. The editor
