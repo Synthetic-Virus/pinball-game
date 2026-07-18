@@ -37,11 +37,13 @@ const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
 const CORNER_SEGMENTS: int = 4
 
 ## SLICE "Low-poly slingshot asset" (2026-06-24): the imported low-poly model that REPLACES the
-## procedural gray-box triangle + posts/rubber as the VISIBLE art. Visual-only: the ball still
-## collides with the ConvexPolygonShape3D body built by _make_body_shape (see ARCHITECTURE.md 14.1).
-## If the .glb fails to import, the gray-box triangle (_make_mesh / _add_posts_and_rubber) STAYS so
-## the sling never vanishes (copy of the pop_bumper.gd fallback guard). The model is authored as the
-## LEFT slingshot; the RIGHT instance mirrors the visual by a negative-X scale (see _mirror_visual).
+## procedural gray-box triangle + posts/rubber as the VISIBLE art. Visual-only, PROJECT RULE (art
+## mesh is never a collider): the ball always collides with the ConvexPolygonShape3D body built by
+## _make_body_shape from the procedural rounded-triangle outline (see ARCHITECTURE.md 14.1), never
+## with the imported mesh's own geometry. If the .glb fails to import, the gray-box triangle
+## (_make_mesh / _add_posts_and_rubber) STAYS so the sling never vanishes (copy of the pop_bumper.gd
+## fallback guard). The RIGHT instance loads a separately-authored, pre-mirrored right_slingshot.glb
+## (see SLINGSHOT_RIGHT_ASSET_PATH below) instead of a runtime negative-X scale.
 const SLINGSHOT_ASSET_PATH: String = "res://assets/models/left_slingshot.glb"
 
 ## The RIGHT slingshot uses a PRE-MIRRORED .glb (baked in Blender with recalculated outward
@@ -152,13 +154,68 @@ func _make_body_shape() -> Shape3D:
 	return hull
 
 
-## Detector = the EXACT triangle body (same hull as _make_body_shape), so body_entered fires at real
-## contact anywhere on the triangle. WHERE the contact landed is then judged by
-## _contact_should_kick: only a contact on the kicking BAND fires the solenoid; the posts/back
-## bounce passively. This is the "true contact point" behavior the developer asked for, no proximity
-## padding to cause an early cone of triggering.
+## Detector = the triangle body's rounded outline, INFLATED outward by BALL_RADIUS (see
+## _offset_outline). WHERE the contact landed is then judged by _contact_should_kick: only a contact
+## on the kicking BAND fires the solenoid; the posts/back bounce passively.
+##
+## DETECTOR MARGIN - PHYSICS-PROGRAMMER FIX (measured defect, a QA-BUG-018-class regression): this
+## used to return the EXACT body shape with zero margin ("no proximity padding to cause an early cone
+## of triggering" - the original developer intent). Measured headless: a ball fired into the trimmed
+## band-end near a rounded post genuinely contacts the solid KickerBody (confirmed via the real
+## ball's get_colliding_bodies(), an independent oracle) but a coincident, non-inflated Area3D
+## detector never registered the overlap - 0 kicks, 0 scores across 120 physics frames, even though
+## _contact_should_kick's own gate evaluated true throughout. Root cause: the ball's continuous_cd
+## sweep resolves the solid-body contact at (near) zero penetration depth, and a same-shape Area3D
+## overlap check can miss that at a shallow/tangential (grazing/corner) angle even though a squarer,
+## more perpendicular hit (the face center, which already worked) does register. Padding the detector
+## outward by BALL_RADIUS - the same magnitude the ActiveKicker base class already uses as its
+## default padding for a round element (_make_detector_shape in active_kicker.gd) - gives the Area3D
+## volume enough clearance past the solid surface that a grazing contact overlaps it before or as the
+## ball's CCD resolves the solid contact, closing the gap without reopening the "early cone of
+## triggering" the zero-margin design was trying to avoid (the padding is bounded to one ball radius,
+## and _contact_should_kick's forward/lateral band gate still has the final say on whether a contact
+## fires the active kick).
 func _make_detector_shape() -> Shape3D:
-	return _make_body_shape()
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = _extrude_triangle_to_hull(
+		_offset_outline(_triangle_outline(), TableConfig.BALL_RADIUS), _height
+	)
+	return hull
+
+
+## Inflate a CCW (x, z) outline outward by `margin`, used ONLY by _make_detector_shape (never the
+## solid body or the visible mesh, which must stay the true, un-padded geometry). For each vertex the
+## outward direction is the average of its two adjacent edge normals (both oriented away from the
+## outline's centroid, mirroring _round_corners' own normal convention) - an accurate approximation
+## of a true parallel (Minkowski) offset for a densely-sampled, smoothly rounded outline like
+## _triangle_outline() (15 points for CORNER_SEGMENTS=4). Falls back to a radial (vertex-to-centroid)
+## direction if the two adjacent edges are degenerate/anti-parallel, so the offset never collapses to
+## a zero vector.
+func _offset_outline(outline: PackedVector2Array, margin: float) -> PackedVector2Array:
+	var n: int = outline.size()
+	if n < 3 or margin <= 0.0:
+		return outline
+	var centroid := Vector2.ZERO
+	for p: Vector2 in outline:
+		centroid += p
+	centroid /= float(n)
+	var out := PackedVector2Array()
+	for i in range(n):
+		var prev: Vector2 = outline[(i - 1 + n) % n]
+		var cur: Vector2 = outline[i]
+		var nxt: Vector2 = outline[(i + 1) % n]
+		var edge_in: Vector2 = cur - prev
+		var edge_out: Vector2 = nxt - cur
+		var n1 := Vector2(edge_in.y, -edge_in.x)
+		var n2 := Vector2(edge_out.y, -edge_out.x)
+		var avg: Vector2 = n1.normalized() + n2.normalized()
+		if avg.length() < 0.0001:
+			avg = cur - centroid  # degenerate (near-antiparallel adjacent edges): fall back to radial
+		avg = avg.normalized()
+		if (cur - centroid).dot(avg) < 0.0:
+			avg = -avg  # keep the normal pointing OUTWARD (away from the outline centroid)
+		out.append(cur + avg * margin)
+	return out
 
 
 ## CONTACT GATE: kick ONLY when the ball contacts the kicking BAND (the face edge), not the posts or
@@ -527,10 +584,17 @@ func _install_art() -> void:
 	# the model's own AABB (independent oracle) and divides the collider span by it.
 	var factor: float = _derive_scale(_visual)
 	_visual.scale = Vector3(factor, factor, factor)
-	# COLLISION = VISUAL: rebuild the solid body + detector from the imported model's own geometry so
-	# the ball bounces off EXACTLY the slingshot you see (the corner hull was a different shape, so the
-	# ball passed through the visual - developer report).
-	_rebuild_collider_from_visual()
+	# PROJECT RULE (established at the first .glb import): the art mesh is NEVER a collider. This used
+	# to call _rebuild_collider_from_visual() here, replacing the procedural hull with the imported
+	# mesh's raw, undeduplicated get_faces() vertices (thousands of points, e.g. 3312 for
+	# right_slingshot.glb vs the procedural hull's 30). That collider was geometrically disconnected
+	# from _contact_should_kick/_kicking_face (both of which read the ORIGINAL TableConfig corners), so
+	# whichever side's .glb happened to import successfully silently swapped to a hull the kick-gate
+	# logic did not agree with - a real ball could contact the visible slingshot without ever tripping
+	# the active kick (measured: 0 kicks/0 scores against the RIGHT sling in a direct repro). REMOVED:
+	# the procedural, explicit-corner rounded-triangle hull (built in _build_body from
+	# _make_body_shape) is the ONLY collider on both sides now, matching the project rule and keeping
+	# collision/detection/visible-art geometry reconciled regardless of asset load success.
 	# On success, hide the gray-box placeholder (the procedural triangle + posts/rubber) so only
 	# the imported model is seen. The collider is untouched - this is purely the VISIBLE swap.
 	var gray_box: Node = get_node_or_null("KickerMesh")
@@ -539,32 +603,6 @@ func _install_art() -> void:
 	# Capture the AUTHORED rest state of the flex nodes ONCE, now, before any kick can animate them
 	# (QA BUG-044). Every flex snaps back to THESE values, never to a live (possibly mid-jab) read.
 	_capture_flex_rest()
-
-
-## Rebuild the solid bounce body AND the detector hull from the imported model's own vertices, in
-## this node's frame (valid because _body_yaw is 0, so the model frame == the collider frame). The
-## ball then collides with exactly the visible slingshot. The fixed kick direction is unchanged.
-func _rebuild_collider_from_visual() -> void:
-	if _visual == null or _body == null:
-		return
-	var pts := PackedVector3Array()
-	for mi: MeshInstance3D in _mesh_instances(_visual):
-		if mi.mesh == null:
-			continue
-		var xf: Transform3D = _visual.transform * TableConfig.relative_xform(_visual, mi)
-		for v: Vector3 in mi.mesh.get_faces():
-			pts.append(xf * v)
-	if pts.size() < 4:
-		return
-	var hull := ConvexPolygonShape3D.new()
-	hull.points = pts
-	# Swap the SOLID body's shape (the ball bounces off this) and the DETECTOR's (fires the kick).
-	for c: Node in _body.get_children():
-		if c is CollisionShape3D:
-			(c as CollisionShape3D).shape = hull
-	for c2: Node in get_children():
-		if c2 is CollisionShape3D:
-			(c2 as CollisionShape3D).shape = hull
 
 
 ## Cache the authored rest position/scale of the three flex-animated sub-nodes (QA BUG-044). Called
