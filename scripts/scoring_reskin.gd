@@ -34,8 +34,9 @@ static func apply(playfield: Node3D) -> void:
 		# DECISION 1 (gameplay-programmer, RESOLVED): the flat opaque accent DOES supersede the pop
 		# bumper's old cosmetic emission/alpha hit-flash - verified by construction, not by guess.
 		# table.gd's _build_dynamic_elements() add_child()s every pop bumper/slingshot/target under
-		# Playfield BEFORE table.gd calls TableReskin.apply(playfield) (see table.gd, the call sits
-		# after every furniture add_child). Godot runs _ready() synchronously on add_child, so
+		# Playfield BEFORE table.gd calls TableReskin.apply(playfield) (that call is a final whole-table
+		# pass in table.gd _ready(), after both build phases, so it lands after every furniture
+		# add_child). Godot runs _ready() synchronously on add_child, so
 		# pop_bumper.gd's _install_art() -> _apply_blue_material() has already set its own translucent,
 		# emissive material_override on "BumperVisual" by the time this loop runs; _paint_subtree below
 		# sets material_override again on the same meshes, so the flat red accent is last-write and is

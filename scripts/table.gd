@@ -111,6 +111,15 @@ func _ready() -> void:
 	_build_flow_and_hud()
 	_wire_signals()
 	_build_layout_editor()
+	# Visual reskin (SLICE A2) runs LAST from here, as a final whole-table pass after BOTH build
+	# phases. Static geometry, dynamic furniture, AND the layout editor's default rails (spawned in
+	# _build_layout_editor) all exist now, so TableReskin walks the WHOLE table and paints the rails
+	# too. WHY here and not at the end of _build_dynamic_elements: the rails are spawned AFTER the
+	# dynamic elements, so an earlier call left the reskin's EditRail branch dead - the guide rails
+	# kept the raw wall.glb colour instead of the calm white frame (QA BUG-049). Running it here also
+	# covers furniture a future slice may add, without moving this call again. VISUAL ONLY:
+	# material_override on visible meshes; no collider, layer, position, or kick vector touched.
+	TableReskin.apply(playfield)
 	# The game no longer auto-starts: the layout editor shows a MAIN MENU first (Build vs Play). Play
 	# calls start_play() to kick off the first ball; Build enters the editor with no ball in motion.
 
@@ -458,12 +467,9 @@ func _build_dynamic_elements() -> void:
 	oob_drain.add_child(oob_col)
 	oob_drain.position = Vector3(0.0, TableConfig.OOB_DRAIN_Y, 0.0)
 	playfield.add_child(oob_drain)
-
-	# --- Visual reskin (SLICE A2) -----------------------------------------------------------------
-	# Apply the Kenney palette AFTER every static + dynamic element exists. VISUAL ONLY: TableReskin
-	# sets material_override on visible meshes (blue playfield, white frame, red scoring accent) and
-	# touches no collider, layer, position, or kick vector. See scripts/config/palette.gd.
-	TableReskin.apply(playfield)
+	# NOTE: the visual reskin (TableReskin.apply) is NOT called here. It runs once from _ready() as a
+	# final whole-table pass AFTER the layout editor spawns the rails, so the rails get painted too
+	# (QA BUG-049). See the "Visual reskin (SLICE A2)" comment block in _ready().
 
 
 # --- In-game layout editor support ---------------------------------------------------------------
@@ -537,6 +543,8 @@ func editor_spawn_wire(points: Array, strands: int) -> Node3D:
 	playfield.add_child(wire)
 	wire.configure(points, strands)
 	wires.append(wire)
+	# Not palette-painted on purpose: a wire ramp is not a wall/rail/scoring piece, so it is outside
+	# the reskin allowlist and keeps its own look (QA BUG-049 - intentional, not an oversight).
 	return wire
 
 
@@ -566,6 +574,9 @@ func editor_spawn_asset(asset_id: String, pos: Vector3, rot_y: float) -> Node3D:
 	playfield.add_child(node)
 	_add_part_collision(node)
 	assets.append(node)
+	# Not palette-painted on purpose: an imported .glb part carries its OWN model materials (flat
+	# colouring it would destroy the art), so it stays outside the reskin allowlist (QA BUG-049 -
+	# intentional, not an oversight).
 	return node
 
 
@@ -626,6 +637,10 @@ func editor_spawn(etype: String, pos: Vector3, rot_y: float) -> Node3D:
 	playfield.add_child(node)
 	if node.has_method("set_ball") and ball != null:
 		node.set_ball(ball)
+	# Keep an editor-placed piece on-palette. The startup TableReskin.apply() already painted the
+	# built-in furniture; this covers scoring furniture the developer adds AFTER load. add_child ran
+	# the node's _ready synchronously, so its marker child exists for the accent scan (QA BUG-049).
+	TableReskin.reskin_spawned(node)
 	return node
 
 
@@ -637,6 +652,10 @@ func editor_spawn_rail(kind: String, smooth: bool, points: Array) -> Node3D:
 	playfield.add_child(rail)
 	rail.configure(points, smooth, kind)
 	rails.append(rail)
+	# Paint the rail into the white frame (its wall segments only, never the cyan drag-handles). The
+	# startup reskin covers the DEFAULT rails; this covers rails the developer draws after load
+	# (QA BUG-049).
+	TableReskin.reskin_spawned(rail)
 	return rail
 
 
