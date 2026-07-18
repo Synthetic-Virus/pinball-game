@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b0lpslingshotglb01"
-path="res://.godot/imported/left_slingshot.glb-0000000000000000000000000000slng.scn"
+uid="uid://vi14ufstowas"
+path="res://.godot/imported/left_slingshot.glb-e885b0e4ff676a2e8fbd92b0c000d57d.scn"
 
 [deps]
 
 source_file="res://assets/models/left_slingshot.glb"
-dest_files=["res://.godot/imported/left_slingshot.glb-0000000000000000000000000000slng.scn"]
+dest_files=["res://.godot/imported/left_slingshot.glb-e885b0e4ff676a2e8fbd92b0c000d57d.scn"]
 
 [params]
 

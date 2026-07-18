@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b0lppopbumperglb01"
-path="res://.godot/imported/pop_bumper.glb-0000000000000000000000000000pbmp.scn"
+uid="uid://dyib5w2utyw42"
+path="res://.godot/imported/pop_bumper.glb-b568f4de364ed7c0deb979c5e86f56d5.scn"
 
 [deps]
 
 source_file="res://assets/models/pop_bumper.glb"
-dest_files=["res://.godot/imported/pop_bumper.glb-0000000000000000000000000000pbmp.scn"]
+dest_files=["res://.godot/imported/pop_bumper.glb-b568f4de364ed7c0deb979c5e86f56d5.scn"]
 
 [params]
 
