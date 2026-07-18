@@ -86,6 +86,21 @@ func _on_body_entered(body: Node) -> void:
 	if body != _ball:
 		return
 
+	# SAFETY CLAMP - PHYSICS-PROGRAMMER FIX (measured defect, diagnosis 2026-07-18): every contact
+	# with this element's solid KickerBody already ran through the physics solver's PhysicsMaterial
+	# restitution (KICKER_BOUNCE) BEFORE this Area3D signal is delivered (body_entered fires after the
+	# physics step resolves collisions). That passive solver bounce was UNCLAMPED on its own: measured
+	# headless against the real Jolt engine, a ball arriving at 2x LAUNCH_SPEED_MAX (232 u/s) and
+	# bouncing off KICKER_BOUNCE=0.7 rebounds at ~196.95 u/s - well past the documented CCD-safe
+	# envelope (TableConfig.KICK_MAX_OUTGOING_SPEED=120). The ACTIVE kick below (_apply_kick) already
+	# clamped correctly every time it fired, but it is gated behind KICK_COOLDOWN_S: a contact landing
+	# inside that cooldown window (e.g. a ball rattling between two active elements, or re-striking the
+	# same one before its cooldown clears) skipped the clamp entirely and left the ball at the raw,
+	# unclamped solver-bounce speed. Clamp UNCONDITIONALLY on every contact, before the cooldown gate,
+	# so the CCD-safe cap holds regardless of cooldown state. This only scales the magnitude down when
+	# it exceeds the cap; direction is preserved so a passive bounce still reads as a bounce.
+	_clamp_to_ccd_safe_cap()
+
 	var now_ms: float = float(Time.get_ticks_msec())
 	if now_ms < _cooldown_until_ms:
 		return
@@ -103,6 +118,19 @@ func _on_body_entered(body: Node) -> void:
 	_apply_kick(direction)
 	kicked.emit(direction)
 	scored.emit(points)
+
+
+## SAFETY NET - PHYSICS-PROGRAMMER FIX: clamp the ball's speed to the CCD-safe cap on EVERY contact
+## with this element's solid body, independent of the cooldown-gated active kick in _apply_kick. See
+## the WHY in _on_body_entered above (measured ~196.95 u/s passive-bounce breach of the 120 u/s cap).
+## Direction-preserving: only the magnitude is scaled down when it exceeds the cap, so a normal
+## passive bounce below the cap is completely unaffected.
+func _clamp_to_ccd_safe_cap() -> void:
+	if _ball == null:
+		return
+	var speed: float = _ball.linear_velocity.length()
+	if speed > TableConfig.KICK_MAX_OUTGOING_SPEED:
+		_ball.linear_velocity = _ball.linear_velocity * (TableConfig.KICK_MAX_OUTGOING_SPEED / speed)
 
 
 ## SUBCLASS OVERRIDE: given where the ball is at contact (global), should this contact fire a kick?
