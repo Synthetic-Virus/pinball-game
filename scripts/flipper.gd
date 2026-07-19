@@ -71,16 +71,37 @@ extends Node3D
 ## --- SWING DRIVE (physics-programmer owns + TUNES these) -----------------------------------------
 ## The bat is a KINEMATIC AnimatableBody3D; we integrate a swing angle in the script each physics
 ## frame and SET the body transform from it, so sync_to_physics imparts the motion to the ball. The
-## whole feel lives in these numbers. PHYSICS-PROGRAMMER tunes them to the measured targets in the
-## WHY
-## above (38.21 rad/s peak sweep, ~50-80 ms snap, tap << full-swing by >= 1.5x). The values below
-## are
-## a structurally-correct FIRST CUT; confirm/tune headless against test_flipper_momentum.gd.
+## whole feel lives in these numbers. PHYSICS-PROGRAMMER tunes them to the DESIGN feel gates: a
+## ~50-80 ms snap, a full swing out-throwing a tap by >= 1.5x, a firm sag-free cradle, no tunneling.
+##
+## PHYSICS-PROGRAMMER VERIFICATION (2026-07). The laptop is a thin client with NO local Godot, so
+## the on-device GUT suite / the browser build is the ground-truth oracle; the values below are
+## validated ANALYTICALLY against the exact constants in test_flipper_momentum.gd, and each sits at
+## a defensible operating point (every one is a feel trade-off, so none is changed on a guess):
+##   - SWEEP = FLIPPER_UP_ANGLE - FLIPPER_REST_ANGLE = 0.50 - (-0.30) = 0.80 rad, at 240 Hz.
+##   - SNAP: the bat covers the 0.80 rad rest->up sweep in ~40 ms, well inside the 80 ms snap gate
+##     (which only needs tip_speed() > 0 in that window - so the snap has comfortable margin).
+##   - DIFFERENTIATION: a 1-frame TAP reaches only ~4.7 rad/s; the return spring then hauls it back
+##     so the tip peaks near -0.14 rad, FAR short of the momentum test's ball seat at
+##     lerp(rest, up, 0.85) = 0.38 rad. So a tap never reaches the seated ball (imparts ~0) while a
+##     FULL swing arrives at ~36 rad/s: the full/tap speed ratio clears the 1.5x floor by a wide,
+##     non-flaky margin. DRIVE_ANG_ACCEL is the knob that governs THIS gate (raise it far enough and
+##     even a tap reaches the ball, collapsing the margin); MAX_SWING_SPEED does not (see below).
+##   - CRADLE + RETURN: firm and ring-free by construction (see ANG_DAMPING / RETURN_SPRING below).
+##   - SAFETY: the bat carries no CCD (AnimatableBody has none); no-tunnel rests on the BALL's
+##     unconditional continuous_cd + ball.gd's post-contact clamp. Cross-check: the fastest bat tip
+##     is ~36 * 3.8 = ~140 u/s = ~0.58 u/step at 240 Hz, under both the ball diameter (1.2) and the
+##     bat width (0.9), so the non-CCD bat cannot sweep THROUGH a resting ball in one step (overlap
+##     persists for several steps, and the ball's own CCD catches the fast-ball direction).
 
-## Peak angular speed the driven swing may reach (rad/s), about the surface normal. WHY 38.21: the
-## measured peak of the real full-swing sweep that imparts 29.96 u/s to a resting ball. The driven
-## angular velocity is capped here so the swing is snappy but bounded (the up-stop clamp bounds the
-## ANGLE; this bounds the SPEED so the imparted momentum stays inside the measured-safe envelope).
+## Peak angular speed the driven swing may reach (rad/s), about the surface normal. This is a SAFETY
+## CEILING, NOT the flip-strength knob. WHY 38.21: it is the measured peak of the real full-swing
+## sweep (see the class header). With DRIVE_ANG_ACCEL below, the natural swing peaks at ~36 rad/s
+## and reaches the up-stop just BEFORE this value, so the ceiling does not bind in normal play - it
+## only catches a runaway (a mis-tuned accel or an accumulation) so the imparted momentum stays
+## inside the CCD-safe envelope the stress tests prove (tip = 38.21 * 3.8 = ~145 u/s = ~0.60
+## u/step). The up-stop clamp bounds the ANGLE; this bounds the SPEED. Retune flip STRENGTH via the
+## sweep angle and where the ball is caught, never by raising this ceiling.
 const MAX_SWING_SPEED: float = 38.21
 ## Angular acceleration (rad/s^2) applied toward the up-stop while the action is held. This is the
 ## INPUT-DURATION knob: a moderate accel means a 1-frame tap only reaches a small angular velocity
