@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://vi14ufstowas"
-path="res://.godot/imported/left_slingshot.glb-e885b0e4ff676a2e8fbd92b0c000d57d.scn"
+uid="uid://b2jtx6jssuxfy"
+path="res://.godot/imported/obstacle-diamond.glb-414ce86ede58bf29a4e9d31aced52c3d.scn"
 
 [deps]
 
-source_file="res://assets/models/left_slingshot.glb"
-dest_files=["res://.godot/imported/left_slingshot.glb-e885b0e4ff676a2e8fbd92b0c000d57d.scn"]
+source_file="res://assets/kenney/baseline/models/obstacle-diamond.glb"
+dest_files=["res://.godot/imported/obstacle-diamond.glb-414ce86ede58bf29a4e9d31aced52c3d.scn"]
 
 [params]
 

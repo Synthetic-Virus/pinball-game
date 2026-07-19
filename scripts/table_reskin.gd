@@ -81,8 +81,8 @@ static func _paint_rail(rail: Node3D, mat: StandardMaterial3D) -> void:
 ## Set `mat` as the material_override on EVERY MeshInstance3D under `root` (inclusive). Using
 ## material_override (not mesh.material) means the reskin never edits the built mesh resource, it
 ## only layers a colour on top, so the underlying geometry/collider is provably untouched. It also
-## covers the skinned wall.glb meshes (a Border body hides its gray-box box mesh and shows the wall
-## model), so a border reads white whether it renders as the box or the imported wall.
+## covers the skinned Kenney wall meshes (a Border body hides its gray-box box mesh and shows the
+## wall model), so a border reads white whether it renders as the box or the imported wall.
 static func _paint_subtree(root: Node3D, mat: StandardMaterial3D) -> void:
 	for mesh: MeshInstance3D in _mesh_instances(root):
 		mesh.material_override = mat

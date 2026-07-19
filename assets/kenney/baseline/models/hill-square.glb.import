@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dyib5w2utyw42"
-path="res://.godot/imported/pop_bumper.glb-b568f4de364ed7c0deb979c5e86f56d5.scn"
+uid="uid://dvji4qartcgep"
+path="res://.godot/imported/hill-square.glb-a2c590f477fd0b9853f679c16055424a.scn"
 
 [deps]
 
-source_file="res://assets/models/pop_bumper.glb"
-dest_files=["res://.godot/imported/pop_bumper.glb-b568f4de364ed7c0deb979c5e86f56d5.scn"]
+source_file="res://assets/kenney/baseline/models/hill-square.glb"
+dest_files=["res://.godot/imported/hill-square.glb-a2c590f477fd0b9853f679c16055424a.scn"]
 
 [params]
 

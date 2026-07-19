@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bfj7ms47acs5h"
-path="res://.godot/imported/right_slingshot.glb-b64757668fcc6661893ec1c1abac0c58.scn"
+uid="uid://cspnsjeo4ll5t"
+path="res://.godot/imported/obstacle-block.glb-f183b8900ef3c8e17919f4f36c0e0d5f.scn"
 
 [deps]
 
-source_file="res://assets/models/right_slingshot.glb"
-dest_files=["res://.godot/imported/right_slingshot.glb-b64757668fcc6661893ec1c1abac0c58.scn"]
+source_file="res://assets/kenney/baseline/models/obstacle-block.glb"
+dest_files=["res://.godot/imported/obstacle-block.glb-f183b8900ef3c8e17919f4f36c0e0d5f.scn"]
 
 [params]
 

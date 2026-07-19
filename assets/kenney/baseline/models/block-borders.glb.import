@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://duws8eybh03y3"
-path="res://.godot/imported/launcher.glb-41244750099e47f4c46f16e1c4c8fe67.scn"
+uid="uid://co3gah868nckv"
+path="res://.godot/imported/block-borders.glb-85424c1d0e816e7789b2da2981e8ced1.scn"
 
 [deps]
 
-source_file="res://assets/models/launcher.glb"
-dest_files=["res://.godot/imported/launcher.glb-41244750099e47f4c46f16e1c4c8fe67.scn"]
+source_file="res://assets/kenney/baseline/models/block-borders.glb"
+dest_files=["res://.godot/imported/block-borders.glb-85424c1d0e816e7789b2da2981e8ced1.scn"]
 
 [params]
 

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://boxgmhw6b61f8"
-path="res://.godot/imported/flipper_bat.glb-6084257bc9132b34783ad9f89df4b430.scn"
+uid="uid://mxni1xi250c5"
+path="res://.godot/imported/hill-round.glb-fce33b58052390a2f53cd951bba64e50.scn"
 
 [deps]
 
-source_file="res://assets/models/flipper_bat.glb"
-dest_files=["res://.godot/imported/flipper_bat.glb-6084257bc9132b34783ad9f89df4b430.scn"]
+source_file="res://assets/kenney/baseline/models/hill-round.glb"
+dest_files=["res://.godot/imported/hill-round.glb-fce33b58052390a2f53cd951bba64e50.scn"]
 
 [params]
 
@@ -42,4 +42,4 @@ materials/extract_path=""
 _subresources={}
 gltf/naming_version=2
 gltf/embedded_image_handling=1
-gltf/texture_map_mode=0
+gltf/texture_map_mode=1

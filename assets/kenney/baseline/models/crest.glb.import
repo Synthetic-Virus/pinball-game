@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://ctupl0sx7j0a6"
-path="res://.godot/imported/mini_flipper.glb-8851b8f96abf1b763f54b3339fd47db0.scn"
+uid="uid://cymvkm7bq82e"
+path="res://.godot/imported/crest.glb-10ad547590ab06047518ad4812c7c8f3.scn"
 
 [deps]
 
-source_file="res://assets/models/mini_flipper.glb"
-dest_files=["res://.godot/imported/mini_flipper.glb-8851b8f96abf1b763f54b3339fd47db0.scn"]
+source_file="res://assets/kenney/baseline/models/crest.glb"
+dest_files=["res://.godot/imported/crest.glb-10ad547590ab06047518ad4812c7c8f3.scn"]
 
 [params]
 

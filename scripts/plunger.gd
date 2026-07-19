@@ -62,43 +62,38 @@ signal ball_launched()
 ## is satisfied: enums precede consts.)
 enum StrokeState { IDLE, FORWARD, RETURN }
 
-## --- IMPORTED LAUNCHER ART + COSMETIC JUICE (SLICE "Custom low-poly asset integration") ----------
-## The launch lane now shows our custom low-poly launcher.glb: a static blue-lidded HOUSING plus a
-## moving plunger GROUP (rod + spring + tip + clip). The art is VISUAL ONLY and DECOUPLED from the
-## physics strike: the AnimatableBody3D _face (above) is the ONLY thing that touches the ball,
-## as before (QA BUG-017/025 honored - no ball.launch(), no code velocity set). The juice below
-## animates only nodes UNDER the imported subtree; a behavioral test asserts the launched ball's
-## velocity is IDENTICAL with the juice on vs off (the decoupling oracle).
+## --- PROCEDURAL LAUNCHER ART + COSMETIC JUICE (SLICE "Kenney 3D asset integration", 2026-07) ---
+## The launch lane shows a PROCEDURAL low-poly launcher built in code (the imported launcher.glb was
+## RETIRED this slice): a static HOUSING channel behind the ball plus a moving plunger GROUP (rod +
+## tip) and a compressible SPRING. It is styled from Palette.HARDWARE (a single grey colour source;
+## table_reskin.gd deliberately never repaints the plunger, so this material is authoritative). The
+## art is VISUAL ONLY and DECOUPLED from the physics strike: the AnimatableBody3D _face (above) is
+## the ONLY thing that touches the ball (QA BUG-017/025 honored - no ball.launch(), no velocity).
+## The juice below animates only the moving-group / spring Node3Ds; a behavioral test asserts the
+## launched ball's velocity is IDENTICAL with the juice on vs off (the decoupling oracle).
 ##
 ## CHARGE/RELEASE JUICE (script-driven from the charge value, interactive, NOT an AnimationPlayer):
 ##   - While charging, the moving group slides BACK (down-table) proportional to the live power, and
-##     the spring compresses (scales down its long axis). The player sees the plunger pull back
+##     the spring compresses (scales down its long axis). The player sees the plunger pull back as
 ##     they charge - the visible analogue of the meter.
-##   - On release, a HARD fast SNAP forward with a slight OVERSHOOT past rest, then a settle back to
-##     rest. This reads as the solenoid/spring firing. Decoupled: it cannot move the ball.
-const LAUNCHER_ASSET_PATH: String = "res://assets/models/launcher.glb"
+##   - On release, the moving group + spring FOLLOW the real physical stroke each frame (see
+##     _drive_launch_visual), so the visible plunger fires WITH the launch. Decoupled: cannot move
+##     the ball.
 
-## The node name the imported launcher .glb is instanced under (tests resolve the visual by this).
+## The node name the procedural launcher visual is instanced under (tests resolve the visual by it).
 const LAUNCHER_VISUAL_NODE_NAME: String = "LauncherVisual"
 
-## Names of the imported objects the juice drives (visual only). Plunger_Anim is the empty parenting
-## the moving rod/tip/clip; Plunger_Spring is the coil that compresses. If a re-export renames
-## or strips them, the juice degrades to a safe no-op (the art still renders, launch unchanged).
+## Names of the procedural Node3Ds the juice drives (visual only). Plunger_Anim is the empty
+## parenting the moving rod + tip; Plunger_Spring is the coil that compresses. Built by
+## _build_launcher_art; if either is absent the juice degrades to a safe no-op (launch unchanged).
 const PLUNGER_ANIM_NODE: String = "Plunger_Anim"
 const PLUNGER_SPRING_NODE: String = "Plunger_Spring"
 
 ## How far (world units) the moving plunger group slides BACK at full charge. Sized off the ball
 ## radius so it scales with the world, never a bare literal. The slide is purely cosmetic.
 const JUICE_PULL_BACK: float = TableConfig.BALL_RADIUS * 1.6
-## Release-snap overshoot as a fraction of the pull-back: the group shoots slightly PAST rest
-## (forward, up-table) before settling, reading as a punchy spring release.
-const JUICE_OVERSHOOT_FRACTION: float = 0.25
 ## How much the spring compresses (fraction of its rest long-axis scale removed) at full charge.
 const JUICE_SPRING_COMPRESS: float = 0.45
-## Release-snap timing (seconds): a hard fast jab forward, then a soft settle from overshoot
-## to rest. Total ~120 ms reads as a crisp release without lingering.
-const JUICE_SNAP_TIME_S: float = 0.05
-const JUICE_SETTLE_TIME_S: float = 0.07
 
 ## How fast the meter oscillates. CHARGE_RATE of 2.5 makes a full 0->1->0 sweep take 0.8 s,
 ## which sits comfortably in the DESIGN feel target of 0.5-1.0 s.
@@ -109,22 +104,18 @@ const CHARGE_RATE: float = 2.5
 ## empty lane). Half the max stroke speed is a safe, simple choice.
 const RETURN_SPEED: float = TableConfig.PLUNGER_STROKE_SPEED_MAX * 0.5
 
-## TEST SEAM (copy of the pop_bumper / slingshot pattern): force the imported-asset load to use a
-## different path so a test can drive the fallback branch (a bad path leaves the gray-box face).
-## "" means "use LAUNCHER_ASSET_PATH" (the production path).
-var _asset_path_override: String = ""
 ## DECOUPLING SEAM: when true, the cosmetic juice is suppressed (the visual never animates). A
 ## behavioral test launches once with this false and once with it true and asserts the launched ball
 ## velocity is IDENTICAL, proving the juice never moves the ball. INERT in play (never set).
 var _suppress_juice: bool = false
-## The instanced launcher .glb root (null until install / on fallback). The juice drives the
-## moving group + spring UNDER this; nothing here is ever a collider.
+## The procedural launcher visual root (built in _build_launcher_art). The juice drives the moving
+## group + spring UNDER this; nothing here is ever a collider (VISUAL only).
 var _launcher_visual: Node3D = null
-## The uniform scale applied to the launcher model, kept so the launch animation can move the rod by
-## the right amount in the model's own (scaled) local space.
+## The launcher is built at world scale (1.0), kept as a field so the juice math divides world-unit
+## slide distances into the visual's own local space consistently (see _apply_charge_visual).
 var _launcher_scale: float = 1.0
-## Resolved handles to the moving group + spring (null if the model lacks them). Their AUTHORED
-## local transforms are captured as the rest baseline the juice animates from and returns to.
+## Handles to the moving group + spring built by _build_launcher_art. Their authored rest transforms
+## are captured as the baseline the juice animates from and returns to.
 var _anim_group: Node3D = null
 var _spring: Node3D = null
 var _anim_rest_pos: Vector3 = Vector3.ZERO
@@ -157,7 +148,7 @@ var _impulse_applied: bool = false
 
 func _ready() -> void:
 	_build_face()
-	_install_launcher_art()
+	_build_launcher_art()
 
 
 ## Build the physical plunger face: an AnimatableBody3D box on the KINEMATIC_OBSTACLES layer, seated
@@ -314,10 +305,10 @@ func _do_launch() -> void:
 	_impulse_applied = false
 	_stroke_state = StrokeState.FORWARD
 
-	# Release JUICE is now driven by _drive_launch_visual() each stroke frame: the rod + spring follow
-	# the REAL stroke (the collision face moving forward), so the visible plunger moves WITH the launch
-	# instead of a separate tween that fought it (developer: "the launcher isn't moving enough"). The
-	# old _play_release_snap tween is intentionally not called - the stroke-driven path supersedes it.
+	# Release JUICE is driven by _drive_launch_visual() each stroke frame: the rod + spring follow the
+	# REAL stroke (the collision face moving forward), so the visible plunger moves WITH the launch
+	# (developer: "the launcher isn't moving enough"). This is the ONLY release-juice path - it drives
+	# only visual nodes, never the ball, so the launch stays decoupled (the decoupling oracle).
 
 	# Wake the ball if it has fallen asleep resting against the face, so the moving face's contact is
 	# registered this step. This does NOT set the ball's velocity (the contact still does that, keeping
@@ -384,9 +375,9 @@ func _advance_stroke(delta: float) -> void:
 	_drive_launch_visual()
 
 
-## Make the visible rod/tip/clip group + spring follow the launch stroke, so the plunger moves WITH
-## the spring instead of staying still while only the invisible collision face strokes. Driven from
-## the face's forward offset from rest, divided by the model scale into the model's local +X.
+## Make the visible rod + tip group + spring follow the launch stroke, so the plunger moves WITH the
+## launch instead of staying still while only the invisible collision face strokes. Driven from the
+## face's forward offset from rest, mapped into the launcher's local +X (up-table). VISUAL only.
 func _drive_launch_visual() -> void:
 	if _anim_group == null or _face == null or _launcher_scale < 0.0001:
 		return
@@ -474,13 +465,6 @@ func set_suppress_juice_for_test(on: bool) -> void:
 	_suppress_juice = on
 
 
-## TEST HOOK: override the launcher .glb path so a test can drive the graceful-fallback branch
-## WITHOUT deleting the real file (a bogus path leaves only the gray-box face visible). Call before
-## _ready builds the plunger. INERT in production (table.gd never calls it).
-func set_asset_path_for_test(path: String) -> void:
-	_asset_path_override = path
-
-
 ## TEST HOOK: the instanced launcher visual root (null on fallback). Lets a structural test assert
 ## the art is pure mesh (zero CollisionShape3D under it) and resolve the moving group / spring.
 func launcher_visual() -> Node3D:
@@ -488,164 +472,145 @@ func launcher_visual() -> Node3D:
 
 
 # ==================================================================================================
-# IMPORTED LAUNCHER ART + COSMETIC JUICE (visual only; the physical _face strike is untouched).
-# Mirrors the proven pop_bumper.gd / slingshot.gd discipline: art mesh never a collider, scale
-# DERIVED from the lane geometry, gray-box face survives a load failure, juice decoupled.
+# PROCEDURAL LAUNCHER ART + COSMETIC JUICE (visual only; the physical _face strike is untouched).
+# Built in code from Palette.HARDWARE + TableConfig lane geometry, so it stays in scale and needs no
+# imported asset. The art mesh is NEVER a collider (only _face is). Mirrors the flipper / slingshot
+# procedural-primary decision this slice: no .glb to fail, no fallback branch.
 # ==================================================================================================
 
 
-## Install the imported launcher.glb as the visible launch hardware: the static housing (Box_*), the
-## blue translucent lid (Box_Top), and the moving plunger group (Plunger_Anim + Plunger_Spring). The
-## subtree is parented to THIS Plunger node (seated at the playfield origin by table.gd), NOT to the
-## moving physical _face - art and collider are independent. On ANY load failure the gray-box
-## _face mesh stays visible (the launch hardware never vanishes). Idempotent via _launcher_visual
-## null guard.
-func _install_launcher_art() -> void:
+## Build the PROCEDURAL launch hardware: a static HOUSING channel behind the ball, a moving plunger
+## GROUP (rod + tip) that slides with the charge/stroke, and a compressible SPRING - all under one
+## LauncherVisual root parented to THIS Plunger node (seated at the playfield origin by table.gd),
+## NOT to the moving physical _face (art and collider are independent). Styled from Palette.HARDWARE
+## (a single grey source; table_reskin.gd never repaints the plunger, so this material is truth).
+## Idempotent via the _launcher_visual null guard.
+##
+## LOCAL FRAME: LauncherVisual is yawed so its local +X points UP-TABLE (playfield -Z). The moving
+## group therefore slides along local +/-X (forward/back up the lane), which is exactly the axis the
+## juice math (_apply_charge_visual / _drive_launch_visual) drives. Built at world scale
+## (_launcher_scale = 1.0), so the juice moves it in world units directly.
+func _build_launcher_art() -> void:
 	if _launcher_visual != null:
 		return
-	var path: String = LAUNCHER_ASSET_PATH if _asset_path_override == "" else _asset_path_override
-	if path == "" or not ResourceLoader.exists(path):
-		return  ## fallback: the gray-box PlungerMesh on _face stays visible
-	var scene: Resource = load(path)
-	if scene == null or not (scene is PackedScene):
-		return  ## fallback (bad/absent asset): gray-box face stays visible
-	_launcher_visual = (scene as PackedScene).instantiate()
+
+	_launcher_visual = Node3D.new()
 	_launcher_visual.name = LAUNCHER_VISUAL_NODE_NAME
+	# +90-deg yaw about +Y maps local +X -> playfield -Z (up-table), so the rod points up the lane and
+	# the juice slides the group along its local X. Seated at the plunger rest so the visible tip meets
+	# the resting ball at the collision face (the _face box also sits at PLUNGER_REST_POS).
+	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
+	_launcher_visual.transform = Transform3D(yaw, TableConfig.PLUNGER_REST_POS)
+	_launcher_scale = 1.0
 	add_child(_launcher_visual)
 
-	# Orient: the model's moving rod points along its LOCAL +X; our launch lane runs up-table along
-	# local -Z. A +90-degree yaw about +Y maps model +X -> world -Z (rod forward = up-table) while the
-	# blue lid (+Y) stays up. Then scale uniformly so the housing length matches the lane chute, and
-	# position it at the plunger rest so the rod sits behind the resting ball. All cosmetic.
-	var factor: float = _derive_launcher_scale(_launcher_visual)
-	_launcher_scale = factor  ## kept so the launch animation can move the rod in the model's scale
-	var yaw := Basis(Vector3(0.0, 1.0, 0.0), PI * 0.5)
-	# Align the CONTACT HEAD (the Plunger_Tip mesh's forward +X face) to the plunger face - NOT the
-	# housing's far edge. The housing mouth sits past the head, so the ball nests INSIDE the mouth and
-	# the visible tip actually meets the ball (developer: "the ball isn't touching the launcher's
-	# plunger"). The collision face stays at PLUNGER_REST_POS, which now coincides with the visible tip.
-	var contact_x: float = _tip_contact_x(_launcher_visual)
-	var tip_local := Vector3(contact_x, 0.0, 0.0)
-	var tip_offset: Vector3 = yaw.scaled(Vector3.ONE * factor) * tip_local
-	var origin: Vector3 = TableConfig.PLUNGER_REST_POS - tip_offset
-	_launcher_visual.transform = Transform3D(yaw.scaled(Vector3.ONE * factor), origin)
-	# Hide the gray-box PlungerMesh (the visible "square") - the model is the plunger now. The
-	# collision box itself stays (it is the physics striker, at the tip); only its placeholder MESH hides.
+	var hardware: StandardMaterial3D = Palette.flat_material(Palette.HARDWARE)
+
+	# Geometry DERIVED from the ball + lane stroke so it scales with the world (no magic literal).
+	var lane_half: float = TableConfig.BALL_RADIUS * 1.1  ## snug channel ~1 ball diameter wide
+	var rod_len: float = TableConfig.PLUNGER_STROKE_LENGTH * 1.6
+	var rod_r: float = TableConfig.BALL_RADIUS * 0.3
+	var tip_r: float = TableConfig.BALL_RADIUS * 0.8
+	var housing_len: float = TableConfig.PLUNGER_STROKE_LENGTH * 2.0
+	var housing_cx: float = -housing_len * 0.5 - tip_r  ## housing sits BEHIND the tip (local -X)
+
+	# --- STATIC HOUSING: a shooter channel behind the ball - a base plate + two side rails running the
+	# length of the chute so the rod visibly sits in a housing. Static: never a collider (only _face).
+	var base := _new_box_mesh(
+		Vector3(housing_len, TableConfig.BALL_RADIUS * 0.4, lane_half * 2.0),
+		Vector3(housing_cx, -tip_r * 0.9, 0.0),
+		hardware
+	)
+	base.name = "Launcher_Housing"
+	_launcher_visual.add_child(base)
+	for side: float in [-1.0, 1.0]:
+		var rail := _new_box_mesh(
+			Vector3(housing_len, TableConfig.BALL_RADIUS, TableConfig.BALL_RADIUS * 0.35),
+			Vector3(housing_cx, 0.0, side * lane_half),
+			hardware
+		)
+		rail.name = "Launcher_Rail_%s" % ("L" if side < 0.0 else "R")
+		_launcher_visual.add_child(rail)
+
+	# --- MOVING GROUP (Plunger_Anim): the rod + tip that slide with the charge/launch. Rest at the
+	# origin (tip at local x~=0, meeting the ball); the juice slides this whole group along local X.
+	_anim_group = Node3D.new()
+	_anim_group.name = PLUNGER_ANIM_NODE
+	_launcher_visual.add_child(_anim_group)
+	var rod := _new_cyl_x(rod_r, rod_len, Vector3(-rod_len * 0.5 - tip_r, 0.0, 0.0), hardware)
+	rod.name = "Plunger_Rod"
+	_anim_group.add_child(rod)
+	var tip := _new_cyl_x(tip_r, tip_r * 0.5, Vector3(-tip_r * 0.25, 0.0, 0.0), hardware)
+	tip.name = "Plunger_Tip"
+	_anim_group.add_child(tip)
+	_anim_rest_pos = _anim_group.position
+
+	# --- SPRING: a low-poly coil-ish cylinder between the rod base and the housing back-stop. Wrapped
+	# in a Node3D so the juice can compress it on its LONG (local X) axis via _spring.scale.x (scaling
+	# the wrapper stretches the child cylinder along its length, which a bare rotated mesh would not).
+	var spring_len: float = maxf(housing_len - rod_len - tip_r, rod_r)
+	_spring = Node3D.new()
+	_spring.name = PLUNGER_SPRING_NODE
+	_spring.position = Vector3(-rod_len - tip_r - spring_len * 0.5, 0.0, 0.0)
+	var coil := _new_cyl_x(rod_r * 1.8, spring_len, Vector3.ZERO, hardware)
+	coil.name = "Plunger_Coil"
+	_spring.add_child(coil)
+	_launcher_visual.add_child(_spring)
+	_spring_rest_scale = _spring.scale
+
+	# Hide the gray-box PlungerMesh (the placeholder "square") - the procedural launcher is the plunger
+	# now. The collision box itself stays (it is the physics striker at the tip); only its MESH hides.
 	var face_mesh: Node = _face.get_node_or_null("PlungerMesh")
 	if face_mesh != null:
 		face_mesh.visible = false
 
-	# Resolve the moving group + spring and capture their AUTHORED rest transforms as the juice
-	# baseline. Absent nodes leave the juice a safe no-op (the static art still renders).
-	_anim_group = _launcher_visual.get_node_or_null(PLUNGER_ANIM_NODE) as Node3D
-	_spring = _launcher_visual.get_node_or_null(PLUNGER_SPRING_NODE) as Node3D
-	if _anim_group != null:
-		_anim_rest_pos = _anim_group.position
-	if _spring != null:
-		_spring_rest_scale = _spring.scale
+
+## Build a flat-shaded BoxMesh MeshInstance3D of `size` at local `pos` with material `mat`. VISUAL
+## only (no collider) - used for the procedural housing.
+func _new_box_mesh(size: Vector3, pos: Vector3, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	box.material = mat
+	mi.mesh = box
+	mi.position = pos
+	return mi
 
 
-## Uniform scale so the imported housing's LONG axis matches the launch-lane chute the plunger works
-## in. DERIVED from the merged mesh AABB (an independent oracle), never a hardcoded model size: the
-## launcher should read as long as the stroke region of the lane. We fit the model's long axis to a
-## few stroke lengths so the housing spans the lane bottom sensibly. The structural test asserts the
-## scale TRACKS the merged AABB (change the model size, the scale follows), not a literal.
-func _derive_launcher_scale(root: Node3D) -> float:
-	var box: AABB = _merged_aabb(root)
-	# Fit the housing CROSS-SECTION to the SHOOTER LANE width, so the launcher lines up wall-to-wall in
-	# the chute (developer: "it should line up with the wall distance"; 2.2 ball diameters was too wide).
-	# Cross-section = the MIDDLE of the three sorted dims (the lane length is the largest); the lane
-	# length then follows proportionally. BALL_START.z is tuned so the housing seats at the lane bottom.
-	var dims: Array[float] = [box.size.x, box.size.y, box.size.z]
-	dims.sort()
-	var cross: float = dims[1]
-	if cross < 0.0001:
-		return 1.0
-	return TableConfig.LANE_WIDTH / cross
-
-
-## The model-local +X (forward) face of the Plunger_Tip mesh - the point that strikes the ball. Used
-## to seat the visible tip at the plunger face. Falls back to the merged-AABB far edge if the tip mesh
-## is absent (the launcher never mis-seats catastrophically). DERIVED from the mesh, not hardcoded.
-func _tip_contact_x(root: Node3D) -> float:
-	for mi: MeshInstance3D in _mesh_instances(root):
-		if mi.name.contains("Tip"):
-			var local: Transform3D = TableConfig.relative_xform(root, mi)
-			var a: AABB = local * mi.get_aabb()
-			return a.position.x + a.size.x
-	var box: AABB = _merged_aabb(root)
-	return box.position.x + box.size.x
-
-
-## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).
-func _merged_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first: bool = true
-	for mi: MeshInstance3D in _mesh_instances(root):
-		var local: Transform3D = TableConfig.relative_xform(root, mi)
-		var a: AABB = local * mi.get_aabb()
-		if first:
-			out = a
-			first = false
-		else:
-			out = out.merge(a)
-	return out
-
-
-## Every MeshInstance3D under `node` (recursive).
-func _mesh_instances(node: Node) -> Array:
-	var found: Array = []
-	if node is MeshInstance3D:
-		found.append(node)
-	for c: Node in node.get_children():
-		found.append_array(_mesh_instances(c))
-	return found
+## Build a CylinderMesh MeshInstance3D whose axis lies along LOCAL +X (Godot's cylinder is +Y by
+## default, so we rotate -90 deg about +Z: +Y -> +X). `length` runs along X; `pos` is the local
+## centre. A low radial segment count keeps the low-poly read. VISUAL only (no collider).
+func _new_cyl_x(radius: float, length: float, pos: Vector3, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = radius
+	cyl.bottom_radius = radius
+	cyl.height = length
+	cyl.radial_segments = 12
+	cyl.material = mat
+	mi.mesh = cyl
+	mi.transform = Transform3D(Basis(Vector3(0.0, 0.0, 1.0), -PI * 0.5), pos)
+	return mi
 
 
 ## COSMETIC: set the moving plunger group + spring to the visual state for `power` in [0,1]. At
 ## power 0 they sit at the authored rest; at power 1 the group is pulled BACK by JUICE_PULL_BACK and
-## the spring is compressed by JUICE_SPRING_COMPRESS. WHY model-LOCAL -X for pull-back: the model
-## rod points along +X (forward = up-table after the install yaw), so retracting it is -X. This
-## reads as the player drawing the plunger back as the meter charges. Pure visual: no ball touched.
+## the spring is compressed by JUICE_SPRING_COMPRESS. WHY LOCAL -X for pull-back: the launcher's
+## local +X is forward = up-table (the +90-deg yaw in _build_launcher_art), so retracting the rod is
+## -X. This reads as the player drawing the plunger back as the meter charges. No ball is moved.
 func _apply_charge_visual(power: float) -> void:
 	if _suppress_juice:
 		return
 	var p: float = clampf(power, 0.0, 1.0)
 	if _anim_group != null:
-		# Pull back along the model's local -X (forward is +X), so the rod retracts as charge rises.
-		# JUICE_PULL_BACK is a WORLD distance; divide by the model scale to move that far in the model's
-		# own (scaled-down) local space, or the retract is invisibly small (developer: "the launcher
-		# isn't moving enough with the power fluctuation").
+		# Pull back along the launcher's local -X (forward = up-table is +X), so the rod retracts as
+		# charge rises. JUICE_PULL_BACK is a WORLD distance; the procedural launcher is built at world
+		# scale (_launcher_scale = 1.0) so this divides by 1.0, but we keep the division so the juice
+		# stays correct if the launcher is ever rescaled.
 		var pull_local: float = JUICE_PULL_BACK / maxf(_launcher_scale, 0.0001)
 		_anim_group.position = _anim_rest_pos + Vector3(-pull_local * p, 0.0, 0.0)
 	if _spring != null:
-		# Compress the coil on its long axis (model X) toward the housing as charge rises.
+		# Compress the coil on its long axis (local X) toward the housing as charge rises.
 		var s: Vector3 = _spring_rest_scale
 		s.x = _spring_rest_scale.x * (1.0 - JUICE_SPRING_COMPRESS * p)
 		_spring.scale = s
-
-
-## COSMETIC release SNAP: from the charged pull-back, jab the moving group fast FORWARD past rest
-## (overshoot), then settle back to the authored rest; the spring snaps to full length. Driven by
-## a Tween on the imported visual nodes ONLY - no ball method called, no ball state read, so the
-## launched ball velocity is identical whether this runs or not (decoupling oracle). A no-op when
-## the juice is suppressed or the model lacks the moving nodes.
-func _play_release_snap(power: float) -> void:
-	if _suppress_juice:
-		return
-	if _anim_group == null and _spring == null:
-		return
-	var overshoot: float = JUICE_PULL_BACK * JUICE_OVERSHOOT_FRACTION * clampf(power, 0.0, 1.0)
-	var tween: Tween = create_tween()
-	tween.set_parallel(true)
-	if _anim_group != null:
-		# Phase 1: hard jab forward PAST rest (overshoot is +X = forward in model space).
-		var peak: Vector3 = _anim_rest_pos + Vector3(overshoot, 0.0, 0.0)
-		tween.tween_property(_anim_group, "position", peak, JUICE_SNAP_TIME_S)
-		# Phase 2: settle from the overshoot back to the authored rest.
-		tween.tween_property(
-			_anim_group, "position", _anim_rest_pos, JUICE_SETTLE_TIME_S
-		).set_delay(JUICE_SNAP_TIME_S)
-	if _spring != null:
-		# The coil snaps back to full rest length over the same window.
-		tween.tween_property(_spring, "scale", _spring_rest_scale, JUICE_SNAP_TIME_S)

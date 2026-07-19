@@ -3,7 +3,8 @@
 ; A SMALL upper-field flipper (scripts/mini_flipper.gd extends scripts/flipper.gd). It reuses the
 ; frozen force/hinge/return-spring drive at ~60% size, bound to the existing "left_flipper" action
 ; (no new input). table.gd instances it at TableConfig.MINI_FLIPPER_PIVOT and calls
-; configure("left_flipper", false). The visible art is the custom mini_flipper.glb (bat + rubber).
+; configure("left_flipper", false). The visible art is the procedural two-tone bat inherited from
+; flipper.gd (the imported mini_flipper.glb was retired in the Kenney 3D asset slice).
 
 [ext_resource type="Script" path="res://scripts/mini_flipper.gd" id="1_mini_flipper"]
 
