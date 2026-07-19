@@ -1,12 +1,16 @@
 extends "res://scripts/flipper.gd"
 ## MiniFlipper - a SMALLER upper-field flipper that bats the ball up toward the bumper cluster.
 ##
-## OWNERSHIP: physics-programmer (it inherits the frozen force/hinge/return-spring drive). This file
-## adds NO new physics: it is a thin subclass of flipper.gd that overrides ONLY the geometry getters
-## and the visible asset path (the overridable seams flipper.gd exposes), so the mini reuses
-## the same RigidBody-on-a-hinge drive, continuous_cd, rubber rebound, and no-tunnel guarantee
-## the main flippers - just at ~60% size. DESIGN: "a mini flipper bats the ball up top", a REAL
-## flipper, not a scripted shortcut.
+## OWNERSHIP: physics-programmer (it inherits the flipper drive). This file adds NO new physics: it
+## is
+## a thin subclass of flipper.gd that overrides ONLY the geometry getters and the visible asset path
+## (the overridable seams flipper.gd exposes), so the mini reuses the SAME kinematic
+## AnimatableBody3D +
+## sync_to_physics + scripted input-duration angle drive, the same rubber rebound, and the same
+## no-tunnel guarantee (ball CCD + the post-contact clamp) as the main flippers - just at ~60% size.
+## DESIGN: "a mini flipper bats the ball up top", a REAL flipper at its own scale, not a scripted
+## shortcut. The drive rebuild (SLICE "Flipper physics rebuild") required ZERO change here: the mini
+## inherits the new drive automatically because it only overrides geometry, never the drive.
 ##
 ## INPUT: it reuses the EXISTING "left_flipper" action via inherited configure(action, mirrored),
 ## so it flips together with the lower-left flipper (the classic upper-flipper convention). NO new
@@ -24,8 +28,10 @@ extends "res://scripts/flipper.gd"
 const MINI_FLIPPER_ASSET_PATH: String = "res://assets/models/mini_flipper.glb"
 
 
-## Override the geometry seams so this flipper is the MINI size. Everything else (the drive, the
-## hinge, the return spring, the rubber material, the handedness) is inherited unchanged.
+## Override the geometry seams so this flipper is the MINI size. Everything else (the kinematic
+## drive,
+## the swing integration, the return spring, the rubber material, the handedness) is inherited
+## unchanged.
 func _flipper_length() -> float:
 	return TableConfig.MINI_FLIPPER_LENGTH
 

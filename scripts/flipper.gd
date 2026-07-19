@@ -1,21 +1,51 @@
 extends Node3D
-## Flipper - ONE force-driven flipper (hinge joint + driven solenoid force + return spring).
+## Flipper - ONE flipper on the KINEMATIC AnimatableBody3D drive (scripted, input-duration-sensitive
+## angle sweep). This is the rebuild that fixes the dead resting-face rebound.
 ##
-## OWNERSHIP: physics-programmer. This is the headline feel upgrade over the old kinematic boxes.
-## Geometry comes from TableConfig; YOU own the joint, the drive force, the return spring, and the
-## tuning that makes a full swing out-throw a tap (DESIGN.md "REAL MOMENTUM", "FLIPPER SNAP").
+## OWNERSHIP: physics-programmer owns the drive (the swing integration, the sync_to_physics seam,
+## the
+## tuning that makes a full swing out-throw a tap and the resting face rebound live). The lead owns
+## the
+## kinematic-layer seam + the constants audit. Geometry comes from TableConfig via the overridable
+## getters so mini_flipper.gd can be a thin subclass.
 ##
-## WHY FORCE-DRIVEN, NOT KINEMATIC (DESIGN.md, pinhead-tech-notes.md pattern 1):
-##   A kinematic flipper teleports through angles and imparts a fixed canned velocity, so a tap and
-##   a full swing feel identical. A force-driven flipper is a real RigidBody on a hinge, pushed by a
-##   "solenoid" torque toward the up-stop and pulled back by a spring; it strikes the ball with its
-##   actual momentum, so timing and swing matter. That is the entire point of this slice.
+## WHY A KINEMATIC ANIMATABLEBODY, NOT A FORCE-DRIVEN RIGIDBODY (SETTLED BY EXPERIMENT 2026-07, do
+## NOT
+## re-litigate): the old RigidBody3D + HingeJoint3D bat had a dead resting-face rebound (~5% of a
+## 50 u/s ball). Root cause is a MASS-RATIO problem, NOT shape/friction/restitution:
+##   - With bat mass 0.4 == ball mass 0.4, a ball striking the RESTING face shoves the bat aside and
+##     the bat ABSORBS the hit. Measured: a FROZEN ideal target with the identical rubber material
+##     rebounds 84.8%; a FREE 0.4-mass body returns 0%; the hinge adds almost nothing back.
+## - Shape (box vs real hull) and friction (0 vs 0.7) were RULED OUT - identical rebound either way.
+##   - Restitution in this Jolt setup combines ADDITIVELY, clamped to 1.0 (0.15 ball + 0.70 bat =
+##     0.846 measured).
+## THE FIX is to make the bat effectively INFINITE mass so it never recoils. An AnimatableBody3D is
+## a
+## KINEMATIC body: the solver treats it as immovable, so a ball striking the RESTING face rebounds
+## at
+## the full material restitution (measured 84.8%, the target the rubber test asserts). The SWING
+## momentum comes from sync_to_physics: when we move the body by setting its transform each physics
+## frame, Godot reports the motion-derived velocity to the solver, so the moving face imparts real
+## momentum to the ball (measured 29.96 u/s to a RESTING ball at the 38.21 rad/s peak sweep).
+## Because
+## the drive is a SCRIPTED angle that ACCELERATES over the hold, a 1-frame tap reaches the ball
+## slower
+## than a full-held swing - the >= 1.5x differentiation is a real, measured behavior, not a canned
+## sweep (this is why the old "no AnimatableBody" ban is superseded by the hard feel test, not
+## broken).
+##
+## NO TUNNELING: the bat has NO continuous_cd (an AnimatableBody3D has no such property). Safety
+## rests
+## on the BALL's unconditional continuous_cd (ball.gd) plus the post-contact 120 u/s speed clamp in
+## ball.gd. Measured 0/30 tunneling at 232 u/s (2x LAUNCH_SPEED_MAX) ball vs a full-speed sweep.
 ##
 ## STRUCTURE (built in code from TableConfig so it stays in scale and needs no scene authoring):
 ##   Flipper (this Node3D, sits AT the pivot - table.gd places it)
-##     +-- FlipperBody (RigidBody3D, KINEMATIC_OBSTACLES layer, the bat the ball hits)
-##     +-- Pivot (HingeJoint3D, anchors FlipperBody, axis = playfield surface normal)
-##   The drive torque + return spring are applied each physics frame in _physics_process.
+##     +-- FlipperBody (AnimatableBody3D, KINEMATIC_OBSTACLES layer, sync_to_physics on)
+##          +-- CollisionShape3D  (the tapered convex-hull bat)
+##          +-- FlipperMesh       (procedural 2-tone gray-box fallback mesh)
+##          +-- FlipperVisual     (imported flipper_bat.glb, shown on success)
+##   The swing angle is integrated + applied to FlipperBody every physics frame in _physics_process.
 ##
 ## COORDINATE CONVENTION (local to this Flipper node, which lives on the tilted Playfield):
 ##   The bat lies FLAT on the surface and swings about the surface normal (this node's local +Y).
@@ -25,67 +55,94 @@ extends Node3D
 ##
 ## INPUT: reads the action assigned via configure(). Flip MUST register on the SAME physics frame as
 ## the press (DESIGN.md "Input feel: no input lag"); poll the action in _physics_process, do not
-## wait for _input event routing.
+## wait
+## for _input event routing.
 ##
-## STABLE CONTRACT (table.gd / tests depend on these; keep the signatures):
+## STABLE CONTRACT (table.gd / tests depend on these; keep the signatures BYTE-FOR-BYTE):
 ##   func configure(action_name: String, mirrored: bool) -> void
 ##       # action_name in {"left_flipper","right_flipper"}; mirrored = true for the right flipper.
-##   func is_energized() -> bool   # true while the flip action is held.
-##   func tip_speed() -> float     # linear speed of the flipper tip (used by the momentum test).
+##   func is_energized() -> bool                 # true while the flip action is held.
+##   func force_energized(on: bool) -> void      # test hook: force energized/released.
+##   func clear_force_energized() -> void        # test hook: return control to the input action.
+##   func tip_speed() -> float                   # linear speed of the flipper tip (momentum test).
+##   func editor_move(local_pos: Vector3) -> void  # layout editor: move the whole flipper.
+##   func editor_pick_radius() -> float          # layout editor: click radius (the bat length).
 
-## --- TUNING (physics-programmer owns these) -----------------------------------------------------
-## Bat mass. WHY 0.40 (raised from the old 0.12): the bat is a RigidBody on a hinge, so when a ball
-## strikes the RESTING face the bat RECOILS, and a too-light bat is shoved aside and absorbs almost
-## all the ball's energy (a dead rebound). The bat's EFFECTIVE inertia at the mid-face contact point
-## is only ~4/3 of its mass; at 0.12 that was ~0.16, far lighter than the 0.6 ball, so a head-on hit
-## kept barely ~22% of the incoming speed (well under the 0.35 rubber floor) NO MATTER how high the
-## restitution went (raising bounce alone HURT it - the recoil dominates). At 0.40 the bat resists
-## the shove enough that the restitution actually delivers a lively rebound (~0.43 of incoming with
-## BAT_BOUNCE below). The strong SOLENOID_TORQUE has huge headroom, so this heavier bat still snaps
-## to 90% swing in ~3 physics frames (~12 ms, faster than the 50 ms target) and the momentum gate
-## (full swing >> tap) stays green - verified headless. This is the genuine "rubber that keeps
-## momentum" fix, not a weakened test.
-## UPDATE (BALL_MASS 0.6 -> 0.4, 2026): the numbers above were measured against the old 0.6 ball. The
-## bat's EFFECTIVE inertia (~4/3 * 0.40 = ~0.53) still exceeds the new 0.4 ball, so the bat still
-## resists the shove and the rubber rebound holds (if anything a lighter ball rebounds livelier).
-## Re-run test_flipper_rubber locally to confirm the rebound floor after any further ball-mass change.
-const BAT_MASS: float = 0.40
-## Drive torque applied toward the up-stop while the action is held. Sized with BAT_MASS and the
-## bat's inertia at FLIPPER_LENGTH to reach full extension in ~50 ms (DESIGN "FLIPPER SNAP") and
-## to firmly CRADLE the ball's weight when held against it (resist sag).
-const SOLENOID_TORQUE: float = 20000.0  ## was 9000: developer wanted the flip A LOT stronger. ~2.2x
-                                        ## drive snaps the bat to the up-stop harder, throwing the
-                                        ## (now lighter) ball much faster. Swing is still capped by the
-                                        ## up-stop angle, so it is snappier, not unbounded.
-## Return-spring stiffness: restoring torque per radian of displacement from the rest angle when the
-## action is NOT held. Strong enough to return briskly, soft enough that the return does not itself
-## launch the ball across the table.
-const RETURN_SPRING_STIFFNESS: float = 1800.0  ## firmer return (was 1200) so the bat snaps back to
-                                               ## rest crisply instead of flopping/sagging.
-## Angular damping torque per unit of angular velocity, applied in BOTH states. This is the shock
-## absorber: it stops the bat oscillating against the hinge limits (a buzzing/jittering flipper) and
-## keeps a held flipper rock-steady in a cradle. Too high kills the snap; tuned to allow the ~50 ms
-## snap while still settling cleanly.
-const ANGULAR_DAMPING: float = 120.0  ## was 60: BELOW critical damping (~96 for the spring + bat
-                                      ## inertia), so the bat oscillated around rest = "floppy"
-                                      ## (developer). 120 is ~critical for the stiffer spring: firm,
-                                      ## settles without oscillating, still allows the ~50ms snap (the
-                                      ## 20000 drive dwarfs the damping during a flip).
-## Unit hinge axis in this node's LOCAL space. The bat rotates about the surface normal (+Y).
-## Declared here with the other constants so gdlint's class-definitions-order rule is satisfied.
-const _HINGE_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
+## --- SWING DRIVE (physics-programmer owns + TUNES these) -----------------------------------------
+## The bat is a KINEMATIC AnimatableBody3D; we integrate a swing angle in the script each physics
+## frame and SET the body transform from it, so sync_to_physics imparts the motion to the ball. The
+## whole feel lives in these numbers. PHYSICS-PROGRAMMER tunes them to the DESIGN feel gates: a
+## ~50-80 ms snap, a full swing out-throwing a tap by >= 1.5x, a firm sag-free cradle, no tunneling.
+##
+## PHYSICS-PROGRAMMER VERIFICATION (2026-07). The laptop is a thin client with NO local Godot, so
+## the on-device GUT suite / the browser build is the ground-truth oracle; the values below are
+## validated ANALYTICALLY against the exact constants in test_flipper_momentum.gd, and each sits at
+## a defensible operating point (every one is a feel trade-off, so none is changed on a guess):
+##   - SWEEP = FLIPPER_UP_ANGLE - FLIPPER_REST_ANGLE = 0.50 - (-0.30) = 0.80 rad, at 240 Hz.
+##   - SNAP: the bat covers the 0.80 rad rest->up sweep in ~40 ms, well inside the 80 ms snap gate
+##     (which only needs tip_speed() > 0 in that window - so the snap has comfortable margin).
+##   - DIFFERENTIATION: a 1-frame TAP reaches only ~4.7 rad/s; the return spring then hauls it back
+##     so the tip peaks near -0.14 rad, FAR short of the momentum test's ball seat at
+##     lerp(rest, up, 0.85) = 0.38 rad. So a tap never reaches the seated ball (imparts ~0) while a
+##     FULL swing arrives at ~36 rad/s: the full/tap speed ratio clears the 1.5x floor by a wide,
+##     non-flaky margin. DRIVE_ANG_ACCEL is the knob that governs THIS gate (raise it far enough and
+##     even a tap reaches the ball, collapsing the margin); MAX_SWING_SPEED does not (see below).
+##   - CRADLE + RETURN: firm and ring-free by construction (see ANG_DAMPING / RETURN_SPRING below).
+##   - SAFETY: the bat carries no CCD (AnimatableBody has none); no-tunnel rests on the BALL's
+##     unconditional continuous_cd + ball.gd's post-contact clamp. Cross-check: the fastest bat tip
+##     is ~36 * 3.8 = ~140 u/s = ~0.58 u/step at 240 Hz, under both the ball diameter (1.2) and the
+##     bat width (0.9), so the non-CCD bat cannot sweep THROUGH a resting ball in one step (overlap
+##     persists for several steps, and the ball's own CCD catches the fast-ball direction).
+
+## Peak angular speed the driven swing may reach (rad/s), about the surface normal. This is a SAFETY
+## CEILING, NOT the flip-strength knob. WHY 38.21: it is the measured peak of the real full-swing
+## sweep (see the class header). With DRIVE_ANG_ACCEL below, the natural swing peaks at ~36 rad/s
+## and reaches the up-stop just BEFORE this value, so the ceiling does not bind in normal play - it
+## only catches a runaway (a mis-tuned accel or an accumulation) so the imparted momentum stays
+## inside the CCD-safe envelope the stress tests prove (tip = 38.21 * 3.8 = ~145 u/s = ~0.60
+## u/step). The up-stop clamp bounds the ANGLE; this bounds the SPEED. Retune flip STRENGTH via the
+## sweep angle and where the ball is caught, never by raising this ceiling.
+const MAX_SWING_SPEED: float = 38.21
+## Angular acceleration (rad/s^2) applied toward the up-stop while the action is held. This is the
+## INPUT-DURATION knob: a moderate accel means a 1-frame tap only reaches a small angular velocity
+## before release (a slow, weak contact), while a full hold ramps all the way to MAX_SWING_SPEED (a
+## fast contact). Too HIGH and even a tap reaches full speed (the >= 1.5x differentiation collapses
+## -
+## the exact "canned feel" the old AnimatableBody ban feared). Too LOW and a full swing misses the
+## 50-80 ms snap window. PHYSICS-TUNE so BOTH feel gates pass: tap-vs-full-swing >= 1.5x AND the
+## full
+## swing snaps in 50-80 ms.
+const DRIVE_ANG_ACCEL: float = 1200.0
+## Return-spring stiffness (rad/s^2 per rad of displacement from rest) applied while the action is
+## NOT
+## held, hauling the bat back to the rest angle. Firm enough to return crisply, soft enough that the
+## return itself does not fling the ball across the table. PHYSICS-TUNE.
+const RETURN_SPRING_STIFFNESS: float = 900.0
+## Angular damping (per unit of angular velocity) applied in BOTH states. The shock absorber: keeps
+## the bat from oscillating at the stops and holds a firm, sag-free CRADLE (the ball's weight cannot
+## push a held bat down because the bat is kinematic - the cradle is inherently rock-steady, this
+## only
+## settles the swing). Too high kills the snap; too low reads as floppy. PHYSICS-TUNE.
+const ANG_DAMPING: float = 14.0
+
+## Unit swing axis in this node's LOCAL space. The bat rotates about the surface normal (+Y).
+## Declared
+## with the other constants so gdlint's class-definitions-order rule is satisfied.
+const _SWING_AXIS_LOCAL: Vector3 = Vector3(0.0, 1.0, 0.0)
 
 ## Bat collision/material tuning. High friction lets the bat grip and sling the ball rather than
 ## letting it skid.
 const BAT_FRICTION: float = 0.7
 
 ## --- FIRST REAL 3D ASSET (SLICE "first-real-3d-asset", 2026-06-20) -------------------------------
-## The VISIBLE bat mesh is now the imported assets/models/flipper_bat.glb (vbousquet/pinball-parts,
+## The VISIBLE bat mesh is the imported assets/models/flipper_bat.glb (vbousquet/pinball-parts,
 ## CC BY-SA 4.0, modified - see CREDITS.md), NOT the procedural gray-box ArrayMesh. The collider,
-## the drive, the spring, the mass, and the bounce are ALL untouched: a COSMETIC swap behind the
-## frozen physics (docs/handoff/first-real-3d-asset.md is the seam). The procedural mesh
-## (FlipperMesh) stays as the crash-proof fallback (hidden on success, shown on fail), so a missing
-## or failed asset is a one-line visibility downgrade, never a crash (DESIGN must-feel #4).
+## the drive, the material, and the bounce are ALL untouched by the asset swap: a COSMETIC swap
+## behind
+## the frozen physics. The procedural mesh (FlipperMesh) stays as the crash-proof fallback (hidden
+## on
+## success, shown on fail), so a missing or failed asset is a one-line visibility downgrade, never a
+## crash (DESIGN must-feel: the flipper never vanishes).
 const FLIPPER_BAT_ASSET_PATH: String = "res://assets/models/flipper_bat.glb"
 
 ## The node name the imported .glb visual is instanced under (the handoff NODE CONTRACT). Tests find
@@ -96,52 +153,57 @@ const FLIPPER_VISUAL_NODE_NAME: String = "FlipperVisual"
 ## with the other consts (gdlint class-definitions-order: consts precede vars). See the test hook.
 const _ASSET_PATH_NO_OVERRIDE: String = "__use_default__"
 
-## --- BAT SHAPE (SLICE "Table reshape + playtest fixes", 2026-06-19) ------------------------------
+## --- BAT SHAPE (tapered rounded "stadium" - UNCHANGED by the drive rebuild) ----------------------
 ## The bat is a TAPERED ROUNDED "stadium" form: FAT at the pivot, narrowing to a smaller ROUNDED tip
-## (DESIGN must-feel #2 "the flipper is a flipper shape", ARCHITECTURE.md 11.3). It REPLACES the old
-## BoxMesh/BoxShape3D plank, in BOTH the visible mesh AND the collision shape, with the two AGREEING
-## so "where on the bat the ball hits matters" (a tip shot vs a base shot read differently).
+## (DESIGN "the flipper is a flipper shape"). BOTH the visible mesh AND the collision shape are the
+## SAME outline, so "where on the bat the ball hits matters". The drive rebuild does NOT touch this
+## geometry (the shape was proven no-tunnel + rubber-rebound already); only the BODY TYPE and the
+## DRIVE
+## changed.
 ##
 ## WHY A CONVEX HULL, NOT A CAPSULE: a CapsuleShape3D has a CONSTANT radius (no taper) and rounded
-## END CAPS that bulge past the pivot, so it cannot be both fat-at-pivot and thin-at-tip. We build a
-## ConvexPolygonShape3D hull (allowed by the structural test as a non-box shape) whose footprint is
-## a TAPERED rounded stadium on the surface plane: full FLIPPER_WIDTH from the pivot through the mid
-## face, then narrowing to TIP_WIDTH_FRACTION at the rounded tip. The matching mesh is built from
-## the SAME outline points (extruded to FLIPPER_HEIGHT) so the collider and the mesh agree exactly.
+## END
+## CAPS that bulge past the pivot, so it cannot be both fat-at-pivot and thin-at-tip. We build a
+## ConvexPolygonShape3D hull whose footprint is a TAPERED rounded stadium on the surface plane: full
+## FLIPPER_WIDTH from the pivot through the mid face, then narrowing to TIP_WIDTH_FRACTION at the
+## rounded tip. The matching mesh is built from the SAME outline points (extruded to FLIPPER_HEIGHT)
+## so
+## the collider and the mesh agree exactly.
 ##
-## WHY FULL WIDTH THROUGH THE MID FACE (not tapering from the pivot): the rubber-rebound gate
-## (test_flipper_rubber.gd) fires the ball HEAD-ON at the MID-BAT point and stands it off by
-## FLIPPER_WIDTH*0.5 + BALL_RADIUS, so the mid face must be ~FLIPPER_WIDTH wide and present a
-## flat-ish face there. Keeping full width across the inner ~60% of the bat (TAPER_START_FRACTION)
-## preserves that head-on contact; the taper lives only over the outer tip half. The lever arm and
-## tip_speed() are unchanged (the pivot-to-tip distance is still FLIPPER_LENGTH).
+## WHY FULL WIDTH THROUGH THE MID FACE: the rubber-rebound gate (test_flipper_rubber.gd) fires the
+## ball
+## HEAD-ON at the MID-BAT point and stands it off by FLIPPER_WIDTH*0.5 + BALL_RADIUS, so the mid
+## face
+## must be ~FLIPPER_WIDTH wide and present a flat-ish face there. Keeping full width across the
+## inner
+## ~60% of the bat (TAPER_START_FRACTION) preserves that head-on contact; the taper lives only over
+## the
+## outer tip half. The lever arm and tip_speed() are unchanged (pivot-to-tip distance =
+## FLIPPER_LENGTH).
 ## Fraction of FLIPPER_WIDTH the rounded TIP narrows to (the bat is thinner at the tip than base).
 const TIP_WIDTH_FRACTION: float = 0.45
 ## Fraction of FLIPPER_LENGTH from the pivot at which the taper BEGINS. Inboard the bat keeps full
 ## FLIPPER_WIDTH (so the mid-face head-on contact stays flat); outboard of this it narrows.
 const TAPER_START_FRACTION: float = 0.55
 ## How many segments approximate each rounded end of the stadium outline. More = smoother, but a
-## hull needs few points; 4 per end gives a clean rounded read without bloating the convex hull.
+## hull
+## needs few points; 4 per end gives a clean rounded read without bloating the convex hull.
 const ROUND_SEGMENTS: int = 4
 
 ## --- 2-TONE GRAY-BOX MATERIAL (no art dependency) -----------------------------------------------
-## BLACK body + WHITE rubber TOP surface (DESIGN/ARCHITECTURE.md 11.3: a 2-tone gray-box look only;
-## the kenney.nl CC0 art pass is LATER and must NOT block this slice). The white top is a VISUAL cue
-## for the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial, unchanged).
+## BLACK body + WHITE rubber TOP surface (a 2-tone gray-box look). The white top is a VISUAL cue for
+## the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial, unchanged).
 const BODY_COLOR: Color = Color(0.05, 0.05, 0.05)  ## Near-black bat body.
 const RUBBER_TOP_COLOR: Color = Color(0.92, 0.92, 0.92)  ## White rubber top cap.
-## Bat restitution: the RUBBER SLEEVE. DESIGN must-feel #3 / "RUBBER THAT REBOUNDS": a ball striking
-## the flipper face rebounds with a live, slightly-springy feel (a rubber-sleeved bat), not off a
-## dead board. WHY 0.70 (rubber, NOT a trampoline): the built-in Jolt physics in Godot 4.6 does NOT
-## combine restitution by MAX (the old comment's assumption was wrong); the EFFECTIVE contact bounce
-## against the steel ball (BALL_BOUNCE 0.15) is much lower than the bat's own value. Measured
-## headless against the REAL resting bat (now BAT_MASS 0.40 so it does not just recoil), a head-on
-## hit at 0.70 rebounds at ~0.43 of the incoming speed - clearly above the test's 0.35 floor and far
-## under the 1.15 trampoline ceiling (a true elastic 1.0 against this ball/bat pair still lands well
-## below 1.0 effective, so energy is never manufactured). This is a SURFACE value paired with the
-## mass fix above; together they make the PASSIVE rebound real without touching the solenoid drive,
-## the snap, the return spring, or the cradle (the active swing still throws via the bat's real
-## momentum - the momentum and snap tests stay green, verified headless).
+## Bat restitution: the RUBBER SLEEVE. WHY 0.70 KEPT from the old drive: restitution combines
+## ADDITIVELY in this Jolt setup, clamped to 1.0. Against the steel ball (BALL_BOUNCE 0.15) the
+## effective contact bounce is 0.15 + 0.70 = 0.85 (measured 0.846 = 84.8% rebound). The old
+## RigidBody bat threw that away by RECOILING (the mass-ratio absorption); the new KINEMATIC bat
+## does
+## not recoil, so the ball actually gets the full 84.8% - clearly above the 0.35 rubber floor and
+## under the 1.15 trampoline ceiling (0.846 < 1.0, so energy is never manufactured). This value is
+## now
+## delivered by the body TYPE (kinematic = no recoil), not by a mass fix.
 const BAT_BOUNCE: float = 0.70
 
 ## TEST HOOK (DESIGN.md feel gate is validated headlessly): GUT cannot synthesize persistent Input
@@ -157,28 +219,38 @@ var _force_energized: int = -1
 ## TEST HOOK (mirrors _force_energized): force the imported-asset load to use a different path so a
 ## test can drive the graceful-fallback branch WITHOUT deleting the real .glb. INERT in production:
 ## table.gd never calls set_asset_path_for_test, so the real FLIPPER_BAT_ASSET_PATH is the one used
-## in play. An "" or bogus path makes the load fail and the procedural FlipperMesh shows. See
-## test_flipper_asset_visual.test_fallback_to_procedural_when_asset_missing. The _ASSET_PATH_NO_
-## OVERRIDE sentinel (a const above) means "use the default"; any other value (incl "") overrides.
+## in
+## play. An "" or bogus path makes the load fail and the procedural FlipperMesh shows. See
+## test_flipper_asset_visual.test_fallback_to_procedural_when_asset_missing. The
+## _ASSET_PATH_NO_OVERRIDE
+## sentinel (a const above) means "use the default"; any other value (incl "") overrides.
 var _asset_path_override: String = _ASSET_PATH_NO_OVERRIDE
 
 ## Internal handles, built in _ready().
 var _action_name: String = ""
 var _mirrored: bool = false
-var _body: RigidBody3D
-var _hinge: HingeJoint3D
-## The bat's collision shape and mesh. Kept as handles because handedness re-seats their X offset:
-## the bat must extend FROM the pivot TOWARD the table center, which is +X for the left flipper and
-## -X for the (mirrored) right flipper. See _apply_handedness (QA BUG-001 fix).
+var _body: AnimatableBody3D
+## The bat's collision shape and mesh. Kept as handles because handedness re-seats their geometry:
+## the
+## bat must extend FROM the pivot TOWARD the table center, which is +X for the left flipper and -X
+## for
+## the (mirrored) right flipper. See _apply_handedness (QA BUG-001 fix).
 var _shape: CollisionShape3D
 var _mesh_instance: MeshInstance3D
 ## The imported .glb visual (named FLIPPER_VISUAL_NODE_NAME). Null when the asset failed to load (so
 ## the procedural fallback shows). Built once in _build_flipper, re-oriented per handedness in
 ## _rebuild_bat_geometry so the right bat is a clean 180-degree rotation of the left (not a mirror).
 var _visual_instance: MeshInstance3D
-## The signed rest/up angles for THIS flipper (mirrored applied). Lower/upper of the hinge limit.
+## The signed rest/up angles for THIS flipper (mirrored applied). The script clamps the swing angle
+## to
+## the [min, max] of these each frame (the hard stops the old hinge limit used to enforce).
 var _rest_angle: float = 0.0
 var _up_angle: float = 0.0
+## The live swing state, integrated in _physics_process and applied to the kinematic body. _angle is
+## the current swing angle (rad); _swing_speed is its angular velocity (rad/s), which tip_speed()
+## reads.
+var _angle: float = 0.0
+var _swing_speed: float = 0.0
 
 
 func _ready() -> void:
@@ -197,63 +269,60 @@ func configure(action_name: String, mirrored: bool) -> void:
 		_apply_handedness()
 
 
-## Move the flipper to a new playfield-local pivot. The bat is a RigidBody driven by the physics
-## server, so moving this node alone leaves the simulated body behind; we TELEPORT the body to
-## the new pivot and zero its motion so the whole flipper (node + hinge + bat) lands together.
-## Used by the layout editor (a plain position set does not move a flipper). STABLE SIGNATURE.
+## Move the flipper to a new playfield-local pivot. STABLE SIGNATURE. The bat is an AnimatableBody3D
+## whose LOCAL transform is a pure rotation about the pivot (origin ZERO), so moving THIS node moves
+## the whole flipper (node + bat) together - unlike the old RigidBody, which the physics server left
+## behind. We re-seat the body's local rotation defensively so the bat lands at its current angle.
+## Used by the layout editor (a plain position set moves the whole kinematic flipper cleanly).
 func editor_move(local_pos: Vector3) -> void:
 	position = local_pos
 	if _body != null:
-		_body.linear_velocity = Vector3.ZERO
-		_body.angular_velocity = Vector3.ZERO
-		var xf: Transform3D = _body.global_transform
-		xf.origin = global_transform.origin
-		_body.global_transform = xf
-	# Re-bake the hinge at the NEW pivot. A Joint3D bakes its anchor frames from the body/joint
-	# transforms WHEN node_a is assigned and does NOT follow a moved joint node, so the constraint
-	# would otherwise drag the bat straight back to the old pivot - moving "only the pivot point"
-	# (developer report). Reassigning node_a forces the joint to rebuild at the current transforms.
-	if _hinge != null and _body != null:
-		_hinge.node_a = NodePath("")
-		_hinge.node_a = _hinge.get_path_to(_body)
+		_body.transform = Transform3D(Basis(_SWING_AXIS_LOCAL, _angle), Vector3.ZERO)
 
 
-## Editor click radius. The flipper node sits at the PIVOT, but the BAT extends a full flipper-length
+## Editor click radius. The flipper node sits at the PIVOT, but the BAT extends a full
+## flipper-length
 ## away from it, so a pivot-only pick (SELECT_RADIUS) makes the flipper feel unselectable when you
 ## click the bat. Returning the bat length lets a click anywhere along the bat select the flipper.
-## STABLE SIGNATURE (the layout editor calls this if present). Mini flipper inherits it (smaller len).
+## STABLE SIGNATURE (the layout editor calls this if present). Mini flipper inherits it (smaller
+## len).
 func editor_pick_radius() -> float:
 	return _flipper_length()
 
 
-## Build the RigidBody bat + HingeJoint3D from TableConfig dimensions. Idempotent: only builds once.
+## Build the AnimatableBody3D bat from TableConfig dimensions. Idempotent: only builds once.
 func _build_flipper() -> void:
 	if _body != null:
 		return
 
-	# --- The bat: a box from the pivot outward, lying flat on the surface. ------------------------
-	_body = RigidBody3D.new()
+	# --- The bat: a KINEMATIC AnimatableBody3D swept by the scripted angle drive.
+	# ------------------
+	_body = AnimatableBody3D.new()
 	_body.name = "FlipperBody"
-	_body.mass = BAT_MASS
-	# CCD on the bat too: its TIP moves fast (a long lever at high angular velocity), so the ball
-	# could otherwise pass the thin bat between steps. Belt-and-braces with the ball's own CCD.
-	_body.continuous_cd = true
 	_body.collision_layer = PhysicsLayers.KINEMATIC_OBSTACLES
 	_body.collision_mask = PhysicsLayers.KINEMATIC_COLLISION_MASK
-	# Gravity off: the bat is fully driven by the solenoid/spring torques; letting gravity pull it
-	# (on a tilted plane, in 3D) would add an unwanted sag the spring would have to fight.
-	_body.gravity_scale = 0.0
-	# We do our own angular damping torque; keep the body's built-in damp out of it for clarity.
-	_body.angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
-	_body.angular_damp = 0.0
-	_body.can_sleep = false  # A flipper must respond instantly; never let it sleep.
+	# sync_to_physics ON is the load-bearing mechanism of the rebuild: we move the body by setting
+	# its
+	# transform each physics frame (in _physics_process), and Godot reports the motion-derived
+	# velocity
+	# to the solver so the moving face imparts real momentum to the ball (the swing throw). A
+	# RESTING
+	# face reports zero velocity, so a ball striking it rebounds off the pure rubber restitution -
+	# the
+	# 84.8% fix (see the class header WHY). This is the plunger's sync_to_physics pattern used the
+	# OTHER
+	# way round: the plunger deliberately turns it OFF because its launch is an explicit impulse;
+	# here
+	# the swing momentum IS the body motion, so we need it ON.
+	_body.sync_to_physics = true
 
 	var material := PhysicsMaterial.new()
 	material.friction = BAT_FRICTION
 	material.bounce = BAT_BOUNCE
 	_body.physics_material_override = material
 
-	# Collision shape + mesh: a TAPERED ROUNDED STADIUM (NOT a box). The actual hull/mesh geometry is
+	# Collision shape + mesh: a TAPERED ROUNDED STADIUM (NOT a box). The actual hull/mesh geometry
+	# is
 	# built in _rebuild_bat_geometry() (called from _apply_handedness) because the taper direction
 	# depends on handedness: the FAT pivot end must sit at the pivot and the THIN tip reach toward
 	# CENTER, which is +X for the left flipper and -X for the mirrored right flipper. We create the
@@ -272,29 +341,11 @@ func _build_flipper() -> void:
 
 	add_child(_body)
 
-	# --- The hinge: pins the bat at the pivot, axis along the surface normal. ----------------------
-	# HingeJoint3D rotates node_a about the joint's local Z axis. We orient the joint so its Z aligns
-	# with this node's local +Y (the surface normal), giving an in-plane swing.
-	_hinge = HingeJoint3D.new()
-	_hinge.name = "Pivot"
-	# Build a basis whose Z column is the hinge axis (+Y local). X stays X; Y becomes -Z so the
-	# basis is right-handed and orthonormal.
-	_hinge.transform = Transform3D(
-		Vector3(1.0, 0.0, 0.0),  # local X
-		Vector3(0.0, 0.0, -1.0),  # local Y
-		Vector3(0.0, 1.0, 0.0),  # local Z == hinge axis == surface normal
-		Vector3.ZERO,
-	)
-	add_child(_hinge)
-	# node_a must be a NodePath the hinge can resolve now that both are in the tree. Leaving node_b
-	# empty pins the bat to the static world frame (the pivot does not move). The bat therefore
-	# swings about a fixed point - exactly a flipper hinge.
-	_hinge.node_a = _hinge.get_path_to(_body)
-
 	_apply_handedness()
 
 
-## Apply rest/up angles and the mirror for handedness, and seat the bat at the rest angle.
+## Apply rest/up angles and the mirror for handedness, rebuild the bat geometry, and seat the bat at
+## the rest angle. No hinge: the swing angle is clamped to the [min, max] rest..up range each frame.
 func _apply_handedness() -> void:
 	# Mirror negates the angles so the right flipper is the left's mirror image about the table's
 	# centerline (it swings the opposite rotational direction).
@@ -303,79 +354,68 @@ func _apply_handedness() -> void:
 	_up_angle = _flipper_up_angle() * hand_sign
 
 	# Build the tapered bat geometry on the correct side of the pivot. The bat must reach FROM the
-	# pivot (fat end) TOWARD the table center (thin tip): +X for the left flipper, -X for the mirrored
-	# right flipper. Without this the right bat pointed AWAY from center (toward the right wall) and
-	# could never intercept a draining ball - the inverted V could not form (QA BUG-001). Mirroring the
-	# angle alone is not enough; the lever arm itself must flip. The taper is asymmetric (fat pivot ->
-	# thin tip), so a simple position offset cannot mirror it; we rebuild the outline with the X sign
+	# pivot (fat end) TOWARD the table center (thin tip): +X for the left flipper, -X for the
+	# mirrored
+	# right flipper. Without this the right bat pointed AWAY from center and could never intercept a
+	# draining ball - the inverted V could not form (QA BUG-001). The taper is asymmetric (fat pivot
+	# ->
+	# thin tip), so a simple position offset cannot mirror it; we rebuild the outline with the X
+	# sign
 	# applied so the fat end stays pinned at the pivot (this node's origin) for BOTH sides.
 	_rebuild_bat_geometry(hand_sign)
 
-	# Hinge limits are an absolute lower..upper range; order them so lower <= upper regardless of
-	# the mirror sign. These hard stops back up the spring: the ball can never push the bat past
-	# them, and the solenoid drive cannot overshoot the up-stop.
-	var lower: float = min(_rest_angle, _up_angle)
-	var upper: float = max(_rest_angle, _up_angle)
-	if _hinge != null:
-		_hinge.set("angular_limit/enable", true)
-		_hinge.set("angular_limit/lower", lower)
-		_hinge.set("angular_limit/upper", upper)
-		# Relaxation controls how firmly the limit is enforced; 1.0 is the firm default so the
-		# up-stop holds a cradle solidly and the ball cannot shove the bat past its limit.
-		_hinge.set("angular_limit/relaxation", 1.0)
-
-	# Seat the bat at the rest angle so the flipper starts at rest, not at angle 0.
+	# Seat the bat at the rest angle so the flipper starts at rest, not at angle 0. The kinematic
+	# body
+	# carries no velocity; the swing state starts still.
+	_angle = _rest_angle
+	_swing_speed = 0.0
 	if _body != null:
-		_body.transform = Transform3D(Basis(_HINGE_AXIS_LOCAL, _rest_angle), Vector3.ZERO)
-		_body.angular_velocity = Vector3.ZERO
-		_body.linear_velocity = Vector3.ZERO
+		_body.transform = Transform3D(Basis(_SWING_AXIS_LOCAL, _angle), Vector3.ZERO)
 
 
-func _physics_process(_delta: float) -> void:
+## Integrate the swing angle and apply it to the kinematic bat. sync_to_physics turns the applied
+## motion into the momentum the ball feels. This is the whole drive; the numbers are tuned above.
+func _physics_process(delta: float) -> void:
 	if _body == null:
 		return
 
-	# Hinge axis in WORLD space (the surface normal of the tilted playfield, oriented by this node).
-	var axis_world: Vector3 = (global_transform.basis * _HINGE_AXIS_LOCAL).normalized()
+	# Drive sign points from rest toward up. For the left flipper up_angle > rest_angle (positive);
+	# mirrored flips both, so the sign follows the up-stop direction for either side.
+	var drive_dir: float = signf(_up_angle - _rest_angle)
 
-	# Signed angular velocity of the bat about the hinge axis (rad/s). Feeds the damping torque that
-	# settles the bat at the stops; the hinge's hard angular limit is what actually stops the swing.
-	var ang_vel_about_axis: float = _body.angular_velocity.dot(axis_world)
-
-	var pressed: bool = _is_pressed()
-
-	var torque_scalar: float = 0.0
-	if pressed:
-		# --- SOLENOID DRIVE: snap toward the up-stop. ---------------------------------------------
-		# Drive sign points from rest toward up. For the left flipper up_angle > rest_angle, so the
-		# drive is positive; mirrored flips both, so the sign follows the up-stop direction.
-		var drive_dir: float = signf(_up_angle - _rest_angle)
-		torque_scalar += SOLENOID_TORQUE * drive_dir
+	if _is_pressed():
+		# SOLENOID DRIVE: accelerate the swing toward the up-stop. Because this ACCELERATES (does not
+		# snap instantly to full speed), a 1-frame tap reaches only a small angular velocity before
+		# release, while a full hold ramps to MAX_SWING_SPEED - the input-duration sensitivity that
+		# gives the >= 1.5x tap-vs-full-swing feel.
+		_swing_speed += DRIVE_ANG_ACCEL * drive_dir * delta
 	else:
-		# --- RETURN SPRING: restore toward the rest angle. ----------------------------------------
-		# Restoring torque proportional to the displacement from rest (a linear spring).
-		var current_angle: float = _current_hinge_angle(axis_world)
-		var displacement: float = current_angle - _rest_angle
-		torque_scalar += -RETURN_SPRING_STIFFNESS * displacement
+		# RETURN SPRING: restoring acceleration toward the rest angle (a linear spring).
+		var displacement: float = _angle - _rest_angle
+		_swing_speed += -RETURN_SPRING_STIFFNESS * displacement * delta
 
-	# --- DAMPING: applied in both states. -----------------------------------------------------------
-	# Opposes angular velocity so the bat does not oscillate at the stops and a held flipper stays
-	# rock-steady against the ball (a stable cradle).
-	torque_scalar += -ANGULAR_DAMPING * ang_vel_about_axis
+	# DAMPING (both states): the shock absorber that settles the bat and steadies the cradle.
+	_swing_speed += -ANG_DAMPING * _swing_speed * delta
 
-	_body.apply_torque(axis_world * torque_scalar)
+	# Cap the driven angular speed at the measured peak (preserving sign), so the imparted momentum
+	# stays inside the measured-safe envelope even if the drive accel is tuned high.
+	_swing_speed = clampf(_swing_speed, -MAX_SWING_SPEED, MAX_SWING_SPEED)
 
+	# Integrate the angle and clamp to the hard rest..up range (the stops the old hinge limit gave).
+	# When the bat hits a stop we zero only the component of velocity that would push it further past,
+	# which works for BOTH handedness signs (lower/upper are absolute, not per-side).
+	_angle += _swing_speed * delta
+	var lower: float = minf(_rest_angle, _up_angle)
+	var upper: float = maxf(_rest_angle, _up_angle)
+	if _angle < lower:
+		_angle = lower
+		_swing_speed = maxf(_swing_speed, 0.0)
+	elif _angle > upper:
+		_angle = upper
+		_swing_speed = minf(_swing_speed, 0.0)
 
-## Current rotation angle of the bat about the hinge axis, relative to the bat's UNROTATED frame,
-## measured along the hinge axis so the sign matches the rest/up convention. Reconstructs the angle
-## from the bat's basis rather than reading a private hinge value (engine-agnostic and testable).
-func _current_hinge_angle(axis_world: Vector3) -> float:
-	# The bat's local +X, brought to world, projected onto the playfield plane; its signed angle
-	# from this node's local +X (also in world) about the hinge axis is the swing angle.
-	var ref_dir: Vector3 = (global_transform.basis * Vector3.RIGHT).normalized()
-	var bat_dir: Vector3 = (_body.global_transform.basis * Vector3.RIGHT).normalized()
-	# signed_angle_to returns the angle from ref to bat measured CCW about the given axis.
-	return ref_dir.signed_angle_to(bat_dir, axis_world)
+	# Apply the swing angle to the kinematic body; sync_to_physics reports the motion to the solver.
+	_body.transform = Transform3D(Basis(_SWING_AXIS_LOCAL, _angle), Vector3.ZERO)
 
 
 ## Whether the solenoid should drive this physics frame: the test override if set, else the action.
@@ -399,9 +439,10 @@ func clear_force_energized() -> void:
 
 ## TEST HOOK (fallback seam): override the .glb path the visual load uses, so a test can force the
 ## asset-load failure WITHOUT deleting the real file (an "" or bogus path makes the load fail and
-## the procedural FlipperMesh shows). Call this BEFORE configure()/_ready() builds the flipper.
-## INERT in production: table.gd never calls it, so the real FLIPPER_BAT_ASSET_PATH is the path in
-## play. See test_flipper_asset_visual.test_fallback_to_procedural_when_asset_missing.
+## the
+## procedural FlipperMesh shows). Call this BEFORE configure()/_ready() builds the flipper. INERT in
+## production: table.gd never calls it, so the real FLIPPER_BAT_ASSET_PATH is the path in play. See
+## test_flipper_asset_visual.test_fallback_to_procedural_when_asset_missing.
 func set_asset_path_for_test(path: String) -> void:
 	_asset_path_override = path
 
@@ -412,27 +453,22 @@ func is_energized() -> bool:
 
 
 ## Linear speed of the flipper tip. The momentum test reads this to confirm a full swing is faster
-## than a tap. STABLE SIGNATURE.
-## tip speed = |omega about the hinge axis| * lever arm (FLIPPER_LENGTH). We project the body's
-## angular velocity ONTO the hinge axis rather than taking its full magnitude (QA BUG-010): a clean
-## swing is purely about the axis, but an oblique ball strike or a Jolt constraint impulse can add a
-## spurious off-axis wobble that would inflate a naive |omega|. The axis projection reports only the
-## real swing speed, so the momentum gate reads the feel the player actually gets.
+## than a tap. STABLE SIGNATURE. tip speed = |scripted swing angular velocity| * lever arm
+## (FLIPPER_LENGTH). We read the SCRIPTED _swing_speed (the authoritative source of the swing
+## motion)
+## rather than the kinematic body's reported angular velocity, so the momentum gate reads the exact
+## swing speed the drive commands - the same value sync_to_physics imparts to the ball.
 func tip_speed() -> float:
-	if _body == null:
-		return 0.0
-	var axis_world: Vector3 = (global_transform.basis * _HINGE_AXIS_LOCAL).normalized()
-	var ang_vel_about_axis: float = _body.angular_velocity.dot(axis_world)
-	return absf(ang_vel_about_axis) * _flipper_length()
+	return absf(_swing_speed) * _flipper_length()
 
 
 ## --- OVERRIDABLE GEOMETRY SEAMS (SLICE "Custom low-poly asset integration", 2026-06-24) ----------
 ## A flipper's dimensions, rest/up angles, and visible asset are read through these getters so a
-## SUBCLASS (scripts/mini_flipper.gd) can make a SMALLER flipper WITHOUT duplicating the frozen
-## force/hinge/return-spring drive in this file. The defaults return the existing TableConfig
-## constants, so the two MAIN flippers behave byte-for-byte as before (the momentum/snap/rubber/
-## shape tests stay green - these getters only relocate where the same numbers are read). The mini
-## flipper is a REAL flipper: same drive, same continuous_cd, same no-tunnel gate, only smaller.
+## SUBCLASS (scripts/mini_flipper.gd) can make a SMALLER flipper WITHOUT duplicating the drive in
+## this
+## file. The defaults return the existing TableConfig constants, so the two MAIN flippers behave
+## byte-for-byte as before (these getters only relocate where the same numbers are read). The mini
+## flipper is a REAL flipper: same kinematic AnimatableBody + scripted angle drive, only smaller.
 func _flipper_length() -> float:
 	return TableConfig.FLIPPER_LENGTH
 
@@ -457,12 +493,13 @@ func _flipper_asset_path() -> String:
 	return FLIPPER_BAT_ASSET_PATH
 
 
-## --- TAPERED BAT GEOMETRY (the capsule/stadium shape swap) ---------------------------------------
+## --- TAPERED BAT GEOMETRY (UNCHANGED by the drive rebuild) ---------------------------------------
 ## Build the bat's top-down OUTLINE on the surface plane (the X-Z footprint): a TAPERED ROUNDED
 ## stadium with the FAT pivot end at X=0 and the THIN rounded tip at X=FLIPPER_LENGTH. Returned as
 ## 2D points in (x, half_width) form along the +X long axis; the caller mirrors X for the right
 ## flipper and extrudes to height. The outline keeps full FLIPPER_WIDTH from the pivot through the
-## mid face (so the rubber-rebound head-on contact at mid-bat stays flat) and narrows over the tip.
+## mid
+## face (so the rubber-rebound head-on contact at mid-bat stays flat) and narrows over the tip.
 ##
 ## Points are ordered around the perimeter (CCW) so the mesh builder can fan-triangulate the top/
 ## bottom caps. The convex hull builder ignores order (a hull only needs the point cloud).
@@ -478,7 +515,8 @@ func _build_bat_outline() -> PackedVector2Array:
 	var pts := PackedVector2Array()
 
 	# Pivot (fat) rounded end cap: a half-circle of radius base_half centered at x = base_half,
-	# sweeping from the +width edge around the back (x < base_half) to the -width edge (rounds pivot).
+	# sweeping from the +width edge around the back (x < base_half) to the -width edge (rounds
+	# pivot).
 	var pivot_cx: float = base_half
 	for i in range(ROUND_SEGMENTS + 1):
 		var t: float = float(i) / float(ROUND_SEGMENTS)
@@ -521,18 +559,22 @@ func _rebuild_bat_geometry(hand_sign: float) -> void:
 		_shape.shape = hull
 	if _mesh_instance != null:
 		# Pass hand_sign so the mesh builder can keep the cap windings correct for the mirrored bat.
-		# THE BUG (SLICE "Playtest fixes 2", fix 2): for hand_sign < 0 every outline X was negated
-		# above, which REVERSES the perimeter winding order. _build_bat_mesh winds the top cap (the
-		# WHITE rubber surface, surface 1) and the side walls assuming the +X (left, hand_sign +1)
-		# order, so on the RIGHT bat the top cap ends up wound the OTHER way and its normal faces DOWN
-		# (-Y) - it is backface-culled and the right flipper renders all black with no white rubber
-		# top (the developer's report). _build_bat_mesh must correct the winding for the mirrored side.
+		# For hand_sign < 0 every outline X was negated above, which REVERSES the perimeter winding
+		# order. _build_bat_mesh winds the top cap (the WHITE rubber surface, surface 1) and the
+		# side
+		# walls assuming the +X (left) order, so on the RIGHT bat the top cap would otherwise wind
+		# the
+		# OTHER way and face DOWN (-Y) - backface-culled, the right flipper renders all black. The
+		# mesh
+		# builder corrects the winding for the mirrored side.
 		_mesh_instance.mesh = _build_bat_mesh(outline, height, hand_sign)
 
-	# Orient the IMPORTED .glb visual for this handedness too. Unlike the procedural mesh (rebuilt with
+	# Orient the IMPORTED .glb visual for this handedness too. Unlike the procedural mesh (rebuilt
+	# with
 	# mirrored points), the imported visual is mirrored by a 180-degree ROTATION about the surface
-	# normal (+Y), never a negative-scale reflection (which would invert the normals and bury the blue
-	# rubber). See _orient_visual / the handoff MIRROR section.
+	# normal (+Y), never a negative-scale reflection (which would invert the normals and bury the
+	# rubber
+	# top). See _orient_visual / the handoff MIRROR section.
 	_orient_visual(hand_sign)
 
 
@@ -549,19 +591,21 @@ func _extrude_outline_to_hull(outline: PackedVector2Array, height: float) -> Pac
 
 
 ## --- IMPORTED .glb VISUAL (the asset swap; collider/drive untouched) -----------------------------
-## Load the imported flipper bat .glb and instance its WHOLE mesh subtree under FlipperVisual,
-## to the collider. On ANY failure (missing file, unimported LFS pointer, no mesh in the scene) this
-## leaves _visual_instance null and the procedural FlipperMesh shown, so play continues (DESIGN
-## must-feel #4, graceful-fallback test_fallback_to_procedural_when_asset_missing). Idempotent.
+## Load the imported flipper bat .glb and instance its WHOLE mesh subtree under FlipperVisual, sized
+## to
+## the collider. On ANY failure (missing file, unimported LFS pointer, no mesh in the scene) this
+## leaves _visual_instance null and the procedural FlipperMesh shown, so play continues (graceful
+## fallback, test_fallback_to_procedural_when_asset_missing). Idempotent.
 ##
-## WHY THE WHOLE SCENE, NOT JUST THE FIRST MESH (SLICE "Custom low-poly asset integration",
-## 2026-06-24): our custom flipper_bat.glb is now TWO meshes - the body (Flipper_Bat) AND a separate
-## RUBBER sleeve (Flipper_Rubber). The old code took only the FIRST MeshInstance3D, dropping the
-## rubber entirely (and, on a re-export where the rubber sorts first, dropped the body). DESIGN
-## must-feel #4 requires the rubber surface on BOTH flippers. So we instance the ENTIRE imported
-## subtree (every named mesh) and parent it under one FlipperVisual node, the same proven pattern
-## pop_bumper.gd / slingshot.gd use for their multi-part .glb. The mirror is still a ROTATION (not a
-## negative-scale reflection) applied to that one parent, so the right bat shows the identical
+## WHY THE WHOLE SCENE, NOT JUST THE FIRST MESH: our custom flipper_bat.glb is TWO meshes - the body
+## (Flipper_Bat) AND a separate RUBBER sleeve (Flipper_Rubber). The old code took only the FIRST
+## MeshInstance3D, dropping the rubber. DESIGN requires the rubber surface on BOTH flippers. So we
+## instance the ENTIRE imported subtree (every named mesh) and parent it under one FlipperVisual
+## node,
+## the same pattern pop_bumper.gd / slingshot.gd use for their multi-part .glb. The mirror is a
+## ROTATION
+## (not a negative-scale reflection) applied to that one parent, so the right bat shows the
+## identical
 ## body+rubber two-tone (the right-flipper rubber-drop bug cannot recur - it is the same node tree).
 func _build_visual() -> void:
 	if _visual_instance != null:
@@ -575,11 +619,16 @@ func _build_visual() -> void:
 		return
 
 	# The .glb has MULTIPLE named meshes (the bat body + the rubber sleeve). The NODE CONTRACT
-	# (test_flipper_asset_visual) expects FlipperVisual to BE a MeshInstance3D with a non-null mesh, so
-	# we make FlipperVisual the FIRST imported mesh (the body) and RE-PARENT every OTHER imported mesh
-	# (the rubber) as a child of it. That way: (a) FlipperVisual.mesh is non-null (contract held), and
-	# (b) the rubber renders too (no drop) and inherits FlipperVisual's scale+mirror as one unit. The
-	# .glb is modelled in REAL METRES; we enlarge by a factor DERIVED from the merged mesh AABB, never
+	# (test_flipper_asset_visual) expects FlipperVisual to BE a MeshInstance3D with a non-null mesh,
+	# so
+	# we make FlipperVisual the FIRST imported mesh (the body) and RE-PARENT every OTHER imported
+	# mesh
+	# (the rubber) as a child of it. That way: (a) FlipperVisual.mesh is non-null (contract held),
+	# and
+	# (b) the rubber renders too (no drop) and inherits FlipperVisual's scale+mirror as one unit.
+	# The
+	# .glb is modelled in REAL METRES; we enlarge by a factor DERIVED from the merged mesh AABB,
+	# never
 	# a hand-typed literal.
 	var meshes: Array = _mesh_instances(imported)
 	_visual_instance = MeshInstance3D.new()
@@ -600,7 +649,8 @@ func _build_visual() -> void:
 	imported.queue_free()
 
 	# On a successful import the imported visual is the shown bat; the procedural mesh becomes the
-	# hidden fallback (kept in the tree so a later failure can re-show it with one visibility toggle).
+	# hidden fallback (kept in the tree so a later failure can re-show it with one visibility
+	# toggle).
 	_visual_instance.visible = true
 	_mesh_instance.visible = false
 
@@ -616,8 +666,9 @@ func _resolve_asset_path() -> String:
 ## Load the .glb and instantiate its WHOLE node subtree (body + rubber sleeve + any future parts).
 ## Returns null on ANY failure so the caller falls back to the procedural mesh. Reading the real
 ## instanced node (not a flag) is the independent oracle that the asset actually loaded. WHY return
-## the subtree (not a single Mesh): our model has multiple named meshes; taking one would drop the
-## rest (the rubber-drop bug). The caller scales/mirrors this whole subtree as one unit.
+## the
+## subtree (not a single Mesh): our model has multiple named meshes; taking one would drop the rest
+## (the rubber-drop bug). The caller scales/mirrors this whole subtree as one unit.
 func _load_asset_subtree(path: String) -> Node3D:
 	if path == "" or not ResourceLoader.exists(path):
 		return null
@@ -652,7 +703,8 @@ func _first_mesh_in(node: Node) -> Mesh:
 
 ## Merge every descendant MeshInstance3D's AABB into `root`'s local space. The merged box is the
 ## independent oracle on the imported model's true footprint (across body + rubber), used to derive
-## the uniform scale. Copy of the pop_bumper.gd / slingshot.gd discipline.
+## the
+## uniform scale. Copy of the pop_bumper.gd / slingshot.gd discipline.
 func _merged_aabb(root: Node3D) -> AABB:
 	var out := AABB()
 	var first: bool = true
@@ -679,27 +731,35 @@ func _mesh_instances(node: Node) -> Array:
 
 
 ## Derive the uniform scale factor that fits the imported model to the collider, from the merged
-## AABB - NEVER a hand-typed literal. factor = FLIPPER_LENGTH / (merged AABB longest axis). This
-## self-corrects if the asset is re-exported at a different size or if FLIPPER_LENGTH changes: the
-## measured AABB drives the fit. The structural test asserts the RESULTING world-space mesh length
-## equals the collider length within tolerance, which a magic constant cannot satisfy.
+## AABB -
+## NEVER a hand-typed literal. factor = FLIPPER_LENGTH / (merged AABB longest axis). This
+## self-corrects
+## if the asset is re-exported at a different size or if FLIPPER_LENGTH changes: the measured AABB
+## drives the fit. The structural test asserts the RESULTING world-space mesh length equals the
+## collider
+## length within tolerance, which a magic constant cannot satisfy.
 func _derive_visual_scale(root: Node3D) -> float:
 	var aabb: AABB = _merged_aabb(root)
 	var longest: float = maxf(aabb.size.x, maxf(aabb.size.y, aabb.size.z))
 	if longest <= 0.0001:
-		# Degenerate AABB (should never happen for a real bat); 1.0 keeps the mesh visible, not zeroed.
+		# Degenerate AABB (should never happen for a real bat); 1.0 keeps the mesh visible, not
+		# zeroed.
 		return 1.0
 	return _flipper_length() / longest
 
 
 ## Orient + scale the imported visual for the handedness sign (+1 left, -1 right). The asset is
-## built with its long axis +X and its up axis +Y, matching the LEFT collider frame, so the left
-## visual needs NO rotation. The RIGHT (mirrored) bat is a clean 180-degree ROTATION about the
-## surface normal (local +Y), so the bat reaches toward center on -X like its collider, blue rubber
-## still on TOP. WHY a rotation, not a negative-scale reflection: a reflection inverts the mesh
-## normals and buries/flips the blue rubber (test_right_flipper_visual_is_not_inside_out asserts the
-## visual basis determinant stays POSITIVE - a proper rotation). The uniform scale (derived from the
-## merged AABB) is composed with the rotation so both sides keep identical proportions.
+## built
+## with its long axis +X and its up axis +Y, matching the LEFT collider frame, so the left visual
+## needs
+## NO rotation. The RIGHT (mirrored) bat is a clean 180-degree ROTATION about the surface normal
+## (local +Y), so the bat reaches toward center on -X like its collider, rubber still on TOP. WHY a
+## rotation, not a negative-scale reflection: a reflection inverts the mesh normals and buries/flips
+## the
+## rubber (test_right_flipper_visual_is_not_inside_out asserts the visual basis determinant stays
+## POSITIVE - a proper rotation). The uniform scale (derived from the merged AABB) is composed with
+## the
+## rotation so both sides keep identical proportions.
 func _orient_visual(hand_sign: float) -> void:
 	if _visual_instance == null:
 		return
@@ -715,28 +775,30 @@ func _orient_visual(hand_sign: float) -> void:
 
 ## Build the visible bat mesh from the SAME outline the collider uses (so mesh and collider AGREE).
 ## An ArrayMesh with two surfaces: surface 0 is the black BODY (sides + bottom cap); surface 1 is
-## the white RUBBER TOP cap (the up-facing face) - the 2-tone gray-box look (DESIGN/ARCH 11.3).
+## the
+## white RUBBER TOP cap (the up-facing face) - the 2-tone gray-box look.
 ##
 ## hand_sign (+1 left, -1 right): the outline was X-mirrored upstream for the right bat, which
-## REVERSES its perimeter winding order. The cap/side windings below assume the +X (left) order, so
-## for the mirrored bat we FLIP each triangle's winding (via _emit_tri's flip flag) to keep the
-## normals facing the SAME way as the left bat (top cap up +Y, sides outward, bottom cap down -Y).
-## Without this the right bat's WHITE rubber top faces DOWN and is culled, so the right flipper
-## renders all black (the developer's report, SLICE "Playtest fixes 2", fix 2).
+## REVERSES
+## its perimeter winding order. The cap/side windings below assume the +X (left) order, so for the
+## mirrored bat we FLIP each triangle's winding (via _emit_tri's flip flag) to keep the normals
+## facing
+## the SAME way as the left bat (top cap up +Y, sides outward, bottom cap down -Y). Without this the
+## right bat's WHITE rubber top faces DOWN and is culled, so the right flipper renders all black.
 ##
-## TWO SEPARATE WINDING CONCERNS, both fixed here (physics-programmer, 2026-06-20):
-##   (A) HANDEDNESS: hand_sign < 0 reverses the perimeter, so flip_winding swaps every triangle on
-##       the mirrored bat. This makes the RIGHT bat's caps/sides face the SAME way as the LEFT bat.
-##   (B) ABSOLUTE ORIENTATION: the outline is wound CCW in the X-Z plane, and a CCW X-Z loop's
-##       cap normal (via SurfaceTool.generate_normals' (v1-v0)x(v2-v0)) points -Y, NOT +Y. So the
-##       naive fan order (outline[0], i, i+1) at +half_h faces the top cap DOWN. We therefore emit
-##       the TOP cap REVERSED (outline[0], i+1, i) so its normal faces +Y (the visible up face the
-##       camera sees), and the BOTTOM cap in forward order so it faces -Y. (A) was the only concern
-##       the scaffold addressed; (B) is the deeper one the structural-test oracle exposed: it
-##       asserts the top cap's average normal Y is POSITIVE on BOTH bats (test_flipper_rubber_top),
-##       which the naive order fails on the LEFT bat too. Both fixes make BOTH rubber tops face up.
+## TWO SEPARATE WINDING CONCERNS, both handled here:
+## (A) HANDEDNESS: hand_sign < 0 reverses the perimeter, so flip_winding swaps every triangle on the
+##       mirrored bat. This makes the RIGHT bat's caps/sides face the SAME way as the LEFT bat.
+##   (B) ABSOLUTE ORIENTATION: the outline is wound CCW in the X-Z plane, and a CCW X-Z loop's cap
+## normal (via SurfaceTool.generate_normals' (v1-v0)x(v2-v0)) points -Y, NOT +Y. So the naive fan
+##       order (outline[0], i, i+1) at +half_h faces the top cap DOWN. We emit the TOP cap REVERSED
+##       (outline[0], i+1, i) so its normal faces +Y (the visible up face the camera sees), and the
+##       BOTTOM cap in forward order so it faces -Y. The orientation is derived from the outline's
+## signed area so it self-corrects for the mirrored bat (test_flipper_rubber_top asserts the top
+##       cap's average normal Y is POSITIVE on BOTH bats).
 func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: float) -> ArrayMesh:
-	# Concern (A): the mirrored (right) bat has a reversed perimeter, so flip every triangle's winding
+	# Concern (A): the mirrored (right) bat has a reversed perimeter, so flip every triangle's
+	# winding
 	# to keep its normals facing the same direction as the left bat's. _emit_tri does the swap.
 	var flip_winding: bool = hand_sign < 0.0
 	var half_h: float = height * 0.5
@@ -758,9 +820,10 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 		_emit_tri(st_body, a_top, a_bot, b_top, flip_winding)
 		_emit_tri(st_body, b_top, a_bot, b_bot, flip_winding)
 	# Bottom cap (fan from the first point), wound to face DOWN (-Y). We orient the cap from the
-	# outline's ACTUAL signed area in the X-Z plane (the proven slingshot BUG-032 technique) so the
-	# bottom always faces -Y for BOTH the left (CCW) and the mirrored right (CW) outline, with no
-	# per-side flag to thread. The bottom cap is the OPPOSITE winding of the top cap below.
+	# outline's ACTUAL signed area in the X-Z plane so the bottom always faces -Y for BOTH the left
+	# (CCW) and the mirrored right (CW) outline, with no per-side flag to thread. The bottom cap is
+	# the
+	# OPPOSITE winding of the top cap below.
 	var top_forward: bool = _cap_top_is_forward(outline)
 	for i in range(1, n - 1):
 		_emit_cap_tri(st_body, outline, i, -half_h, not top_forward)
@@ -773,9 +836,9 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 	# --- Surface 1: WHITE RUBBER TOP cap (the up-facing face). ---
 	# Wound to face UP (+Y) - the face the top-down camera sees. Orientation is derived from the
 	# outline's signed area (_cap_top_is_forward) so the top cap faces +Y on BOTH the left and the
-	# mirrored right bat. test_flipper_rubber_top.gd asserts this (the cap's average normal Y must be
-	# POSITIVE on both bats); deriving from signed area removes the brittle hand-picked winding that
-	# faced the cap DOWN on both bats (the SEND_BACK failure).
+	# mirrored right bat. test_flipper_rubber_top.gd asserts this (the cap's average normal Y must
+	# be
+	# POSITIVE on both bats).
 	var st_top := SurfaceTool.new()
 	st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(1, n - 1):
@@ -790,9 +853,11 @@ func _build_bat_mesh(outline: PackedVector2Array, height: float, hand_sign: floa
 
 
 ## Emit one triangle to a SurfaceTool, flipping the winding (swapping v1/v2) when flip is true. Used
-## by the SIDE WALLS: an X-mirrored outline reverses the perimeter order, so the mirrored bat flips
-## every side triangle to keep its outward normals consistent. The CAPS use _emit_cap_tri instead
-## (their orientation is derived from the outline's signed area, not from a per-side flag).
+## by
+## the SIDE WALLS: an X-mirrored outline reverses the perimeter order, so the mirrored bat flips
+## every
+## side triangle to keep its outward normals consistent. The CAPS use _emit_cap_tri instead (their
+## orientation is derived from the outline's signed area, not from a per-side flag).
 func _emit_tri(st: SurfaceTool, v0: Vector3, v1: Vector3, v2: Vector3, flip: bool) -> void:
 	st.add_vertex(v0)
 	if flip:
@@ -805,8 +870,8 @@ func _emit_tri(st: SurfaceTool, v0: Vector3, v1: Vector3, v2: Vector3, flip: boo
 
 ## Signed area of the (x, z) outline in the X-Z plane (the shoelace formula). Positive = the points
 ## wind counter-clockwise (the left bat), negative = clockwise (the mirrored right bat). Used to
-## orient the prism caps so the TOP always faces +Y regardless of the per-side mirror, the same
-## proven technique slingshot.gd uses for its triangular prism (QA BUG-032).
+## orient
+## the prism caps so the TOP always faces +Y regardless of the per-side mirror.
 func _signed_area_xz(outline: PackedVector2Array) -> float:
 	var area: float = 0.0
 	var n: int = outline.size()
@@ -818,20 +883,22 @@ func _signed_area_xz(outline: PackedVector2Array) -> float:
 
 
 ## Whether the TOP cap fan should be emitted in FORWARD order (0, i, i+1) to face +Y. Derived from
-## the outline's signed area so it self-corrects for the mirrored bat: a CCW outline (positive area,
-## the left bat) needs the forward order to face the top cap +Y; a CW outline (negative area, the
-## mirrored right bat) needs the reversed order. The exact mapping (which sign uses forward) was
-## pinned against the REAL mesh normals that test_flipper_rubber_top.gd reads from
-## generate_normals() under Godot's built-in winding convention, NOT a hand-written cross-product
-## (the previous code's hand cross-product assumed the opposite convention and faced both caps DOWN
-## - the SEND_BACK failure).
+## the
+## outline's signed area so it self-corrects for the mirrored bat: a CCW outline (positive area, the
+## left bat) needs the forward order to face the top cap +Y; a CW outline (negative area, the
+## mirrored
+## right bat) needs the reversed order. The mapping was pinned against the REAL mesh normals that
+## test_flipper_rubber_top.gd reads from generate_normals() under Godot's built-in winding
+## convention.
 func _cap_top_is_forward(outline: PackedVector2Array) -> bool:
 	return _signed_area_xz(outline) > 0.0
 
 
 ## Emit one cap fan triangle (apex outline[0], then outline[i], outline[i+1]) at height y. When
-## forward is false the i / i+1 pair is swapped, flipping the cap's facing. Keeps the cap winding in
-## one helper shared by the top (+Y) and bottom (-Y) caps of both bats.
+## forward
+## is false the i / i+1 pair is swapped, flipping the cap's facing. Keeps the cap winding in one
+## helper
+## shared by the top (+Y) and bottom (-Y) caps of both bats.
 func _emit_cap_tri(
 	st: SurfaceTool, outline: PackedVector2Array, i: int, y: float, forward: bool
 ) -> void:
