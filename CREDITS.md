@@ -7,18 +7,17 @@ goes into assets/ without a line in this file.
 ## 3D models
 
 ### Custom low-poly element family (assets/models/)
-Files: `flipper_bat.glb`, `mini_flipper.glb`, `pop_bumper.glb`, `launcher.glb`, `wall.glb`,
-`left_slingshot.glb`.
+Files: `flipper_bat.glb`, `mini_flipper.glb`, `pop_bumper.glb`, `launcher.glb`, `wall.glb`.
 - Source: original low-poly models created in Blender for this project (the matched stylized
   flat-shaded blue-cap family). They REPLACE the earlier borrowed art (the vbousquet/pinball-parts
   flipper bat and the older bumper_body.glb, both removed from the repo).
 - License: original project work; no third-party attribution required.
 - Modified: exported to glTF 2.0 .glb. The art carries NO collision geometry: every element's collider
   is a primitive shape built in code (the flipper / mini-flipper convex hull, the pop bumper
-  CylinderShape3D, the wall BoxShape3D, the slingshot ConvexPolygonShape3D) or, for the launcher, the
-  AnimatableBody3D strike face. Object names: flipper_bat (Flipper_Bat, Flipper_Rubber); mini_flipper
-  (Flipper_Bat_Mini, Flipper_Rubber_Mini); pop_bumper (Bumper_Base, Bumper_Body, Bumper_Cap); launcher
-  (Box_* housing + Plunger_Anim{Rod,Tip,Clip} + Plunger_Spring); wall (Wall_Body, Wall_Cap).
+  CylinderShape3D, the wall BoxShape3D) or, for the launcher, the AnimatableBody3D strike face. Object
+  names: flipper_bat (Flipper_Bat, Flipper_Rubber); mini_flipper (Flipper_Bat_Mini, Flipper_Rubber_Mini);
+  pop_bumper (Bumper_Base, Bumper_Body, Bumper_Cap); launcher (Box_* housing +
+  Plunger_Anim{Rod,Tip,Clip} + Plunger_Spring); wall (Wall_Body, Wall_Cap).
 
 ### Kenney asset packs (assets/kenney/baseline/)
 Files: every model, texture, UI image, font, and audio clip under `assets/kenney/baseline/`
@@ -26,8 +25,9 @@ Files: every model, texture, UI image, font, and audio clip under `assets/kenney
 `fonts/kenney_future*.ttf`, `audio/*.ogg`), copied unmodified from the Kenney.nl asset packs into
 this repo per the frozen baseline manifest (docs/assets/KENNEY_BASELINE_MANIFEST.json, kept local
 per this repo's docs/ policy).
-- Source: Kenney (kenney.nl) - Minigolf Kit, UI Pack (Sci-fi), Kenney Fonts, and the Kenney audio
-  packs (UI Audio / Impact Sounds / Music Jingles).
+- Source: Kenney (kenney.nl) - Minigolf Kit, UI Pack (Sci-fi), Game Icons, Kenney Fonts, and the
+  Kenney audio packs (UI Audio / Impact Sounds / Music Jingles). The Game Icons pack (White/2x) supplies
+  `ui/music_on.png` and `ui/music_off.png` (the play-bar music toggle icon, SLICE "Gate 0 polish").
 - License: CC0 1.0 Universal (public domain dedication) - https://kenney.nl/assets - no attribution
   legally required, credited here anyway as house policy and good practice.
 - Modified: none (used as shipped by Kenney); imported into Godot's own resource format by the
@@ -38,9 +38,34 @@ per this repo's docs/ policy).
   overhanging a post, in the flat faceted Kenney style) to replace the Minigolf Kit's `bump.glb`,
   which read as a plain square rather than a pop bumper at gameplay zoom. The Kenney pinball-parts
   reference set (see below) was used as a PROPORTION reference only; no geometry was copied from it.
+  Revised (SLICE "Gate 0 polish", 2026-07-19): the authored dome raised (cap-head height 0.28 -> 0.62,
+  total height 0.52 -> 0.82, footprint unchanged) so it reads as domed rather than flat.
 - License: original project work; no third-party attribution required.
 - Modified: exported to glTF 2.0 .glb, no collision geometry (the bumper's collider is the existing
   primitive shape built in code, per the project's art-mesh-is-never-a-collider rule).
+
+### Custom-authored slingshot wedges (assets/models/left_slingshot.glb, right_slingshot.glb)
+- Source: original models, built from scratch in Blender for this project (SLICE "Gate 0 polish",
+  2026-07-19) - a solid, slightly-domed triangular wedge whose footprint traces the slingshot's
+  rounded-triangle collider outline. Replaces the earlier open-truss visual (raised corner posts plus
+  thin rubber bands) that read as see-through rather than a solid slingshot. Two separately-authored,
+  pre-mirrored files (not one negative-scaled mesh) so the right sling keeps outward-facing normals
+  instead of shading inside-out.
+- License: original project work; no third-party attribution required.
+- Modified: exported to glTF 2.0 .glb, no collision geometry (the ball always collides with the
+  existing ConvexPolygonShape3D hull; the art mesh is never a collider). Object names:
+  `SlingshotWedge_L` / `SlingshotWedge_R`.
+
+### Custom-authored bullseye standup target (assets/models/bullseye_target.glb)
+- Source: original model, built from scratch in Blender for this project (SLICE "Gate 0 polish",
+  2026-07-19) - a low-poly, flat-shaded archery-target disc (concentric alternating red/white rings,
+  red centre and red outer rim, 18 segments). Replaces the plain Minigolf Kit `obstacle-block.glb`,
+  which read as "just round circles" rather than a scoring target. Baked to the SAME material values
+  as the mushroom pop bumper (red 0.86/0.16/0.16, white 0.95/0.95/0.96, metallic 0, roughness 0.6) so
+  the standup bank and the pop bumpers read as one matched scoring set.
+- License: original project work; no third-party attribution required.
+- Modified: exported to glTF 2.0 .glb, no collision geometry (the ball always collides with the
+  existing Deflector CylinderShape3D at POST_RADIUS; the art mesh is never a collider).
 
 ### Imported parts (wire guides, flat rails, bottom lane guides, drop/react targets)
 Files: `wire_guide_1in_thin.glb`, `wire_guide_1in_thick.glb`, `wire_guide_2in_thin.glb`,
