@@ -1,0 +1,252 @@
+extends Node
+## AudioDirector - the ONE node that owns every game sound (SLICE "Kenney baseline COMPLETION",
+## FRONT 3). It builds a small pool of AudioStreamPlayer voices from AudioLibrary, exposes stable
+## typed slot methods that table.gd connects the EXISTING gameplay signals to, and plays the music
+## bed. AUDIO ONLY: it never reads or writes a collider, layer, kick vector, or layout coordinate
+## (physics is FROZEN this slice), and it invents NO new gameplay signal - it listens to the ones
+## the
+## table already emits (bumper kicked, target scored, ball launched, ball drained, score changed)
+## and
+## POLLS the existing flipper INPUT ACTIONS (reading input is not a new signal).
+##
+## SCENE PLACEMENT: table.gd instances ONE AudioDirector as a child of the Table root (see
+## table._build_audio) and wires it in table._wire_signals, exactly like GameFlow and the HUD. It is
+## NOT an autoload (this project has none; systems live under Table so Table.tscn tests reach them).
+##
+## VOICE MODEL: one dedicated AudioStreamPlayer per semantic event (AudioLibrary.SFX_EVENTS) plus
+## one
+## music player. One voice per event keeps each event's volume independent and means a rapid
+## re-trigger restarts only THAT voice (arcade-standard: a second bumper hit re-strikes the bell).
+## If
+## the retail polish later needs overlapping tails on the impacts, add a tiny round-robin pool
+## behind
+## play_event WITHOUT changing its signature (see TODO in _build_voices) - the public contract
+## holds.
+##
+## WEB AUDIO UNLOCK: browsers keep audio muted until the first user gesture. Building the players
+## and
+## even calling play() before that gesture does NOT error (it is silently inaudible); the menu PLAY
+## click is the natural first gesture, so from the player's view sound "just starts working" on
+## PLAY.
+## Nothing here may error before that unlock - every load is null-guarded
+## (AudioLibrary.load_stream).
+##
+## HEADLESS: GUT runs with no audio device; the players still instance and is_playing() still flips
+## true on play(), so the WIRING is fully testable (a voice exists, its stream is a real loaded
+## resource, firing the signal calls play()). Headless CANNOT hear - the audio evidence is the
+## wiring
+## test + the event-to-sound table, never a listening claim.
+##
+## OWNERSHIP: lead-programmer scaffolds + owns the voice pool and the slot contract. The
+## gameplay-programmer copies the .ogg files, tunes the mix (AudioLibrary.EVENT_VOLUME_DB), confirms
+## the score-blip policy, and adds the UI-click call sites in layout_editor.gd. The test-builder
+## fills
+## the audio wiring tests. HOUSE STYLE: typed GDScript, snake_case, WHY comments, lines <= 100.
+
+## The per-event SFX voices, keyed by AudioLibrary event StringName. Built in _ready. Typed as Node
+## values in the Dictionary (GDScript Dictionaries are untyped-valued) but every entry is an
+## AudioStreamPlayer; player_for() returns the typed handle.
+var _voices: Dictionary = {}
+
+## The single looping music player (the bed). Null until _build_music runs.
+var _music: AudioStreamPlayer = null
+
+## True while a ball is actually in play (table.set_play_view drives it). Gates the flipper thwack
+## so
+## a flipper keypress in a menu does not thwack, and lets a test drive the poll deterministically.
+var _gameplay_active: bool = false
+
+## Master mute (e.g. a future options toggle). When true, play_event/start_music are no-ops so the
+## table can be silenced without tearing down the voices. Kept simple; no per-bus routing this
+## slice.
+var _muted: bool = false
+
+## Last score seen by on_score_changed, so the subtle score blip fires only on an INCREASE (never on
+## the score_changed(0) that GameFlow emits at game start / restart). See on_score_changed.
+var _last_score: int = 0
+
+
+func _ready() -> void:
+	_build_voices()
+	_build_music()
+
+
+## Build one AudioStreamPlayer per SFX event, cache its stream + mix level once. A missing/not-yet-
+## copied .ogg leaves stream = null (load_stream is null-guarded); the voice still exists so wiring
+## never null-derefs, it is just silent until the file lands.
+## TODO(retail polish, optional): if impact tails need to overlap, swap the single player for a
+## small
+## round-robin AudioStreamPlayer array behind play_event - do NOT change play_event's signature.
+func _build_voices() -> void:
+	for event: StringName in AudioLibrary.SFX_EVENTS:
+		var player := AudioStreamPlayer.new()
+		player.name = "Voice_" + String(event)
+		player.stream = AudioLibrary.load_stream(AudioLibrary.stream_path_for(event))
+		player.volume_db = AudioLibrary.volume_db_for(event)
+		add_child(player)
+		_voices[event] = player
+
+
+## Build the looping music player. The stream loops (set defensively in code in case the .import did
+## not carry the loop flag) at the bed level, so it sits under every SFX. Not started here: music
+## begins when play starts (set_play_view(true) -> start_music) so the menu is quiet by default.
+func _build_music() -> void:
+	_music = AudioStreamPlayer.new()
+	_music.name = "MusicBed"
+	_music.volume_db = AudioLibrary.MUSIC_VOLUME_DB
+	add_child(_music)
+
+
+# --- PUBLIC CONTRACT (STABLE SIGNATURES - tests + table.gd depend on these) -----------------------
+
+
+## Play the voice bound to `event`. Restarts the voice if it is already playing (arcade re-strike).
+## A no-op when muted, when the event is unknown, or when the voice has no stream (file not copied
+## yet) - it must never error before the web audio unlock. STABLE SIGNATURE.
+func play_event(event: StringName) -> void:
+	if _muted:
+		return
+	var player: AudioStreamPlayer = player_for(event)
+	if player == null or player.stream == null:
+		return
+	player.play()
+
+
+## Start (or restart) the looping music bed. `bed` selects which loop (defaults to the DESIGN
+## recommendation, AudioLibrary.MUSIC_BED_DEFAULT). Idempotent-ish: re-calling with the same bed
+## while
+## it is already playing does nothing so a re-entry does not stutter the music. STABLE SIGNATURE.
+func start_music(bed: String = AudioLibrary.MUSIC_BED_DEFAULT) -> void:
+	if _muted or _music == null:
+		return
+	var stream: AudioStream = AudioLibrary.load_stream(bed)
+	if stream == null:
+		return  ## file not copied yet - stay silent, never error
+	# Ensure the bed loops even if the import preset did not set it (Ogg Vorbis exposes `loop`).
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	var same: bool = _music.stream == stream
+	if same and _music.playing:
+		return
+	_music.stream = stream
+	_music.play()
+
+
+## Stop the music bed (e.g. returning to the menu). Safe if it is already stopped. STABLE SIGNATURE.
+func stop_music() -> void:
+	if _music != null:
+		_music.stop()
+
+
+## True while the music bed is playing. Test seam + a guard for callers. STABLE SIGNATURE.
+func is_music_playing() -> bool:
+	return _music != null and _music.playing
+
+
+## Mute / unmute all audio. Muting also stops the music so the table goes fully quiet. STABLE.
+func set_muted(muted: bool) -> void:
+	_muted = muted
+	if muted:
+		stop_music()
+
+
+## Mark play active/inactive. table.set_play_view drives this: true gates the flipper thwack ON and
+## starts the music; false stops the music and gates the thwack OFF. STABLE SIGNATURE.
+func set_gameplay_active(active: bool) -> void:
+	_gameplay_active = active
+	if active:
+		start_music()
+	else:
+		stop_music()
+
+
+## The AudioStreamPlayer voice for `event`, or null if unknown. Test seam: a wiring test asserts
+## player_for(EVENT_BUMPER).stream is a non-null loaded AudioStream and is_playing() after the
+## signal
+## fires. STABLE SIGNATURE.
+func player_for(event: StringName) -> AudioStreamPlayer:
+	if _voices.has(event):
+		return _voices[event] as AudioStreamPlayer
+	return null
+
+
+# --- SIGNAL SLOTS (table.gd connects the EXISTING gameplay signals to these) ----------------------
+# Each slot's parameter list MATCHES the source signal exactly so connect() binds with no adapter.
+# Unused args are underscore-prefixed (Godot 4 does not drop them on connect). Each just voices its
+# event - the mapping is the DESIGN event-to-sound table, made literal.
+
+
+## pop_bumper.kicked(direction) -> the bell pop. Fired once per bumper hit (the base class cooldown
+## already blocks per-frame farming, so this never machine-guns). STABLE SIGNATURE.
+func on_bumper_kicked(_direction: Vector3) -> void:
+	play_event(AudioLibrary.EVENT_BUMPER)
+
+
+## slingshot.kicked(direction) -> the plank snap. Same kicked(Vector3) contract as the bumper, but a
+## distinct voice so a sling does not sound like a bumper. STABLE SIGNATURE.
+func on_slingshot_kicked(_direction: Vector3) -> void:
+	play_event(AudioLibrary.EVENT_SLINGSHOT)
+
+
+## target.scored(points) -> the tin hit (a metallic voice distinct from the bumper bell). STABLE.
+func on_target_scored(_points: int) -> void:
+	play_event(AudioLibrary.EVENT_TARGET)
+
+
+## plunger.ball_launched -> the laser release whoosh. STABLE SIGNATURE.
+func on_ball_launched() -> void:
+	play_event(AudioLibrary.EVENT_LAUNCH)
+
+
+## drain.ball_drained (and the OOB failsafe) -> the low loss thud. STABLE SIGNATURE.
+func on_ball_drained() -> void:
+	play_event(AudioLibrary.EVENT_DRAIN)
+
+
+## game_flow.score_changed(score) -> the subtle score blip, but ONLY on an INCREASE. GameFlow emits
+## score_changed(0) at game start and restart; blipping on those would be a phantom chime, so we
+## track
+## the last score and voice only when it rose. A decrease/reset just re-baselines silently.
+## TODO(gameplay/qa): confirm this "blip on increase only, kept subtle (EVENT_SCORE mix is well
+## under
+## the impacts)" policy reads right on the artifact; the score also drives the bell/tin on the same
+## hit, so the blip is meant to LAYER under, not stand alone. STABLE SIGNATURE.
+func on_score_changed(score: int) -> void:
+	if score > _last_score:
+		play_event(AudioLibrary.EVENT_SCORE)
+	_last_score = score
+
+
+## A UI button was pressed. table.play_ui_click forwards here from layout_editor's button handlers.
+## `secondary` picks the second click voice (RESET BALL) vs the primary (MENU / PLAY), so the two
+## buttons sound distinct. The PLAY click is typically the first-gesture web audio unlock. STABLE.
+func on_ui_pressed(secondary: bool = false) -> void:
+	if secondary:
+		play_event(AudioLibrary.EVENT_UI_SECONDARY)
+	else:
+		play_event(AudioLibrary.EVENT_UI_PRIMARY)
+
+
+# --- FLIPPER THWACK (polled, not a signal) --------------------------------------------------------
+
+
+## Poll the EXISTING flipper input actions and thwack on the just-pressed edge, but only while play
+## is
+## active (a flipper keypress in a menu should not thwack). Polling reads input actions the game
+## already defines (project.godot: left_flipper, right_flipper) - it invents no gameplay signal, and
+## it also catches the touch controls, which drive the SAME actions via Input.action_press
+## (layout_editor._handle_play_touch). We poll in _physics_process (not _process) so the thwack
+## lands
+## on the same physics frame the flipper drive reads the press (flipper.gd polls in _physics_process
+## too), keeping cause and effect on one frame (DESIGN: "each sound lands ON the same frame").
+func _physics_process(_delta: float) -> void:
+	if not _gameplay_active:
+		return
+	if _flipper_action_just_pressed("left_flipper") or _flipper_action_just_pressed("right_flipper"):
+		play_event(AudioLibrary.EVENT_FLIPPER)
+
+
+## True if the action exists AND was just pressed this frame. The has_action guard keeps a headless
+## test that has not loaded the input map from erroring.
+func _flipper_action_just_pressed(action: StringName) -> bool:
+	return InputMap.has_action(action) and Input.is_action_just_pressed(action)

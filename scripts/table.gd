@@ -18,6 +18,7 @@ extends Node3D
 ##     |     +-- Ball                                   (scripts/ball.gd, physics-programmer)
 ##     +-- GameFlow (Node)   game state machine         (scripts/game_flow.gd, gameplay-programmer)
 ##     +-- HUD (CanvasLayer)  score/balls/meter/message  (scripts/hud.gd, gameplay-programmer)
+##     +-- AudioDirector (Node) every game sound        (scripts/audio_director.gd, lead+gameplay)
 ##
 ## SIGNAL WIRING is the integration contract. This script connects (see _wire_signals):
 ##   Drain.ball_drained          -> GameFlow.on_ball_drained
@@ -30,6 +31,16 @@ extends Node3D
 ##   GameFlow.message(String)     -> HUD.set_message
 ##   GameFlow.game_over(int)      -> HUD.show_game_over
 ##   Plunger.power_changed(float) -> HUD.set_meter
+## AUDIO WIRING (FRONT 3, _wire_audio_signals): the SAME existing signals also drive AudioDirector:
+##   PopBumper.kicked(Vector3)    -> AudioDirector.on_bumper_kicked   (bell)
+##   Slingshot.kicked(Vector3)    -> AudioDirector.on_slingshot_kicked (plank)
+##   Target.scored(int)           -> AudioDirector.on_target_scored   (tin)
+##   Plunger.ball_launched        -> AudioDirector.on_ball_launched   (laser)
+##   Drain.ball_drained           -> AudioDirector.on_ball_drained    (low thud)
+##   GameFlow.score_changed(int)  -> AudioDirector.on_score_changed   (subtle blip on a rise)
+##   flipper INPUT actions (polled in AudioDirector)                  -> flipper thwack
+##   UI buttons (layout_editor -> table.play_ui_click)                -> UI clicks
+##   music bed is toggled by set_play_view (PLAY on / menu off).
 ## RESTART: in GAME_OVER, _physics_process polls the "launch" action and calls GameFlow.restart(),
 ## which re-runs start_game(); _on_request_new_ball hides the game-over panel so the player is not
 ## left staring at "GAME OVER" over a live ball (QA BUG-002 / #5 / #6).
@@ -83,6 +94,10 @@ var drain: Area3D
 var oob_drain: Area3D
 var game_flow: Node
 var hud: CanvasLayer
+## AudioDirector (scripts/audio_director.gd): the ONE node that owns every game sound. Instanced in
+## _build_audio and wired to the existing gameplay signals in _wire_signals (SLICE "Kenney baseline
+## COMPLETION", FRONT 3). Typed as Node so a stubbed-out build never hard-fails the scene.
+var audio_director: Node
 var targets: Array[Area3D] = []
 ## Active-kick furniture (SLICE "real pinball furniture"). Both are Area3D detectors (pop_bumper.gd
 ## /
@@ -109,6 +124,7 @@ func _ready() -> void:
 	_build_static_geometry()
 	_build_dynamic_elements()
 	_build_flow_and_hud()
+	_build_audio()
 	_wire_signals()
 	_build_layout_editor()
 	# Visual reskin (SLICE A2) runs LAST from here, as a final whole-table pass after BOTH build
@@ -253,6 +269,13 @@ func _frame_camera() -> void:
 func set_play_view(on: bool) -> void:
 	_play_view = on
 	call_deferred("_frame_camera")
+	# AUDIO (FRONT 3): this is the ONE central play/not-play hook the layout editor already calls on
+	# every mode change (_show_hud -> set_play_view), so driving the audio here needs ZERO edits to the
+	# editor. PLAY -> gameplay active + music bed on; BUILD/menu -> inactive + music off. A pause menu
+	# does NOT call this (the tree just freezes), so the bed keeps playing under the translucent pause
+	# overlay, which is the intended feel.
+	if audio_director != null and audio_director.has_method("set_gameplay_active"):
+		audio_director.set_gameplay_active(on)
 
 
 func _place_camera(center: Vector3, out_dir: Vector3, dist: float) -> void:
@@ -740,6 +763,15 @@ func _build_flow_and_hud() -> void:
 	add_child(hud)
 
 
+## Instance the AudioDirector (scripts/audio_director.gd) as a child of Table. It builds its voice
+## pool in _ready; table.gd only connects it to the existing gameplay signals (_wire_signals) and
+## toggles it with the play/menu mode (set_play_view). AUDIO ONLY - no physics is touched.
+func _build_audio() -> void:
+	audio_director = preload("res://scripts/audio_director.gd").new()
+	audio_director.name = "AudioDirector"
+	add_child(audio_director)
+
+
 ## The ONE place cross-system signals are connected. Keeping wiring here means a coder can change a
 ## system's internals freely as long as the documented signal signatures hold. Each connection is
 ## guarded with has_signal/has_method so a not-yet-implemented stub never crashes the scene.
@@ -791,6 +823,42 @@ func _wire_signals() -> void:
 	if game_flow.has_signal("game_over") and hud.has_method("show_game_over"):
 		game_flow.game_over.connect(hud.show_game_over)
 
+	_wire_audio_signals()
+
+
+## Connect the EXISTING gameplay signals to the AudioDirector slots (SLICE "Kenney baseline
+## COMPLETION", FRONT 3). Each connect is guarded so a stubbed director / element never crashes the
+## scene. The mapping is the DESIGN event-to-sound table, made literal: bell on a bumper kick, tin
+## on a target score, plank on a sling kick, laser on launch, low thud on drain, blip on a score
+## rise. The flipper thwack is polled inside AudioDirector (an input action, not a signal), and the
+## UI clicks are forwarded from layout_editor via play_ui_click - so neither needs a connect here.
+func _wire_audio_signals() -> void:
+	if audio_director == null:
+		return
+	# Pop bumpers -> bell. Their kicked(direction: Vector3) fires once per hit (base-class cooldown).
+	for bumper: Area3D in pop_bumpers:
+		if bumper.has_signal("kicked") and audio_director.has_method("on_bumper_kicked"):
+			bumper.kicked.connect(audio_director.on_bumper_kicked)
+	# Slingshots -> plank (same kicked(Vector3) contract, distinct voice).
+	for sling: Area3D in slingshots:
+		if sling.has_signal("kicked") and audio_director.has_method("on_slingshot_kicked"):
+			sling.kicked.connect(audio_director.on_slingshot_kicked)
+	# Standup targets -> tin (their scored(points) contract).
+	for target: Area3D in targets:
+		if target.has_signal("scored") and audio_director.has_method("on_target_scored"):
+			target.scored.connect(audio_director.on_target_scored)
+	# Plunger launch -> laser.
+	if plunger != null and plunger.has_signal("ball_launched"):
+		if audio_director.has_method("on_ball_launched"):
+			plunger.ball_launched.connect(audio_director.on_ball_launched)
+	# Center drain -> low thud (the OOB failsafe routes through _on_oob_body_entered, which thuds too).
+	if drain != null and drain.has_signal("ball_drained"):
+		if audio_director.has_method("on_ball_drained"):
+			drain.ball_drained.connect(audio_director.on_ball_drained)
+	# Score rise -> subtle blip (the director guards against the score_changed(0) at game start).
+	if game_flow.has_signal("score_changed") and audio_director.has_method("on_score_changed"):
+		game_flow.score_changed.connect(audio_director.on_score_changed)
+
 
 ## GameFlow asked for a fresh ball (start, or after a non-final drain). Reset the ball to the launch
 ## lane, arm the plunger, and HIDE the game-over panel. Hiding here covers BOTH a normal new ball
@@ -827,6 +895,16 @@ func manual_reset_ball() -> void:
 		game_flow.force_reseat()
 
 
+## Play a UI button click (SLICE "Kenney baseline COMPLETION", FRONT 3/4). The layout editor button
+## handlers call this so a HUD/menu click is voiced without the editor needing an AudioDirector
+## reference or a new gameplay signal. `secondary` picks the second click voice (RESET BALL) vs the
+## primary (MENU / PLAY / BUILD). The menu PLAY click is usually the first user gesture, which is
+## what unlocks web audio - so this is also the natural unlock point. Null-safe. STABLE SIGNATURE.
+func play_ui_click(secondary: bool = false) -> void:
+	if audio_director != null and audio_director.has_method("on_ui_pressed"):
+		audio_director.on_ui_pressed(secondary)
+
+
 ## Failsafe drain hit: only the live ball counts (ignore any other body), then route to the same
 ## GameFlow drain handler the center drain uses. GameFlow's own state guard prevents a double-spend
 ## if both drains somehow fire for the same lost ball (the second arrives in READY_TO_LAUNCH and is
@@ -836,6 +914,10 @@ func _on_oob_body_entered(body: Node) -> void:
 		return
 	if game_flow != null and game_flow.has_method("on_ball_drained"):
 		game_flow.on_ball_drained()
+	# A ball lost over a wall (the OOB failsafe) still thuds like a drain (FRONT 3). GameFlow's own
+	# state guard prevents a double ball-spend; a rare double thud is harmless.
+	if audio_director != null and audio_director.has_method("on_ball_drained"):
+		audio_director.on_ball_drained()
 
 
 ## Poll for the restart input. Only meaningful in GAME_OVER; GameFlow.restart() ignores it
