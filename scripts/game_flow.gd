@@ -130,7 +130,7 @@ func on_ball_launched() -> void:
 ##
 ## Two branches:
 ##   1. REACHED PLAY: if ball_local_z < TableConfig.LAUNCH_REACHED_PLAY_Z (the ball crossed the
-##      flipper-pivot row up-table, so it is unambiguously in play) -> notify_ball_reached_play()
+##      reached-play line up-table, so it is unambiguously in play) -> notify_ball_reached_play()
 ##      promotes to BALL_IN_PLAY and returns. No further timer work needed.
 ##   2. FAILED LAUNCH: ball is still down-table in the lane. Advance the settle timer; once it
 ##      exceeds LAUNCH_SETTLE_TIME_S without the ball reaching play, the launch is judged FAILED
@@ -141,10 +141,12 @@ func tick_launch_watch(ball_local_z: float, delta: float) -> void:
 	if _state != State.LAUNCHING:
 		return
 	# Branch 1: the ball reached play (crossed up-table of the reached-play line).
-	# NOTE (N2): the reached-play line (LAUNCH_REACHED_PLAY_Z, the slingshot row) sits DOWN-table of
-	# every scoring body (the standup bank and pop bumpers are further up-table at z <= -7), so a ball
-	# always promotes to BALL_IN_PLAY BEFORE it can reach any target/bumper. No score is ever lost to
-	# the on_target_scored BALL_IN_PLAY guard during the brief LAUNCHING window.
+	# NOTE (N2, UPDATED 2026-07-18 - see TableConfig.LAUNCH_REACHED_PLAY_Z's own WHY for the full
+	# derivation): the reached-play line is now BALL_START.z - 6.0, not the slingshot row (that
+	# earlier derivation broke when BALL_START.z moved up the lane past it - c1d93fc). It still sits
+	# DOWN-table of every scoring body (the standup bank and pop bumpers are further up-table at
+	# z <= -7), so a ball always promotes to BALL_IN_PLAY BEFORE it can reach any target/bumper. No
+	# score is ever lost to the on_target_scored BALL_IN_PLAY guard during the brief LAUNCHING window.
 	if ball_local_z < TableConfig.LAUNCH_REACHED_PLAY_Z:
 		notify_ball_reached_play()
 		return
