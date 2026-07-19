@@ -272,8 +272,9 @@ func set_play_view(on: bool) -> void:
 	# AUDIO (FRONT 3): this is the ONE central play/not-play hook the layout editor already calls on
 	# every mode change (_show_hud -> set_play_view), so driving the audio here needs ZERO edits to the
 	# editor. PLAY -> gameplay active + music bed on; BUILD/menu -> inactive + music off. A pause menu
-	# does NOT call this (the tree just freezes), so the bed keeps playing under the translucent pause
-	# overlay, which is the intended feel.
+	# does NOT call this (it only sets get_tree().paused), and the music player is PROCESS_MODE_ALWAYS
+	# (see AudioDirector._build_music), so the bed keeps playing under the translucent pause overlay,
+	# which is the intended feel.
 	if audio_director != null and audio_director.has_method("set_gameplay_active"):
 		audio_director.set_gameplay_active(on)
 

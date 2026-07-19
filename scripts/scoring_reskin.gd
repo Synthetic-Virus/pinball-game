@@ -12,15 +12,20 @@ extends RefCounted
 ##
 ## HOW SCORING NODES ARE FOUND (structural, so table.gd needs no group bookkeeping): a scoring
 ## element is any node that owns one of the marker children a bumper / sling / target builds -
-## "BumperVisual", "SlingshotVisual", "KickerMesh" (the gray-box fallback mesh), or "Deflector" (the
-## target's solid post). The drain and oob-drain Area3Ds own none of these, so they are never
-## recoloured, and the flippers / ball are not scoring nodes, so the flipper two-tone is safe.
+## "BumperVisual" (the pop bumper cap), "KickerMesh" (the slingshot's procedural triangle AND the
+## pop bumper's gray-box fallback mesh), or "Deflector" (the target's solid post). The drain and
+## oob-drain Area3Ds own none of these, so they are never recoloured, and the flippers / ball are
+## not scoring nodes, so the flipper two-tone is safe. NOTE: the slingshot's visible mesh is named
+## "KickerMesh" by ActiveKicker (the legacy .glb "SlingshotVisual" art was retired in the Kenney 3D
+## swap), so slings carry no separate "SlingshotVisual" node - they are accented via "KickerMesh".
 ##
 ## Called by TableReskin.apply(). Standalone entry so the future editor can re-accent on its own.
 
-## Child node names that mark a node as scoring furniture (see class doc).
+## Child node names that mark a node as scoring furniture (see class doc). "SlingshotVisual" is
+## deliberately absent: no node is ever named that (the slingshot renders as "KickerMesh"), so a
+## literal for it would just be dead marker weight that matches nothing.
 const SCORING_MARKERS: Array[String] = [
-	"BumperVisual", "SlingshotVisual", "KickerMesh", "Deflector"
+	"BumperVisual", "KickerMesh", "Deflector"
 ]
 
 
