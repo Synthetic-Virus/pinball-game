@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b0lplauncherglb001"
-path="res://.godot/imported/launcher.glb-0000000000000000000000000lnch.scn"
+uid="uid://duws8eybh03y3"
+path="res://.godot/imported/launcher.glb-41244750099e47f4c46f16e1c4c8fe67.scn"
 
 [deps]
 
 source_file="res://assets/models/launcher.glb"
-dest_files=["res://.godot/imported/launcher.glb-0000000000000000000000000lnch.scn"]
+dest_files=["res://.godot/imported/launcher.glb-41244750099e47f4c46f16e1c4c8fe67.scn"]
 
 [params]
 

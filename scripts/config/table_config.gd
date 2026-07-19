@@ -74,6 +74,17 @@ const WALL_THICKNESS: float = 0.35  ## REAL-SCALE: thin rails, not fat slabs (wa
 const LANE_INNER_X: float = 11.0    ## MATCH PINK: lane 11..13.
 const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the divider (= 2.0).
 
+## The launch-lane DIVIDER's up-table (top) endpoint (playfield-local Z; up-table is -Z). The divider
+## (scripts/table_geometry.gd:_build_borders, the "LaneDivider" segment) runs from here down to the
+## lane pocket, forming the physical channel wall between the launch lane and the open field; it
+## STOPS short of the very top so the lane is open there and a launched ball curves into the field.
+## This is the SINGLE source of truth for that endpoint: table_geometry.gd reads it when building the
+## wall (previously a bare -HALF_LENGTH + 9.0 literal duplicated only there), and
+## LAUNCH_REACHED_PLAY_Z (below) derives the soft-lock watchdog's "the ball has genuinely left the
+## lane" line from it, so the two never drift out of sync again the way BALL_START.z and
+## LAUNCH_REACHED_PLAY_Z did (see the WHY on LAUNCH_REACHED_PLAY_Z).
+const LANE_DIVIDER_TOP_Z: float = -HALF_LENGTH + 9.0
+
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
 ## A half-arch across the top turns the ball launched up the lane back over into the playfield.
 const ARCH_CENTER_Z: float = -HALF_LENGTH + 6.0  ## How far down from the very top the arch curves.
@@ -403,26 +414,46 @@ const PLUNGER_REST_POS: Vector3 = Vector3(
 ## flow handles); GameFlow owns the state transition; the constants here are the CONTRACT.
 ##
 ## LAUNCH_REACHED_PLAY_Z: the playfield-local Z line (up-table is -Z) the ball CENTER must cross to
-## count as "reached play". WHY this value: the ball rests at BALL_START.z (HALF_LENGTH - 2.0 = 23)
-## and a successful launch carries it up the lane and over the arch into the field.
+## count as "reached play". WHY this value: the ball rests at BALL_START.z; a successful launch
+## carries it up the lane and over the arch into the field.
 ##
-## QA BUG-031 HARDENING (2026-06-20): the line was the flipper pivot row (FLIPPER_PIVOT_Z = 20.0).
-## That was too close to the lane: a ball rolling down a SIDE channel (e.g. the field band between a
-## slingshot and the launch-lane divider) can TRANSIENTLY dip its center across z=20 while it is
-## really just draining down the side, never having reached play. The watchdog would then falsely
-## promote LAUNCHING -> BALL_IN_PLAY on that transient crossing; if the ball then rolled back into
-## the launch lane (z ~= 23) the plunger was dead (disarmed, watchdog stopped) and the original
-## soft-lock returned by a different path. FIX: move the reached-play line UP-TABLE of the slingshot
-## row (FLIPPER_PIVOT_Z - 3.5 = 16.5) so only a ball genuinely up in the field counts as "in play".
-## A ball that climbed the lane and came over the arch is at z far up-table of 16.5; a dribble or a
-## side-roll stays down-table of it. WHY this exact line: the slingshots sit at
-## FLIPPER_PIVOT_Z - 3.5 (SLINGSHOT_*_POS.z), so this line is the slingshot row - the down-table
-## edge of the open mid-field.
-## A side-draining ball can reach the slingshot Z but not cross UP-TABLE of it without being kicked
-## back into play (which is itself "reached play"); a transient dip toward the flippers cannot reach
-## this far up. The gap from the lane (23) to this line (16.5) is ~5 ball diameters, still a clean,
-## unambiguous split between "dribbled / draining" and "in play".
-const LAUNCH_REACHED_PLAY_Z: float = FLIPPER_PIVOT_Z - 3.5
+## QA BUG-031 HARDENING (2026-06-20, ORIGINAL): the line was the flipper pivot row
+## (FLIPPER_PIVOT_Z = 20.0). That was too close to the lane: a ball rolling down a SIDE channel (e.g.
+## the field band between a slingshot and the launch-lane divider) can TRANSIENTLY dip its center
+## across z=20 while it is really just draining down the side, never having reached play. The
+## watchdog would then falsely promote LAUNCHING -> BALL_IN_PLAY on that transient crossing. The
+## original fix moved the line to the slingshot row (FLIPPER_PIVOT_Z - 3.5 = 16.5), reasoned against
+## BALL_START.z being HALF_LENGTH - 2.0 = 23 at the time (a ~5-ball-diameter gap from the lane).
+##
+## MEASURED DEFECT (diagnosis 2026-07-18) AND RE-FIX: c1d93fc "move ball start up the lane so the
+## long launcher housing fits below it" later moved BALL_START.z to HALF_LENGTH - 13.0 = 12.0 (up
+## the lane by 11 units, for the launcher-housing fit - re-checked below, unaffected by this change)
+## WITHOUT updating this line, silently inverting the invariant the watchdog depends on:
+## BALL_START.z (12.0) < LAUNCH_REACHED_PLAY_Z (16.5). Measured live against the real Table.tscn: a
+## STATIONARY ball at BALL_START (never moved, gravity_scale unchanged) satisfied
+## "ball_local_z < LAUNCH_REACHED_PLAY_Z" on the very first physics frame after on_ball_launched(),
+## so tick_launch_watch() promoted straight to BALL_IN_PLAY before the settle timer or even one frame
+## of real motion could run - the entire soft-lock watchdog was silently dead code for every launch,
+## weak or strong.
+##
+## RE-DERIVATION: instead of the flipper/slingshot row (which is now DOWN-TABLE of BALL_START and so
+## can never protect the invariant again if either geometry is retuned), derive this line directly
+## from BALL_START.z itself - the value that actually broke the invariant - so the relationship
+## LAUNCH_REACHED_PLAY_Z < BALL_START.z holds BY CONSTRUCTION and cannot silently invert again no
+## matter how BALL_START (or this line) is retuned in the future. MARGIN: 6.0 units (~5 ball
+## diameters, matching the original BUG-031 "clean, unambiguous split" margin) up-table of
+## BALL_START.z, so the watchdog requires a real, unambiguous start to the climb (not a jitter at
+## rest) without demanding the ball travel anywhere near the FULL lane. This lands at
+## BALL_START.z - 6.0 = 6.0: still a wide 16-unit margin short of LANE_DIVIDER_TOP_Z (-16.0, the
+## lane's true physical exit, see that constant's WHY) and down-table of TableConfig-independent
+## "reached play" sentinels used elsewhere in the suite (e.g. z=0.0), so a side-draining ball would
+## still need to be clearly up in the open field to trip this line - the same anti-false-positive
+## intent as the original BUG-031 fix, now anchored to the ball's own rest position instead of a
+## flipper/slingshot row that can end up on the wrong side of it. Reachable well within the speed
+## budget already validated for a MINIMUM-power launch (PLUNGER_STROKE_SPEED_MIN=85 was tuned to
+## carry the ball all the way to the LaneExitDeflector zone around z ~ -13.5, far up-table of this
+## line, even against the heavier ball's gravity_scale 1.8 - see LAUNCH_SPEED_MAX's WHY above).
+const LAUNCH_REACHED_PLAY_Z: float = BALL_START.z - 6.0
 ## LAUNCH_SETTLE_TIME_S: how long after ball_launched we wait before judging a launch failed. WHY
 ## 2.0 s: a full-power launch (LAUNCH_SPEED_MAX ~116 u/s) clears the lane and crosses the reached-play
 ## line in a fraction of a second; even a marginal launch that just barely clears does so well under

@@ -148,9 +148,18 @@ func _apply_blue_material(root: Node3D) -> void:
 		mi.material_override = mat
 
 
-## SUBTLE light-up when the bumper is hit: pop the emission, then fade it back over ~0.18 s. Takes
-## no args so it can connect to `kicked` regardless of that signal's parameters. Cosmetic only.
-func _flash_on_hit() -> void:
+## SUBTLE light-up when the bumper is hit: pop the emission, then fade it back over ~0.18 s.
+##
+## FIX (measured defect, review 2026-07-18): this used to take NO args, on the (WRONG) assumption
+## that a zero-arg callback "can connect to `kicked` regardless of that signal's parameters". Godot 4
+## does NOT drop unconsumed signal arguments on connect(): kicked(direction: Vector3) emits with one
+## Vector3 arg (active_kicker.gd:_on_body_entered), so every real kick logged "Method expected 0
+## argument(s), but called with 1" and _flash_on_hit never actually ran - the hit-flash silently never
+## played. Accepting the (unused) direction as a typed, underscore-prefixed parameter matches this
+## codebase's existing unused-parameter convention (e.g. active_kicker.gd's _contact_should_kick,
+## _kick_direction_for) and the sibling connection slingshot.gd:kicked.connect(_play_flex), which
+## already accepts the signal's real signature. Cosmetic only - no physics or collider touched.
+func _flash_on_hit(_direction: Vector3) -> void:
 	if _bumper_mat == null:
 		return
 	# Pulse the ALBEDO (the base color, always rendered), not just emission. Emission alone showed NO

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b0lpminiflipperglb1"
-path="res://.godot/imported/mini_flipper.glb-0000000000000000000000000mflp.scn"
+uid="uid://ctupl0sx7j0a6"
+path="res://.godot/imported/mini_flipper.glb-8851b8f96abf1b763f54b3339fd47db0.scn"
 
 [deps]
 
 source_file="res://assets/models/mini_flipper.glb"
-dest_files=["res://.godot/imported/mini_flipper.glb-0000000000000000000000000mflp.scn"]
+dest_files=["res://.godot/imported/mini_flipper.glb-8851b8f96abf1b763f54b3339fd47db0.scn"]
 
 [params]
 
