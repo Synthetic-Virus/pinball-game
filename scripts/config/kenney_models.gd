@@ -45,16 +45,36 @@ const HILL_ROUND: String = "res://assets/kenney/baseline/models/hill-round.glb"
 ## from scratch in the flat faceted Kenney style - shade_flat on every face, no bevels, 18 segments
 ## on the round parts, flat baked colours (cap red near 0.86/0.16/0.16, light-grey ring, neutral
 ## grey post). The pinball-parts set was a PROPORTION reference only, so this mesh is original and
-## license-clean. Real proportions: cap diameter about 1.04 units, height about 0.52, with the CAP
-## as the widest XZ span so uniform_scale_to_span fits the cap to the collider diameter, and the
-## stem base seated at Y=0 on export so base_seat_y keeps it from sinking below the field.
+## license-clean. Proportions (raised 2026-07-19 after Gate 0 "the mushrooms are pretty flat"): cap
+## diameter about 1.04 units (the widest XZ span, UNCHANGED so the derived uniform scale is the
+## same) and total height about 0.82, with the red cap-head about 0.62 tall - head height about 0.59
+## of the cap diameter. WHY that ratio: the in-game scale (pop_bumper.gd _derive_scale) is a single
+## UNIFORM factor fitting the footprint to the collider, so it preserves the authored
+## height/diameter ratio exactly; a taller authored dome is the only way to make the cap read domed
+## (not a flat disc) under the steep flat-shaded gameplay camera. The CAP stays the widest XZ span
+## so uniform_scale_to_span fits the cap to the collider diameter, and the stem base is seated at
+## Y=0 on export so base_seat_y keeps it from sinking below the field.
 ## pop_bumper.gd needs NO code change: it reads KenneyModels.POP_BUMPER_MODEL, wears the
 ## BumperVisual marker, overhangs the collider, and pulses the albedo hit-flash. BUMP / BUMP_WALLS
 ## / HILL_ROUND stay as fallback kit candidates only.
 const MUSHROOM_BUMPER: String = "res://assets/kenney/baseline/models/mushroom_bumper.glb"
 
-## obstacle_post role (standup-target bank candidates). OBSTACLE_BLOCK is the chosen bank mesh (see
-## STANDUP_TARGET_MODEL); diamond and triangle are held for future variety.
+## CUSTOM-AUTHORED bullseye standup target - the SHIPPED in-field standup mesh (STANDUP_TARGET_MODEL
+## binds here, SLICE "Gate 0 polish", 2026-07-19). It replaces the OBSTACLE_BLOCK kit mesh, which
+## Andrew's Gate 0 play-test flagged as reading like "just round circles" rather than a real archery
+## target: a low-poly disc with concentric baked RED/WHITE rings (red centre, alternating, red outer
+## rim), baked to the SAME material values as MUSHROOM_BUMPER (red 0.86/0.16/0.16, white
+## 0.95/0.95/0.96) so the standup bank and the pop bumpers read as one matched scoring set. Mirrors
+## the MUSHROOM_BUMPER pattern exactly: a 15th, hand-authored asset, deliberately NOT in the frozen
+## 13-entry ALL_MODELS manifest, asserted against its own const in test_kenney_models.gd instead of
+## the manifest list. target.gd needs no path literal: it reads KenneyModels.STANDUP_TARGET_MODEL,
+## instances it as the "TargetVisual" child (a BAKED_VISUAL_MARKERS exemption in scoring_reskin.gd
+## spares the baked rings from the flat scoring accent), footprint tracks POST_RADIUS.
+const BULLSEYE_TARGET: String = "res://assets/models/bullseye_target.glb"
+
+## obstacle_post role (standup-target bank candidates). OBSTACLE_BLOCK / DIAMOND / TRIANGLE are kit
+## fallback candidates only; the chosen in-field bank mesh is BULLSEYE_TARGET (see
+## STANDUP_TARGET_MODEL below).
 const OBSTACLE_BLOCK: String = "res://assets/kenney/baseline/models/obstacle-block.glb"
 const OBSTACLE_DIAMOND: String = "res://assets/kenney/baseline/models/obstacle-diamond.glb"
 const OBSTACLE_TRIANGLE: String = "res://assets/kenney/baseline/models/obstacle-triangle.glb"
@@ -86,9 +106,11 @@ const CASTLE: String = "res://assets/kenney/baseline/models/castle.glb"
 ## (cap_overhang test). BUMP / BUMP_WALLS / HILL_ROUND stay in the library as fallback candidates.
 const POP_BUMPER_MODEL: String = MUSHROOM_BUMPER
 
-## STANDUP TARGET BANK (all THREE share one mesh). OBSTACLE_BLOCK reads as a clean standup post, and
-## a bank of identical blocks reads as a set. The target keeps its "Deflector" scoring marker.
-const STANDUP_TARGET_MODEL: String = OBSTACLE_BLOCK
+## STANDUP TARGET BANK (all THREE share one mesh): the custom BULLSEYE_TARGET, which reads as a real
+## archery-style scoring target at play zoom (the read OBSTACLE_BLOCK failed on: "just round
+## circles"). The target keeps its "Deflector" scoring marker. OBSTACLE_BLOCK / DIAMOND / TRIANGLE
+## stay in the library as fallback kit candidates.
+const STANDUP_TARGET_MODEL: String = BULLSEYE_TARGET
 
 ## PERIMETER WALLS / BORDER RAILS / RAIL BRACKETS. BLOCK_BORDERS is the bordered wall block.
 const WALL_BORDER_MODEL: String = BLOCK_BORDERS
