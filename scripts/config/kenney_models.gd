@@ -38,18 +38,19 @@ const BUMP: String = "res://assets/kenney/baseline/models/bump.glb"
 const BUMP_WALLS: String = "res://assets/kenney/baseline/models/bump-walls.glb"
 const HILL_ROUND: String = "res://assets/kenney/baseline/models/hill-round.glb"
 
-## CUSTOM-AUTHORED mushroom-cap pop bumper (SLICE "Kenney baseline COMPLETION", FRONT 1 - the named
-## failure "the mushrooms are just squares"). A low-poly Kenney-style domed cap OVERHANGING a post,
-## authored from scratch in headless Blender (shade_flat, no bevels, 16-20 segments, flat Kenney
-## colours baked in), silhouette per the retired custom bumper, license-clean (pinball-parts used
-## as proportion reference only). Modelled at sane real proportions with the CAP as the widest XZ
-## span (pop_bumper._derive_scale fits that to the cap diameter) and the post base seated at Y=0 on
-## export (base_seat_y keeps it from sinking below the field). pop_bumper.gd binds this via
-## POP_BUMPER_MODEL and needs NO code change - it already reads KenneyModels.POP_BUMPER_MODEL, wears
-## the BumperVisual marker, overhangs the collider, and pulses the albedo hit-flash.
-## SCAFFOLD STATE: the .glb is authored by the asset-builder in FRONT 1. The path is stable NOW so
-## the test-builder can target it; POP_BUMPER_MODEL points at BUMP below until the asset lands, then
-## the asset-builder flips that ONE const to MUSHROOM_BUMPER (see the WHY on POP_BUMPER_MODEL).
+## CUSTOM-AUTHORED mushroom-cap pop bumper - the SHIPPED in-field bumper mesh (POP_BUMPER_MODEL
+## binds here). It replaces the blocky BUMP kit mesh that failed the eyeball test ("the mushrooms
+## are just squares"): a low-poly domed RED cap that clearly OVERHANGS a narrow grey stem, wrapped
+## by a light ring band so it reads as a pop bumper from a steep top-down gameplay camera. Modelled
+## from scratch in the flat faceted Kenney style - shade_flat on every face, no bevels, 18 segments
+## on the round parts, flat baked colours (cap red near 0.86/0.16/0.16, light-grey ring, neutral
+## grey post). The pinball-parts set was a PROPORTION reference only, so this mesh is original and
+## license-clean. Real proportions: cap diameter about 1.04 units, height about 0.52, with the CAP
+## as the widest XZ span so uniform_scale_to_span fits the cap to the collider diameter, and the
+## stem base seated at Y=0 on export so base_seat_y keeps it from sinking below the field.
+## pop_bumper.gd needs NO code change: it reads KenneyModels.POP_BUMPER_MODEL, wears the
+## BumperVisual marker, overhangs the collider, and pulses the albedo hit-flash. BUMP / BUMP_WALLS
+## / HILL_ROUND stay as fallback kit candidates only.
 const MUSHROOM_BUMPER: String = "res://assets/kenney/baseline/models/mushroom_bumper.glb"
 
 ## obstacle_post role (standup-target bank candidates). OBSTACLE_BLOCK is the chosen bank mesh (see
@@ -79,14 +80,11 @@ const CASTLE: String = "res://assets/kenney/baseline/models/castle.glb"
 # one designed object (a matched set), not random clutter. Element scripts reference THESE, never a
 # raw path literal, so a mesh choice is changed in exactly one place.
 
-## POP BUMPERS (all THREE share one mesh). FRONT 1 target: the custom MUSHROOM_BUMPER, which reads
-## as a mushroom/dome pop bumper instantly at play zoom (the read Andrew's Gate-0 rejected on BUMP:
-## "the mushrooms are just squares"). The cap overhangs the contact post so the ball tucks under the
-## lip (cap_overhang test). SCAFFOLD: this still points at BUMP so the suite stays green until the
-## authored .glb lands; the asset-builder flips it to MUSHROOM_BUMPER as the final FRONT-1 step (a
-## one-line change, no other file edits - pop_bumper.gd reads this const). BUMP / BUMP_WALLS /
-## HILL_ROUND stay as fallback candidates judged by the same rendered-at-gameplay-zoom test.
-const POP_BUMPER_MODEL: String = BUMP
+## POP BUMPERS (all THREE share one mesh): the custom MUSHROOM_BUMPER, which reads as a domed
+## mushroom pop bumper instantly at play zoom (the read the earlier BUMP kit mesh failed on: "the
+## mushrooms are just squares"). The cap overhangs the contact post so the ball tucks under the lip
+## (cap_overhang test). BUMP / BUMP_WALLS / HILL_ROUND stay in the library as fallback candidates.
+const POP_BUMPER_MODEL: String = MUSHROOM_BUMPER
 
 ## STANDUP TARGET BANK (all THREE share one mesh). OBSTACLE_BLOCK reads as a clean standup post, and
 ## a bank of identical blocks reads as a set. The target keeps its "Deflector" scoring marker.
