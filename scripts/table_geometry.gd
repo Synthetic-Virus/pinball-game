@@ -249,9 +249,14 @@ static func _build_borders(parent: Node3D) -> void:
 		_add_border_segment(parent, outline[i], outline[i + 1], "Border%d" % i)
 
 	# Launch-lane divider at +LANE_INNER_X (the inner right wall forming the shooter lane, lane =
-	# li..hw). It STOPS short of the top so the lane is OPEN and a launched ball curves into the field.
+	# li..hw). It STOPS short of the top (TableConfig.LANE_DIVIDER_TOP_Z, the single source of truth
+	# also used by LAUNCH_REACHED_PLAY_Z's soft-lock-watchdog derivation) so the lane is OPEN and a
+	# launched ball curves into the field.
 	_add_border_segment(
-		parent, Vector3(li, 0.0, -hl + 9.0), Vector3(li, 0.0, hl - 2.0), "LaneDivider"
+		parent,
+		Vector3(li, 0.0, TableConfig.LANE_DIVIDER_TOP_Z),
+		Vector3(li, 0.0, hl - 2.0),
+		"LaneDivider"
 	)
 
 
