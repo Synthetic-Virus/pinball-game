@@ -31,6 +31,17 @@ extends Node
 ## gameplay-programmer copies the .ogg files, tunes the mix (AudioLibrary.EVENT_VOLUME_DB), confirms
 ## the score-blip policy, and adds the UI-click call sites in layout_editor.gd. The test-builder
 ## fills the wiring tests. HOUSE STYLE: typed GDScript, snake_case, WHY comments, lines <= 100.
+##
+## MUSIC ON/OFF (Gate 0 play-test follow-up): a player-facing toggle, distinct from set_muted, that
+## turns ONLY the music bed off, persisted at user:// so the choice survives a reload/relaunch. See
+## set_music_enabled / is_music_enabled and the MUSIC PREFERENCE section near the bottom of this
+## file. The play-bar button in layout_editor.gd is the only caller.
+
+## user:// ConfigFile path the music preference is persisted to. user:// is a real file on desktop
+## and an IndexedDB-backed virtual filesystem on the web export, so this works unmodified in both.
+const MUSIC_CONFIG_PATH: String = "user://audio_settings.cfg"
+const MUSIC_CONFIG_SECTION: String = "audio"
+const MUSIC_CONFIG_KEY: String = "music_enabled"
 
 ## The per-event SFX voices, keyed by AudioLibrary event StringName. Built in _ready. Typed as Node
 ## values in the Dictionary (GDScript Dictionaries are untyped-valued) but every entry is an
@@ -48,12 +59,20 @@ var _gameplay_active: bool = false
 ## table can be silenced without tearing down the voices. Kept simple; no per-bus routing here.
 var _muted: bool = false
 
+## Player-facing MUSIC on/off (the play-bar toggle button), distinct from _muted: muting silences
+## every voice including impacts, while this gates ONLY the music bed. Defaults true (music plays
+## out of the box, matching the existing default); false only after the player explicitly turns it
+## off. Loaded from user:// in _ready and persisted on every change - see _load_music_preference /
+## _save_music_preference.
+var _music_enabled: bool = true
+
 ## Last score seen by on_score_changed, so the subtle score blip fires only on an INCREASE (never on
 ## the score_changed(0) that GameFlow emits at game start / restart). See on_score_changed.
 var _last_score: int = 0
 
 
 func _ready() -> void:
+	_load_music_preference()  ## before _build_music so a saved "off" is already in effect
 	_build_voices()
 	_build_music()
 
@@ -111,9 +130,12 @@ func play_event(event: StringName) -> void:
 ## Start (or restart) the looping music bed. `bed` selects which loop (defaults to the DESIGN
 ## recommendation, AudioLibrary.MUSIC_BED_DEFAULT). Idempotent-ish: re-calling with the same bed
 ## while
-## it is already playing does nothing so a re-entry does not stutter the music. STABLE SIGNATURE.
+## it is already playing does nothing so a re-entry does not stutter the music. A no-op while muted
+## OR while the player has turned music off (_music_enabled) - both gates are respected here so
+## every caller (set_gameplay_active, set_muted's unmute branch, set_music_enabled) gets the same
+## behaviour for free. STABLE SIGNATURE.
 func start_music(bed: String = AudioLibrary.MUSIC_BED_DEFAULT) -> void:
-	if _muted or _music == null:
+	if _muted or not _music_enabled or _music == null:
 		return
 	var stream: AudioStream = AudioLibrary.load_stream(bed)
 	if stream == null:
@@ -148,6 +170,30 @@ func set_muted(muted: bool) -> void:
 		stop_music()
 	elif _gameplay_active:
 		start_music()
+
+
+## Player-facing MUSIC on/off (the play-bar toggle button). Distinct from set_muted: this touches
+## ONLY the music bed, never the SFX voices, so turning music off still leaves bumpers/targets/
+## flippers/etc audible. OFF stops the bed immediately; ON mirrors set_muted's own unmute branch and
+## restarts the bed ONLY while a ball is in play (toggling music on from the main menu should not
+## start a bed that set_gameplay_active would otherwise be gating off). The choice is saved to
+## user:// immediately so it survives a reload. STABLE SIGNATURE (layout_editor.gd's play-bar toggle
+## calls this).
+func set_music_enabled(on: bool) -> void:
+	_music_enabled = on
+	_save_music_preference()
+	if on:
+		if _gameplay_active:
+			start_music()
+	else:
+		stop_music()
+
+
+## True while the player has music turned ON (independent of whether the bed is currently sounding -
+## e.g. still true while paused at the in-play menu). The play-bar toggle reads this once at build
+## time to draw its correct initial on/off state. STABLE SIGNATURE.
+func is_music_enabled() -> bool:
+	return _music_enabled
 
 
 ## Mark play active/inactive. table.set_play_view drives this: true gates the flipper thwack ON and
@@ -246,3 +292,35 @@ func _physics_process(_delta: float) -> void:
 ## test that has not loaded the input map from erroring.
 func _flipper_action_just_pressed(action: StringName) -> bool:
 	return InputMap.has_action(action) and Input.is_action_just_pressed(action)
+
+
+# --- MUSIC PREFERENCE (persisted at user://, Gate 0 play-test follow-up) -------------------------
+# The player's music on/off choice needs to survive a reload (closing and reopening the browser tab,
+# or relaunching a desktop build), so it is not just an in-memory flag. ConfigFile at user:// is the
+# simplest engine-native key/value store that works the same on every export target: a real file on
+# desktop/native, and an IndexedDB-backed virtual filesystem on the web export (Godot handles that
+# translation - this code never touches the browser storage APIs directly, unlike layout_editor's
+# JavaScriptBridge localStorage calls for the table layout.
+
+
+## Load the saved music on/off preference from user:// (ConfigFile), called once from _ready before
+## the very first possible start_music() call. A missing file (first run, nothing saved yet) or any
+## read error (e.g. a web browser blocking storage in private mode) both leave _music_enabled at its
+## true default - this must never crash or block _ready, so any non-OK load result is treated as
+## "no preference saved" rather than an error to surface.
+func _load_music_preference() -> void:
+	var cfg := ConfigFile.new()
+	var err: Error = cfg.load(MUSIC_CONFIG_PATH)
+	if err == OK:
+		_music_enabled = bool(cfg.get_value(MUSIC_CONFIG_SECTION, MUSIC_CONFIG_KEY, true))
+
+
+## Save the current music on/off preference to user:// (ConfigFile). Called every time
+## set_music_enabled changes the value. Best-effort: on the web export the write can fail (private
+## browsing, storage quota, IndexedDB not yet ready) - a failed save just means the toggle will not
+## be remembered next session, which degrades gracefully instead of erroring, so the return Error is
+## intentionally not checked further here.
+func _save_music_preference() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value(MUSIC_CONFIG_SECTION, MUSIC_CONFIG_KEY, _music_enabled)
+	cfg.save(MUSIC_CONFIG_PATH)
