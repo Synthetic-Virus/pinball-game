@@ -43,7 +43,7 @@ extends Node3D
 ##   Flipper (this Node3D, sits AT the pivot - table.gd places it)
 ##     +-- FlipperBody (AnimatableBody3D, KINEMATIC_OBSTACLES layer, sync_to_physics on)
 ##          +-- CollisionShape3D  (the tapered convex-hull bat)
-##          +-- FlipperMesh       (procedural 2-tone black-body / white-rubber-top bat - the visual)
+##          +-- FlipperMesh       (procedural 2-tone black-body / lighter-rubber-top bat - the visual)
 ##   The swing angle is integrated + applied to FlipperBody every physics frame in _physics_process.
 ##
 ## COORDINATE CONVENTION (local to this Flipper node, which lives on the tilted Playfield):
@@ -135,11 +135,12 @@ const BAT_FRICTION: float = 0.7
 
 ## --- VISIBLE BAT MESH (procedural, SLICE "Kenney 3D asset integration", 2026-07) ----------------
 ## The VISIBLE bat is the PROCEDURAL 2-tone ArrayMesh (FlipperMesh) built below from the SAME
-## tapered stadium outline as the collider - black body + white rubber top. The flipper_bat.glb was
-## RETIRED this slice: the low-poly procedural bat is the primary (and only) visual, so there is no
-## asset load to fail and no fallback branch to maintain. The collider, drive, material, and bounce
-## are untouched - this only changed WHICH mesh renders (the procedural one, which the collider and
-## the keep-green rubber-top / shape tests already agree with by name). See _build_bat_mesh.
+## tapered stadium outline as the collider - black body + a distinctly lighter rubber top. The
+## flipper_bat.glb was RETIRED this slice: the low-poly procedural bat is the primary (and only)
+## visual, so there is no asset load to fail and no fallback branch to maintain. The collider,
+## drive, material, and bounce are untouched - this only changed WHICH mesh renders (the procedural
+## one, which the collider and the keep-green rubber-top / shape tests already agree with by name).
+## See _build_bat_mesh.
 
 ## --- BAT SHAPE (tapered rounded "stadium" - UNCHANGED by the drive rebuild) ----------------------
 ## The bat is a TAPERED ROUNDED "stadium" form: FAT at the pivot, narrowing to a smaller ROUNDED tip
@@ -179,10 +180,24 @@ const TAPER_START_FRACTION: float = 0.55
 const ROUND_SEGMENTS: int = 4
 
 ## --- 2-TONE GRAY-BOX MATERIAL (no art dependency) -----------------------------------------------
-## BLACK body + WHITE rubber TOP surface (a 2-tone gray-box look). The white top is a VISUAL cue for
-## the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial, unchanged).
+## BLACK body + a distinctly LIGHTER rubber TOP surface (a 2-tone gray-box look). The lighter top is
+## a VISUAL cue for the rubber surface; the rubber FEEL stays BAT_BOUNCE 0.70 (the PhysicsMaterial,
+## unchanged). The top's exact tone is tuned for legibility against the table's white walls/rails at
+## PLAY-screen zoom (see RUBBER_TOP_COLOR's own WHY comment); the two-tone CONTRACT is "dark body,
+## clearly lighter top", not a pinned hue.
 const BODY_COLOR: Color = Color(0.05, 0.05, 0.05)  ## Near-black bat body.
-const RUBBER_TOP_COLOR: Color = Color(0.92, 0.92, 0.92)  ## White rubber top cap.
+## Rubber top cap colour. WHY 0.62/0.65/0.70, NOT near-white (producer SEND_BACK, PR #49): at the
+## PLAY-screen near-top-down camera the bat's dominant visible surface IS this top cap, and the old
+## Color(0.92, 0.92, 0.92) sat almost the same lightness as Palette.WALLS (0.93, 0.94, 0.96) and
+## Palette.RAILS (0.87, 0.90, 0.94), so the bat visually merged into the adjacent lane guides -
+## exactly the legibility main's medium-blue .glb bat did not have. A mid-light cool grey clears the
+## walls/rails by relative luminance (sRGB) delta >= 0.15 (measured ~0.87 walls / ~0.78 rails vs
+## ~0.38 this top, delta ~0.40-0.49) while staying clearly LIGHTER than the near-black BODY_COLOR
+## above (delta ~0.37), preserving the two-tone body/top contract as DATA, not by matching main's
+## hue. This is a COLOR-ONLY fix: the outline/hull/mesh-building functions below are untouched, so
+## the collider (which shares the same outline) cannot regress. Do not restore near-white here
+## without re-proving the luminance delta on a fresh artifact shot.
+const RUBBER_TOP_COLOR: Color = Color(0.62, 0.65, 0.70)  ## Mid-light cool-grey rubber top cap.
 ## Bat restitution: the RUBBER SLEEVE. WHY 0.70 KEPT from the old drive: restitution combines
 ## ADDITIVELY in this Jolt setup, clamped to 1.0. Against the steel ball (BALL_BOUNCE 0.15) the
 ## effective contact bounce is 0.15 + 0.70 = 0.85 (measured 0.846 = 84.8% rebound). The old

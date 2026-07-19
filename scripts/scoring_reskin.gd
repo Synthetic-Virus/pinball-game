@@ -31,26 +31,24 @@ static func apply(playfield: Node3D) -> void:
 	# One shared flat accent material reused across all scoring furniture.
 	var accent := Palette.flat_material(Palette.SCORING_ACCENT)
 	for node: Node3D in _scoring_nodes(playfield):
-		# DECISION 1 (gameplay-programmer, RESOLVED): the flat opaque accent DOES supersede the pop
-		# bumper's old cosmetic emission/alpha hit-flash - verified by construction, not by guess.
-		# table.gd's _build_dynamic_elements() add_child()s every pop bumper/slingshot/target under
-		# Playfield BEFORE table.gd calls TableReskin.apply(playfield) (that call is a final whole-table
-		# pass in table.gd _ready(), after both build phases, so it lands after every furniture
-		# add_child). Godot runs _ready() synchronously on add_child, so
-		# pop_bumper.gd's _install_art() -> _apply_blue_material() has already set its own translucent,
-		# emissive material_override on "BumperVisual" by the time this loop runs; _paint_subtree below
-		# sets material_override again on the same meshes, so the flat red accent is last-write and is
-		# what actually renders. That is also the right call on the design brief: the old hit-flash
-		# used emission (mat.emission_enabled = true) and alpha (transparency), both ruled out by
-		# must-feel #6 ("NO emission... flat albedo StandardMaterial3D ONLY"). The HUD score tick
-		# remains the hit feedback. pop_bumper.gd is a kick-family script (extends active_kicker.gd)
-		# and is FROZEN for this visual-only slice - editing it would break the git diff --stat
-		# visual-only proof - so its _flash_on_hit() tween keeps firing on every kick, but it now only
-		# mutates an orphaned material resource no mesh points at, so it has zero visible effect: a
-		# harmless leftover, not a bug this file can fix without touching a frozen file (flagged in
-		# BACKLOG.md as a follow-up cleanup for whoever next opens pop_bumper.gd). If a legible
-		# red-based pulse is wanted later, re-wire it on ALBEDO (never emission) inside pop_bumper.gd,
-		# reading the pulse colour from Palette.SCORING_ACCENT so there is still one source of truth.
+		# DECISION 1 (gameplay-programmer, RESOLVED; behaviour updated by commit 760742a): the flat
+		# opaque accent DOES supersede the pop bumper's own idle cap colour - verified by construction,
+		# not by guess. table.gd's _build_dynamic_elements() add_child()s every pop bumper/slingshot/
+		# target under Playfield BEFORE table.gd calls TableReskin.apply(playfield) (that call is a
+		# final whole-table pass in table.gd _ready(), after both build phases, so it lands after every
+		# furniture add_child). Godot runs _ready() synchronously on add_child, so pop_bumper.gd's
+		# _install_art() has already set its own flat, opaque material_override on "BumperVisual" by
+		# the time this loop runs; _paint_subtree below sets material_override again on the same
+		# meshes, so the flat red accent is last-write and is what actually renders at rest. pop_
+		# bumper.gd is NO LONGER FROZEN (commit 760742a rewired its hit-flash): _flash_on_hit() now
+		# isolates a PRIVATE copy of the mesh's LIVE material_override (whatever ScoringReskin most
+		# recently painted there, read at flash time via meshes[0].material_override, not a stale
+		# handle captured at _ready) and pulses that copy's albedo from FLASH_PEAK_ALBEDO back to
+		# FLASH_REST_ALBEDO (Palette.SCORING_ACCENT) on the physics clock, then re-installs it as the
+		# mesh's material_override. So the flash renders correctly on top of whatever ScoringReskin
+		# painted, with zero coupling back into this file (pop_bumper.gd never touches ScoringReskin's
+		# shared accent object, only its own private duplicate) - DESIGN must-feel #4 (a hit flash must
+		# never stop flashing) is satisfied; no BACKLOG.md follow-up remains for this defect.
 		#
 		# DECISION 2 (gameplay-programmer, RESOLVED for this slice): all three scoring types keep the
 		# single shared SCORING_ACCENT. The locked design direction names one hue for "the scoring
