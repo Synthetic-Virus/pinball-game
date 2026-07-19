@@ -143,7 +143,11 @@ const FLIPPER_UP_ANGLE: float = 0.50  ## was 0.15 (~9deg): too shallow, the bat 
 ## NOTE (rest angle raised -0.55 -> -0.30, 2026): a PERKIER (less drooped) rest makes the bat reach
 ## LESS far down-table, so 23.66 is now EXTRA conservative and the drain stays safely clear - kept as
 ## a fixed pessimistic bound rather than re-derived (re-deriving would move the drain and needs the
-## local BUG-023 test to confirm). RE-DERIVE this if the rest is ever set MORE drooped than -0.55.
+## local BUG-023 test to confirm). RE-DERIVE this if ANY input to the bat's down-table reach grows:
+## a MORE drooped FLIPPER_REST_ANGLE (than -0.30), a longer FLIPPER_LENGTH, or a FLIPPER_PIVOT_Z
+## moved further down-table (the old note named only the rest angle - incomplete, QA BUG-051).
+## test_world_scale now measures the LIVE instanced bat reach against BOTH this bound and the
+## drain edge, so a stale value here is caught headlessly instead of left to a hand-check.
 const FLIPPER_BAT_MAX_Z: float = 23.66
 ## Clearance the drain's up-table edge keeps ABOVE FLIPPER_BAT_MAX_Z. Half a ball diameter is a
 ## comfortable, readable buffer (a ball whose CENTER is still above the bat zone cannot trip the
@@ -230,8 +234,8 @@ const DRAIN_Z: float = FLIPPER_BAT_MAX_Z + DRAIN_BAT_CLEARANCE + DRAIN_DEPTH * 0
 ## ROOT CAUSE this replaces: the drain previously spanned the WHOLE open-center width
 ## (x in [-HALF_WIDTH, LANE_INNER_X], ~26.5 units). DESIGN says "open CENTER drain between/below the
 ## flippers", but a volume that wide also covered the X under the flipper BODIES (the pivots sit at
-## +/-FLIPPER_PIVOT_SPREAD = +/-7.2). The BUG-023 fix only cleared the drain in Z (up-table edge
-## below the bats), but a ball seated in the catch zone at the LEFT pivot X (-7.2) is NOT on the
+## +/-FLIPPER_PIVOT_SPREAD = +/-4.5). The BUG-023 fix only cleared the drain in Z (up-table edge
+## below the bats), but a ball seated in the catch zone at the LEFT pivot X (-4.5) is NOT on the
 ## angled bat there (near the pivot the bat sits up at z~PIVOT_Z=20, far up-table of the ball),
 ## so it rolls straight down-table and the over-wide drain swallowed it - the exact core-loop break
 ## behavioral oracle (a real ball dropped at z~23.06) still caught after the Z-only math fix.
@@ -533,10 +537,9 @@ const KICK_IMPULSE_SPEED: float = 55.0
 const KICK_MIN_OUTGOING_SPEED: float = 40.0
 ## KICK_MAX_OUTGOING_SPEED: the CCD-SAFE CAP. The post-kick speed is clamped to this so a stacked
 ## kick (ball already fast, then kicked) can never exceed the speed the no-tunneling stress tests
-## prove safe. The stress tests fire at >= 2x LAUNCH_SPEED_MAX (180); this cap (well under that)
-## keeps
-## every kicked ball strictly inside the proven-safe band. The physics-programmer owns this
-## guarantee.
+## prove safe. The stress tests fire at >= 2x LAUNCH_SPEED_MAX (232, at LAUNCH_SPEED_MAX 116); this
+## cap (well under that) keeps every kicked ball strictly inside the proven-safe band. The
+## physics-programmer owns this guarantee.
 const KICK_MAX_OUTGOING_SPEED: float = 120.0
 ## BALL_MAX_CCD_SAFE_SPEED: the general CCD-safe ceiling for the BALL's speed after ANY contact, in
 ## world units/s. SAME numeric cap as KICK_MAX_OUTGOING_SPEED (one source of truth so the two cannot
