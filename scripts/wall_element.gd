@@ -1,5 +1,5 @@
 extends StaticBody3D
-## WallElement - a basic placeable WALL the ball bounces off, built from our custom wall.glb.
+## WallElement - a basic placeable WALL the ball bounces off, wearing the Kenney block-borders mesh.
 ##
 ## OWNERSHIP: physics-programmer owns the collider + bounce; lead scaffolds the asset install. The
 ## full draw-along-curve / closed-solid / tunnel-tool wall EDITOR is OUT OF SCOPE for this slice
@@ -11,16 +11,18 @@ extends StaticBody3D
 ## than the ball diameter so the ball cannot ride over it, and the ball's continuous_cd plus the
 ## static box mean no tunneling even at >= 2x LAUNCH_SPEED_MAX (proven by the stress test).
 ##
-## VISUAL: the imported wall.glb (dark Wall_Body + blue translucent Wall_Cap) is instanced as the
-## visible art, scaled by a factor DERIVED from the collider length (never hardcoded), parented to
-## this body so it follows the box. If the .glb fails to import, the gray-box mesh stays so the wall
-## never vanishes.
+## VISUAL (SLICE "Kenney 3D asset integration", 2026-07-19): the imported Kenney Minigolf-Kit
+## block-borders.glb (KenneyModels.WALL_BORDER_MODEL), the designer's locked wall-border role mesh,
+## replaces the retired custom wall.glb. It is instanced as the visible art, scaled by a factor
+## DERIVED from the collider length (never hardcoded) and seated on the surface, parented to this
+## body so it follows the box. On a failed .glb import the gray-box mesh stays so the wall never
+## vanishes. TableReskin paints this the calm white frame colour as a final whole-table pass.
 ##
 ## STABLE CONTRACT (table.gd / tests depend on these):
 ##   func configure() -> void   # pull dimensions/material from TableConfig (called by table.gd).
 
-## The imported wall art (custom low-poly, matched blue-cap family).
-const WALL_ASSET_PATH: String = "res://assets/models/wall.glb"
+## The imported wall art: the Kenney block-borders role mesh (one source of truth in KenneyModels).
+const WALL_ASSET_PATH: String = KenneyModels.WALL_BORDER_MODEL
 
 ## The node name the imported .glb visual is instanced under (tests resolve it by this name).
 const WALL_VISUAL_NODE_NAME: String = "WallVisual"
@@ -81,11 +83,11 @@ func _build_collider_and_graybox() -> void:
 	add_child(gray)
 
 
-## Instance the imported wall.glb as the visible art and hide the gray box. COPIES the proven
-## pop_bumper.gd / slingshot.gd install: load the path (or test override), bail to the gray box on
-## any failure, instance the WHOLE subtree under a named child, scale it from the merged AABB to the
-## collider length (DERIVED, not a literal), hide the gray box on success. The art is pure mesh - it
-## is never a collider.
+## Instance the imported Kenney block-borders mesh as the visible art and hide the gray box. COPIES
+## the proven pop_bumper.gd / target.gd install: load the path (or test override), bail to the gray
+## box on any failure, instance the WHOLE subtree under a named child, scale it from the merged AABB
+## to the collider length (DERIVED, not a literal), seat the base on the surface, hide the gray box
+## on success. The art is pure mesh - it is never a collider.
 func _install_art() -> void:
 	var path: String = WALL_ASSET_PATH if _asset_path_override == "" else _asset_path_override
 	if path == "" or not ResourceLoader.exists(path):
@@ -98,42 +100,22 @@ func _install_art() -> void:
 	add_child(_visual)
 	var factor: float = _derive_scale(_visual)
 	_visual.scale = Vector3(factor, factor, factor)
+	# Seat the wall BASE at the box bottom (the box is centred on the element origin, so its base is
+	# at -_height/2) so an off-origin Kenney mesh cannot sink below the field (the burned integration
+	# gotcha). Measured after the scale is set, never hardcoded (KenneyModels.base_seat_y).
+	_visual.position.y = KenneyModels.base_seat_y(_visual, -_height * 0.5)
 	var gray: Node = get_node_or_null("WallGrayBox")
 	if gray != null:
 		gray.visible = false
 
 
 ## Uniform scale so the imported model's LONG axis matches the collider length. Measured from the
-## merged mesh AABB (independent oracle on the scale), never hardcoded: re-exporting the model at a
-## different size self-corrects. The structural test asserts the scale TRACKS the collider length.
+## merged mesh AABB (KenneyModels.merged_aabb - the shared, unit-tested helper), never hardcoded:
+## re-exporting the model at a different size self-corrects. The structural test
+## asserts the scale TRACKS the collider length.
 func _derive_scale(root: Node3D) -> float:
-	var box: AABB = _merged_aabb(root)
+	var box: AABB = KenneyModels.merged_aabb(root)
 	var longest: float = maxf(box.size.x, maxf(box.size.y, box.size.z))
 	if longest < 0.0001:
 		return 1.0
 	return _length / longest
-
-
-## Merge every descendant MeshInstance3D's AABB into root-local space (copy of the proven helper).
-func _merged_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first: bool = true
-	for mi: MeshInstance3D in _mesh_instances(root):
-		var local: Transform3D = TableConfig.relative_xform(root, mi)
-		var a: AABB = local * mi.get_aabb()
-		if first:
-			out = a
-			first = false
-		else:
-			out = out.merge(a)
-	return out
-
-
-## Every MeshInstance3D under `node` (recursive).
-func _mesh_instances(node: Node) -> Array:
-	var found: Array = []
-	if node is MeshInstance3D:
-		found.append(node)
-	for c: Node in node.get_children():
-		found.append_array(_mesh_instances(c))
-	return found

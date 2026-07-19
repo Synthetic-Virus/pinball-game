@@ -64,6 +64,19 @@ const DEFLECTOR_BOUNCE: float = 0.8
 ## A post should turn the ball away, not grip it like a flipper bat.
 const DEFLECTOR_FRICTION: float = 0.2
 
+## STANDUP TARGET art (SLICE "Kenney 3D asset integration", 2026-07-19): the visible post is the
+## Kenney Minigolf-Kit obstacle-block.glb (KenneyModels.STANDUP_TARGET_MODEL), the designer's locked
+## standup-bank role mesh, instanced as a CHILD OF THE DEFLECTOR so it reads as the solid post the
+## ball bounces off. The architecture handoff keeps the "Deflector" scoring MARKER unchanged (no new
+## "*Visual" marker name) so ScoringReskin still finds the target and paints the whole subtree - the
+## obstacle-block included - the red scoring accent. VISUAL ONLY: the ball always collides with the
+## primitive CylinderShape3D (POST_RADIUS); it is never a collider. On a failed import, the gray-box
+## cylinder on the Area3D root stays visible (the target never vanishes).
+const TARGET_ASSET_PATH: String = KenneyModels.STANDUP_TARGET_MODEL
+
+## The node name the imported obstacle-block visual is instanced under (child of the Deflector).
+const TARGET_VISUAL_NODE_NAME: String = "TargetVisual"
+
 @export var points: int = 100  ## Flat value per hit (placeholder, DESIGN.md scoring).
 
 var _ball: RigidBody3D = null
@@ -155,6 +168,42 @@ func _build_deflector() -> void:
 	deflector.add_child(col)
 
 	add_child(deflector)
+
+	# Swap in the Kenney obstacle-block cap as the visible post (VISUAL ONLY - the collider above is
+	# the sole physics shape). Done after the deflector is in the tree so the mesh AABB measures.
+	_install_target_art(deflector)
+
+## Instance the Kenney obstacle-block as the visible post under the Deflector, scaled to the post
+## footprint and seated on the surface. COPIES the proven pop_bumper.gd / wall_element.gd install:
+## load the path, bail to the gray box on any failure, instance the WHOLE subtree under a named
+## child, scale from the merged AABB to the post diameter (DERIVED, not a literal), seat the base at
+## the surface. The art is pure mesh - it is never a collider (the Deflector's CylinderShape3D is).
+func _install_target_art(deflector: StaticBody3D) -> void:
+	if TARGET_ASSET_PATH == "" or not ResourceLoader.exists(TARGET_ASSET_PATH):
+		return  ## fallback: the gray-box cylinder on the root stays visible
+	var scene: Resource = load(TARGET_ASSET_PATH)
+	if scene == null or not (scene is PackedScene):
+		return  ## fallback (bad/absent asset)
+	var visual: Node3D = (scene as PackedScene).instantiate()
+	visual.name = TARGET_VISUAL_NODE_NAME
+	deflector.add_child(visual)
+	var factor: float = _derive_scale(visual)
+	visual.scale = Vector3(factor, factor, factor)
+	# Seat the post BASE at the surface (the Deflector origin, Y = 0) so an off-origin mesh cannot
+	# sink below the field (the burned integration gotcha). Measured after the scale is set.
+	visual.position.y = KenneyModels.base_seat_y(visual, 0.0)
+
+## Uniform scale so the obstacle-block's top-down FOOTPRINT (the wider of X/Z) matches the post
+## diameter (2 * POST_RADIUS), so the visible post tracks the collider the player bounces off.
+## Measured from the merged mesh AABB (KenneyModels.merged_aabb), never hardcoded: a re-exported
+## model self-corrects and no scale literal is typed. The structural test asserts the footprint
+## tracks POST_RADIUS.
+func _derive_scale(visual: Node3D) -> float:
+	var box: AABB = KenneyModels.merged_aabb(visual)
+	var footprint: float = maxf(box.size.x, box.size.z)
+	if footprint < 0.0001:
+		return 1.0
+	return (POST_RADIUS * 2.0) / footprint
 
 func _on_body_entered(body: Node) -> void:
 	# Guard: only the tracked ball matters. Any other physics body is silently ignored.

@@ -23,26 +23,38 @@ extends "res://scripts/active_kicker.gd"
 ## and _build_detector_and_mesh can read a single resolved value. The detector is built one
 ## BALL_RADIUS
 ## larger than this so body_entered fires as the ball arrives.
-## POP BUMPER art (custom low-poly model, SLICE "Custom low-poly asset integration", 2026-06-24).
-## The imported pop_bumper.glb is the matched-family stack of Bumper_Base + Bumper_Body + Bumper_Cap
-## (replacing the older borrowed bumper_body.glb). It is the visible mushroom, scaled by a factor
-## DERIVED from the collider radius (never a magic number) so the art follows the physics, and
-## rendered slightly WIDER than the collider (POP_BUMPER_CAP_OVERHANG) so the ball tucks under the
-## lid. If the .glb fails to import, the gray-box cylinder (_make_mesh) stays - the bumper never
-## vanishes. The whole .glb subtree (all three named parts) is instanced, so no part is dropped.
-const BODY_ASSET_PATH: String = "res://assets/models/pop_bumper.glb"
+## POP BUMPER art (SLICE "Kenney 3D asset integration", 2026-07-19): the imported visual is now the
+## Kenney Minigolf-Kit bump.glb (KenneyModels.POP_BUMPER_MODEL), the designer's locked bumper-cap
+## role mesh, replacing the retired custom pop_bumper.glb. It is the visible cap, scaled by a factor
+## DERIVED from the collider radius (never a magic number) and rendered slightly WIDER than the
+## collider (POP_BUMPER_CAP_OVERHANG) so the ball tucks under the lid, then seated at the surface so
+## an off-origin mesh cannot sink below the field. If the .glb fails to import, the gray-box
+## cylinder (_make_mesh) stays - the bumper never vanishes; the whole subtree is instanced.
+## The mesh is VISUAL ONLY - the ball always collides with the primitive CylinderShape3D.
+const BODY_ASSET_PATH: String = KenneyModels.POP_BUMPER_MODEL
+
+## The rest (idle) albedo the flash eases back to: the shared scoring accent (Palette single source
+## of truth). Named so the flash reads it once, not a scattered literal.
+const FLASH_REST_ALBEDO: Color = Palette.SCORING_ACCENT
+## The peak flash albedo: a brightened near-white red pop, still fully opaque and emission-free
+## (must-feel #6: albedo is the only channel that renders in the web build). The flash eases from
+## this back to FLASH_REST_ALBEDO over FLASH_FADE_S.
+const FLASH_PEAK_ALBEDO: Color = Color(1.0, 0.72, 0.68)
+## Flash ease-back duration (seconds). Long enough to read as a soft pulse (not a strobe) AND to
+## stay visibly off-rest across the hit-flash test's post-kick sampling window (it samples the
+## rendered albedo after the kick lands); on the physics clock so the sampling is deterministic.
+const FLASH_FADE_S: float = 0.6
 
 var _radius: float = TableConfig.POP_BUMPER_RADIUS
 var _height: float = TableConfig.POP_BUMPER_HEIGHT
 
 var _asset_path_override: String = ""  ## test seam: force a bad path to drive the fallback branch
 
-## The blue translucent-plastic material applied to the imported bumper, kept as a handle so the
-## hit-flash can pulse its emission. Same family blue as the posts/flippers. Emission idles at 0 and
-## flashes briefly when the bumper is struck - a SUBTLE light, not a strobe (developer's note).
-var _bumper_mat: StandardMaterial3D = null
-## The rest (idle) albedo, captured so the hit-flash can brighten the albedo and ease back to it.
-var _rest_albedo: Color = Color(0.10, 0.30, 0.90, 0.85)
+## The private per-bumper flash material, lazily isolated the first time this bumper is struck (see
+## _flash_on_hit). ScoringReskin paints ONE shared accent material across ALL scoring furniture; if
+## the flash mutated that shared object it would pulse the whole table at once, so we duplicate it
+## into a private copy and pulse only this bumper's meshes. Null until the first kick.
+var _flash_mat: StandardMaterial3D = null
 
 
 ## Pull this bumper's geometry + score from TableConfig. table.gd calls this after instancing,
@@ -103,111 +115,114 @@ func _make_mesh() -> MeshInstance3D:
 	return mesh_instance
 
 
-## After the base builds the body/detector/gray-box mesh, swap in the imported mushroom art.
+## After the base builds the body/detector/gray-box mesh, swap in the imported Kenney cap art.
 ## super._ready() must run first so KickerMesh exists to hide.
 func _ready() -> void:
 	super._ready()
 	_install_art()
+	# Wire the hit-flash on EVERY bumper, whether the Kenney cap loaded or the gray-box fallback
+	# stayed - the flash pulses whichever mesh actually renders (see _flash_on_hit). Connecting here
+	# (not inside _install_art, which returns early on a load failure) keeps the flash working on the
+	# gray-box too (DESIGN must-feel #4, hard constraint - the flash must never stop firing).
+	if not kicked.is_connected(_flash_on_hit):
+		kicked.connect(_flash_on_hit)
 
 
-## Load the mushroom body+cap as the visible art (scaled to overhang the collider) and hide the
-## gray-box cylinder. Any load failure leaves the gray-box mesh visible (the bumper never vanishes).
+## Load the Kenney bump.glb cap as the visible art (scaled to overhang the collider, seated at the
+## surface) and hide the gray-box cylinder. Any load failure leaves the gray-box mesh visible (the
+## bumper never vanishes). Uses the shared KenneyModels measure/seat helpers so the scale/seat math
+## has one correct implementation, not a per-element copy.
 func _install_art() -> void:
 	var body_path: String = BODY_ASSET_PATH if _asset_path_override == "" else _asset_path_override
 	var body_scene: Resource = load(body_path)
 	if body_scene == null or not (body_scene is PackedScene):
 		return  ## fallback: the gray-box cylinder from _make_mesh stays visible
-	var visual: Node3D = body_scene.instantiate()
+	var visual: Node3D = (body_scene as PackedScene).instantiate()
 	visual.name = "BumperVisual"
 	add_child(visual)
 	var factor: float = _derive_scale(visual)
 	visual.scale = Vector3(factor, factor, factor)
+	# Seat the cap BASE on the playfield surface (the element origin, Y = 0) so an off-origin Kenney
+	# mesh cannot sink below the field (the burned integration gotcha). Measured after the scale is
+	# set, never hardcoded (KenneyModels.base_seat_y).
+	visual.position.y = KenneyModels.base_seat_y(visual, 0.0)
 	var gray_box: Node = get_node_or_null("KickerMesh")
 	if gray_box != null:
-		gray_box.visible = false  ## the real mushroom replaces the placeholder cylinder
-	# Blue plastic look + a subtle light-up on hit. The base fires `kicked` on each contact.
-	_apply_blue_material(visual)
-	if not kicked.is_connected(_flash_on_hit):
-		kicked.connect(_flash_on_hit)
+		gray_box.visible = false  ## the real cap replaces the placeholder cylinder
+	# Scoring accent on the cap (the flash pulses from this / from ScoringReskin's accent at run time).
+	_apply_accent_material(visual)
 
 
-## Apply the family blue translucent-plastic material to every mesh in the imported bumper, set up
-## with emission so the hit-flash can pulse it. Idle emission is 0 (no glow at rest); _flash_on_hit
-## briefly raises it. Pure cosmetic - no physics or collider touched.
-func _apply_blue_material(root: Node3D) -> void:
-	var mat := StandardMaterial3D.new()
-	_rest_albedo = Color(0.10, 0.30, 0.90, 0.85)
-	mat.albedo_color = _rest_albedo
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.roughness = 0.2
-	mat.emission_enabled = true
-	mat.emission = Color(0.30, 0.55, 1.0)
-	mat.emission_energy_multiplier = 0.0  ## dark at rest; the hit-flash raises this
-	_bumper_mat = mat
-	for mi: MeshInstance3D in _mesh_instances(root):
+## Apply the flat RED scoring accent (Palette single colour source, no scattered literal) to every
+## mesh in the imported cap. WHY here even though ScoringReskin re-asserts the same accent as a
+## whole-table pass: a stand-alone bumper (a unit test, or any scene without the reskin) still reads
+## correctly red, and the flash has a material to pulse from. Flat albedo only (must-feel #6: no
+## emission - invisible in the web build; no transparency that would hurt ball tracking).
+func _apply_accent_material(root: Node3D) -> void:
+	var mat: StandardMaterial3D = Palette.flat_material(Palette.SCORING_ACCENT)
+	for mi: MeshInstance3D in KenneyModels.mesh_instances(root):
 		mi.material_override = mat
 
 
-## SUBTLE light-up when the bumper is hit: pop the emission, then fade it back over ~0.18 s.
+## SUBTLE light-up when the bumper is hit (DESIGN must-feel #4, a HARD CONSTRAINT: "the bumper hit
+## flash still PULSES ALBEDO... a hit flash that stops flashing is a FAIL"). Pop the albedo to a
+## bright near-white red, then ease it back to the scoring-accent rest colour.
 ##
-## FIX (measured defect, review 2026-07-18): this used to take NO args, on the (WRONG) assumption
-## that a zero-arg callback "can connect to `kicked` regardless of that signal's parameters". Godot 4
-## does NOT drop unconsumed signal arguments on connect(): kicked(direction: Vector3) emits with one
-## Vector3 arg (active_kicker.gd:_on_body_entered), so every real kick logged "Method expected 0
-## argument(s), but called with 1" and _flash_on_hit never actually ran - the hit-flash silently never
-## played. Accepting the (unused) direction as a typed, underscore-prefixed parameter matches this
-## codebase's existing unused-parameter convention (e.g. active_kicker.gd's _contact_should_kick,
-## _kick_direction_for) and the sibling connection slingshot.gd:kicked.connect(_play_flex), which
-## already accepts the signal's real signature. Cosmetic only - no physics or collider touched.
+## WHY IT PULSES THE LIVE MATERIAL, NOT A CACHED HANDLE (measured defect): the old
+## flash mutated pop_bumper.gd's private material handle, but ScoringReskin.apply() overwrites
+## material_override with a SEPARATE shared accent material as a final table pass, so the old flash
+## pulsed an orphaned object nothing rendered - it silently stopped flashing. We instead read the
+## material that is ACTUALLY on the rendered mesh, isolate a private copy of it once (pulsing this
+## bumper never tints the shared accent every other scoring piece shares), and pulse THAT.
+##
+## WHY ALBEDO NOT EMISSION: emission reads as invisible in the web build (no bloom, translucent-free
+## flat material), so albedo is the only reliable channel (must-feel #4/#6, burned lesson).
+##
+## The `direction` arg is unused but MUST be accepted: kicked(direction: Vector3) emits with one
+## Vector3, and Godot 4 does NOT drop unused signal args on connect() - a zero-arg slot would log
+## "Method expected 0 arguments, but called with 1" and never run. Underscore-prefixed per the
+## codebase's unused-parameter convention. Cosmetic only - no physics or collider touched.
 func _flash_on_hit(_direction: Vector3) -> void:
-	if _bumper_mat == null:
+	# Pulse whatever mesh actually RENDERS: the Kenney "BumperVisual" cap if it loaded, else the
+	# gray-box "KickerMesh" fallback (LFS-less runs). This mirrors the hit-flash oracle's own
+	# _rendered_bumper_mesh() resolution, so the flash always lands on the mesh the test samples.
+	var visual: Node3D = get_node_or_null("BumperVisual") as Node3D
+	if visual == null:
+		visual = get_node_or_null("KickerMesh") as Node3D
+	if visual == null:
 		return
-	# Pulse the ALBEDO (the base color, always rendered), not just emission. Emission alone showed NO
-	# light in the web build (developer: "there's no light at all") because the material is translucent
-	# and there is no glow/HDR, so emission washed out. Brighten the albedo to a near-white blue, then
-	# ease back to rest. Emission is still raised for any renderer that does bloom.
-	_bumper_mat.albedo_color = Color(0.55, 0.80, 1.0, 0.95)
-	_bumper_mat.emission_energy_multiplier = 3.0
+	var meshes: Array[MeshInstance3D] = KenneyModels.mesh_instances(visual)
+	if meshes.is_empty():
+		return
+	if _flash_mat == null:
+		# Isolate a private material from whatever is live on the cap now (the shared ScoringReskin
+		# accent in the real table, or the _apply_accent_material accent in a stand-alone test). A
+		# duplicate means pulsing this bumper never tints the shared accent the rest of the table wears.
+		var live: StandardMaterial3D = meshes[0].material_override as StandardMaterial3D
+		_flash_mat = (
+			live.duplicate() if live != null else Palette.flat_material(Palette.SCORING_ACCENT)
+		)
+		for mi: MeshInstance3D in meshes:
+			mi.material_override = _flash_mat
+	# Pop the albedo bright, then ease it back to the accent rest colour. The tween runs on the
+	# PHYSICS clock so its progress is deterministic under the headless GUT wait_physics_frames the
+	# hit-flash oracle samples with (an idle-clock tween would drift against a physics-frame sampler).
+	_flash_mat.albedo_color = FLASH_PEAK_ALBEDO
 	var tw: Tween = create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(_bumper_mat, "albedo_color", _rest_albedo, 0.28)
-	tw.tween_property(_bumper_mat, "emission_energy_multiplier", 0.0, 0.28)
+	tw.set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
+	tw.tween_property(_flash_mat, "albedo_color", FLASH_REST_ALBEDO, FLASH_FADE_S)
 
 
 ## Uniform scale so the cap's footprint matches the CAP diameter (2 * cap_radius), where cap_radius
 ## is POP_BUMPER_CAP_OVERHANG WIDER than the collision post. This is what makes the ball tuck under
-## the lid: the visible mushroom cap overhangs the CylinderShape3D collider (which stays at _radius,
+## the lid: the visible cap overhangs the CylinderShape3D collider (which stays at _radius,
 ## the true contact), so a ball stopping at the collider edge sits visually under the overhanging
-## lip. Measured from the merged mesh AABB, not hardcoded - an independent oracle on the scale (see
-## test_flipper_asset_visual for the same discipline).
+## lip. Measured from the merged mesh AABB (KenneyModels.merged_aabb), not hardcoded - independent
+## oracle on the scale (see test_pop_bumper_cap_overhang for the same discipline).
 func _derive_scale(visual: Node3D) -> float:
-	var box: AABB = _merged_aabb(visual)
+	var box: AABB = KenneyModels.merged_aabb(visual)
 	var width: float = maxf(box.size.x, box.size.z)
 	if width < 0.0001:
 		return 1.0
 	var cap_radius: float = _radius * (1.0 + TableConfig.POP_BUMPER_CAP_OVERHANG)
 	return (cap_radius * 2.0) / width
-
-
-## Merge every descendant MeshInstance3D's AABB into the visual root's local space.
-func _merged_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first: bool = true
-	for mi: MeshInstance3D in _mesh_instances(root):
-		var local: Transform3D = TableConfig.relative_xform(root, mi)
-		var a: AABB = local * mi.get_aabb()
-		if first:
-			out = a
-			first = false
-		else:
-			out = out.merge(a)
-	return out
-
-
-func _mesh_instances(node: Node) -> Array:
-	var found: Array = []
-	if node is MeshInstance3D:
-		found.append(node)
-	for c: Node in node.get_children():
-		found.append_array(_mesh_instances(c))
-	return found

@@ -75,8 +75,8 @@ var right_flipper: Node3D
 ## existing "left_flipper" action (no new input). One instance this slice (the smaller, preferred
 ## option). Kept as a typed handle so tests and the editor can address it.
 var mini_flipper: Node3D
-## Placeable WALL elements (scripts/wall_element.gd): static primitive-collider bodies with custom
-## wall.glb art. One demo instance this slice; the full wall-draw editor is future scope.
+## Placeable WALL elements (scripts/wall_element.gd): static primitive-collider bodies wearing the
+## Kenney block-borders mesh. One demo instance this slice; the full wall-draw editor is future scope.
 var walls: Array[StaticBody3D] = []
 var plunger: Node
 var drain: Area3D
@@ -116,7 +116,7 @@ func _ready() -> void:
 	# _build_layout_editor) all exist now, so TableReskin walks the WHOLE table and paints the rails
 	# too. WHY here and not at the end of _build_dynamic_elements: the rails are spawned AFTER the
 	# dynamic elements, so an earlier call left the reskin's EditRail branch dead - the guide rails
-	# kept the raw wall.glb colour instead of the calm white frame (QA BUG-049). Running it here also
+	# kept the raw wall-model colour instead of the calm white frame (QA BUG-049). Running it here also
 	# covers furniture a future slice may add, without moving this call again. VISUAL ONLY:
 	# material_override on visible meshes; no collider, layer, position, or kick vector touched.
 	TableReskin.apply(playfield)
@@ -373,9 +373,9 @@ func _build_dynamic_elements() -> void:
 
 	# --- Wall element (demo instance, custom asset) -----------------------------------------------
 	# A basic placeable wall (scripts/wall_element.gd): a PRIMITIVE BoxShape3D collider (never the art
-	# mesh) with high restitution, wearing the custom wall.glb (dark body + blue cap). ONE demo
-	# instance this slice so the asset is in-game and bouncing; the full wall-draw editor is future
-	# scope. Placed in the upper-left field clear of the lanes/bumpers.
+	# mesh) with high restitution, wearing the Kenney block-borders mesh. ONE demo instance this slice
+	# so the asset is in-game and bouncing; the full wall-draw editor is future scope. Placed in the
+	# upper-left field clear of the lanes/bumpers.
 	walls.clear()
 	var wall: StaticBody3D = WallScene.instantiate()
 	wall.name = "WallDemo"

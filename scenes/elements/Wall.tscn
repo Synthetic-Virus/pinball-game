@@ -2,7 +2,7 @@
 
 ; A basic placeable WALL element (scripts/wall_element.gd). Root is a StaticBody3D with a PRIMITIVE
 ; BoxShape3D collider (high restitution, never the art mesh) on STATIC_OBSTACLES; the visible art is
-; the custom wall.glb (dark body + blue translucent cap) instanced in code, scaled from the collider.
+; the Kenney block-borders mesh (KenneyModels.WALL_BORDER_MODEL) instanced in code, from the collider.
 ; table.gd places one demo instance; the full wall-draw editor is out of scope for this slice.
 
 [ext_resource type="Script" path="res://scripts/wall_element.gd" id="1_wall"]

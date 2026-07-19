@@ -18,10 +18,13 @@ extends RefCounted
 ## straight off the running 3D table (developer: "idk where those coords are"). Set false to hide.
 const SHOW_COORD_GRID: bool = true
 
-## Our custom low-poly wall model (dark body + blue beveled cap). Each border box is SKINNED with a
-## scaled copy of this so the outline reads as our wall family instead of plain white boxes. The box
-## COLLIDER is kept; only the visible mesh is swapped (the art is never a collider).
-const WALL_ASSET_PATH: String = "res://assets/models/wall.glb"
+## Border skinning (SLICE "Kenney 3D asset integration", 2026-07-19): each border box is SKINNED
+## with a scaled copy of a Kenney wall_border mesh so the outline reads as one designed frame, not
+## plain white boxes. The designer's locked role split (see _wall_model_for): the PERIMETER rails
+## get block-borders.glb (KenneyModels.WALL_BORDER_MODEL); the NARROW launch-lane divider gets the
+## thinner narrow-block.glb (KenneyModels.NARROW_GUIDE_MODEL), better for a tight lane gap. The
+## box COLLIDER is kept; only the visible mesh is swapped (the art is never a collider). TableReskin
+## paints these the calm white frame colour as a final whole-table pass.
 
 ## Entry point. table.gd calls TableGeometry.build(playfield_node).
 static func build(playfield: Node3D) -> void:
@@ -278,20 +281,33 @@ static func _add_border_segment(
 	)
 	# Yaw the box so its local +X runs along the a->b chord about +Y.
 	body.rotation.y = atan2(-chord.z, chord.x)
-	# Skin the box with our wall model (keeps the collider, hides the white box mesh).
-	_skin_with_wall(body, length, h, t)
+	# Skin the box with the Kenney wall model for this segment's ROLE (keeps the collider, hides the
+	# white box mesh).
+	_skin_with_wall(body, length, h, t, _wall_model_for(seg_name))
 
 
-## Replace a border box's visible mesh with a scaled copy of our wall.glb (dark body + blue cap),
-## keeping the box collider. The model is measured and fit to the segment (length x h x t) so a
-## re-export self-corrects; its base is seated on the surface. Falls back to the white box if the
-## asset is missing (the outline never vanishes).
-static func _skin_with_wall(body: StaticBody3D, length: float, h: float, t: float) -> void:
-	var scene: Resource = load(WALL_ASSET_PATH)
+## The Kenney wall_border mesh for a border segment's ROLE (the designer's locked split): the NARROW
+## launch-lane divider ("LaneDivider") gets the thinner narrow-block.glb; every PERIMETER rail
+## ("Border*") gets the wider block-borders.glb. Named-based so table.gd's own segment naming in
+## _build_borders is the single source of the role, no extra flag threaded through.
+static func _wall_model_for(seg_name: String) -> String:
+	if seg_name == "LaneDivider":
+		return KenneyModels.NARROW_GUIDE_MODEL
+	return KenneyModels.WALL_BORDER_MODEL
+
+
+## Replace a border box's visible mesh with a scaled copy of the given Kenney wall model, keep the
+## box collider. The model is measured (KenneyModels.merged_aabb - the shared, unit-tested helper)
+## and fit to the segment (length x h x t) so a re-export self-corrects; its base is seated on the
+## surface. Falls back to the white box if the asset is missing (the outline never vanishes).
+static func _skin_with_wall(
+	body: StaticBody3D, length: float, h: float, t: float, model_path: String
+) -> void:
+	var scene: Resource = load(model_path)
 	if scene == null or not (scene is PackedScene):
 		return
 	var inst: Node3D = (scene as PackedScene).instantiate()
-	var box: AABB = _instance_aabb(inst)
+	var box: AABB = KenneyModels.merged_aabb(inst)
 	if box.size.x < 0.0001 or box.size.y < 0.0001 or box.size.z < 0.0001:
 		inst.queue_free()
 		return
@@ -304,27 +320,3 @@ static func _skin_with_wall(body: StaticBody3D, length: float, h: float, t: floa
 	# account for where the model's own minimum-Y sits after scaling.
 	inst.position = Vector3(0.0, -h * 0.5 - box.position.y * (h / box.size.y), 0.0)
 	body.add_child(inst)
-
-
-## Merged AABB of every mesh under an out-of-tree instance, in its local space (local-transform walk
-## via TableConfig.relative_xform, valid before the node is in the SceneTree).
-static func _instance_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first: bool = true
-	for mi: MeshInstance3D in _all_mesh_instances(root):
-		var a: AABB = TableConfig.relative_xform(root, mi) * mi.get_aabb()
-		if first:
-			out = a
-			first = false
-		else:
-			out = out.merge(a)
-	return out
-
-
-static func _all_mesh_instances(node: Node) -> Array:
-	var found: Array = []
-	if node is MeshInstance3D:
-		found.append(node)
-	for c: Node in node.get_children():
-		found.append_array(_all_mesh_instances(c))
-	return found
