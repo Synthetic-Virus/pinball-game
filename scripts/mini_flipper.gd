@@ -20,12 +20,12 @@ extends "res://scripts/flipper.gd"
 ## force_energized() from flipper.gd byte-for-byte. table.gd instances this, positions it at
 ## TableConfig.MINI_FLIPPER_PIVOT, and calls configure("left_flipper", false).
 
-## The mini's visible art is our custom mini_flipper.glb (Flipper_Bat_Mini + Flipper_Rubber_Mini,
-## the matched low-poly blue family). The inherited _build_visual instances the WHOLE subtree (both
-## meshes) and scales it from the merged AABB to the mini collider length, so the rubber is never
-## dropped (the same fix as the main flipper). On a load failure the inherited gray-box bat
-## stays visible (the flipper never vanishes).
-const MINI_FLIPPER_ASSET_PATH: String = "res://assets/models/mini_flipper.glb"
+## The mini's visible bat is the PROCEDURAL 2-tone bat it inherits from flipper.gd (black body +
+## white rubber top), built to the mini geometry the getters below override. The imported
+## mini_flipper.glb was RETIRED with the main flipper_bat.glb this slice ("Kenney 3D asset
+## integration"): the low-poly procedural bat is the primary (and only) visual, so the mini needs no
+## asset path override - it inherits the same procedural mesh at its smaller size. The collider,
+## drive, rubber material, and no-tunnel guarantee are all inherited unchanged.
 
 
 ## Override the geometry seams so this flipper is the MINI size. Everything else (the kinematic
@@ -50,9 +50,3 @@ func _flipper_rest_angle() -> float:
 
 func _flipper_up_angle() -> float:
 	return TableConfig.MINI_FLIPPER_UP_ANGLE
-
-
-## The mini's visible asset (instanced whole-subtree by the inherited _build_visual, so both the bat
-## and the rubber sleeve render). The collider/drive are unaffected - cosmetic mesh only.
-func _flipper_asset_path() -> String:
-	return MINI_FLIPPER_ASSET_PATH

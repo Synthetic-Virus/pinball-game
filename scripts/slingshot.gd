@@ -322,8 +322,10 @@ func _make_mesh() -> MeshInstance3D:
 ## so this gives the slingshot its real look without touching the proven physics.
 func _add_posts_and_rubber(parent: Node3D) -> void:
 	var corners: PackedVector2Array = _raw_corners()
-	var rubber := StandardMaterial3D.new()
-	rubber.albedo_color = Color(0.72, 0.10, 0.10)  ## red rubber, like the reference posts
+	# The rubber posts + bands share the Palette scoring accent (single colour source, no literal),
+	# matching the triangle face and the ScoringReskin accent so the whole slingshot reads as one red
+	# scoring object; the raised posts give the shape its read, not a separate colour.
+	var rubber: StandardMaterial3D = Palette.flat_material(Palette.SLINGSHOT_ACCENT)
 	var post_r: float = _thickness * 0.6
 	# Posts: short cylinders standing a little taller than the rubber band, one per corner.
 	for c: Vector2 in corners:
@@ -479,9 +481,12 @@ func _build_triangle_mesh(outline: PackedVector2Array, height: float) -> ArrayMe
 			st.add_vertex(i_b)
 			st.add_vertex(j_b)
 	st.generate_normals()
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.55, 0.55, 0.58)
-	st.set_material(mat)
+	# Restyle (SLICE "Kenney 3D asset integration"): the triangle body is SCORING furniture, so its
+	# base material is the shared Palette scoring accent (single colour source, no scattered literal).
+	# ScoringReskin re-paints this same red at table build time via material_override; this base keeps
+	# the unit-test / pre-reskin look correct and Palette-sourced. Flat albedo (Palette.flat_material)
+	# preserves the low-poly faceted read and stays visible in the web export (no emission).
+	st.set_material(Palette.flat_material(Palette.SLINGSHOT_ACCENT))
 	st.commit(mesh)
 	return mesh
 
@@ -536,14 +541,15 @@ func _body_yaw() -> float:
 ## first so the gray-box "KickerMesh" exists to hide.
 func _ready() -> void:
 	super._ready()
-	_install_art()
-	# The RIGHT sling now loads a PRE-MIRRORED .glb (right_slingshot.glb) with correct outward
-	# normals, so NO runtime negative-X scale is applied here (that inverted the normals and shaded
-	# the right sling dark). The collider mirror is still the position/rotation mirror set in
-	# configure() via SLINGSHOT_RIGHT_CORNERS.
-	# Cosmetic flex: the SAME kicked(direction) signal the impulse fires also drives _play_flex, on a
-	# SEPARATE path that touches only the visual meshes. Removing this connection leaves the kick
-	# byte-for-byte identical (the behavioral decoupling oracle).
+	# SLICE "Kenney 3D asset integration" (2026-07): the PROCEDURAL rounded triangle (KickerMesh,
+	# built by the base from _make_mesh) is now the PRIMARY visual. The imported low-poly
+	# left/right_slingshot.glb was RETIRED, so _install_art() is NO LONGER called and the gray-box
+	# triangle is never hidden - it renders as the slingshot, restyled in Palette below. _visual
+	# stays null; the .glb loaders further down are dead this slice and are removed at the cleanup
+	# pass (they still satisfy the test seams that read _visual / _asset_path_override as null). The
+	# collider / kick / score / cooldown are UNTOUCHED (the frozen active-kick base).
+	# Cosmetic flex stays wired to the kick signal; with no imported art (_visual == null) _play_flex
+	# is a safe no-op, so the kick is byte-for-byte identical (the behavioral decoupling oracle).
 	kicked.connect(_play_flex)
 
 
