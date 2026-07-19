@@ -538,6 +538,18 @@ const KICK_MIN_OUTGOING_SPEED: float = 40.0
 ## every kicked ball strictly inside the proven-safe band. The physics-programmer owns this
 ## guarantee.
 const KICK_MAX_OUTGOING_SPEED: float = 120.0
+## BALL_MAX_CCD_SAFE_SPEED: the general CCD-safe ceiling for the BALL's speed after ANY contact, in
+## world units/s. SAME numeric cap as KICK_MAX_OUTGOING_SPEED (one source of truth so the two cannot
+## drift): the speed the no-tunneling stress tests prove safe. WHY a second name: ball.gd's
+## post-contact clamp (SLICE "Flipper physics rebuild") is NOT kick-specific - it is the net for
+## ANY pathological STACKED KINEMATIC hit (an uncapped flipper-vs-wall pinch measured 366 u/s).
+## Reading a "KICK_" constant at the ball would mislead, so the ball reads this alias. It sits ABOVE
+## the fastest legitimate in-play speed (~118 measured, full launch 116) so a real flip/launch is
+## NEVER clipped - like the launch watchdog, it should essentially never fire in normal play. The
+## clamp is CONTACT-GATED (fires only while the ball touches a body), so a free-flight stress ball
+## at 2x LAUNCH_SPEED_MAX (232) is NOT slowed on approach - the CCD sweep still gets the worst-case
+## approach speed it exists to prove safe.
+const BALL_MAX_CCD_SAFE_SPEED: float = KICK_MAX_OUTGOING_SPEED
 ## Per-element re-trigger cooldown (seconds). Same family as the target RETRIGGER_COOLDOWN_S
 ## (BUG-007):
 ## after a kick + score, the element is dead for this long so a ball resting/jittering against it is

@@ -53,7 +53,8 @@ func _ready() -> void:
 
 	# --- Contact reporting (needed by the physical plunger's impulse-on-contact launch). ----------
 	# The plunger (scripts/plunger.gd) confirms its face is actually TOUCHING the ball before it
-	# applies the launch impulse, so a release with no seated ball is a no-op (ARCHITECTURE.md 11.2).
+	# applies the launch impulse, so a release with no seated ball is a no-op (ARCHITECTURE.md
+	# 11.2).
 	# That confirmation reads this body's reported contacts (is_touching() below), so we must enable
 	# the contact monitor and reserve a few contact slots. WHY a small number: a ball realistically
 	# touches at most a couple of bodies at once (a wall + the face); 8 is ample headroom and cheap.
@@ -63,13 +64,19 @@ func _ready() -> void:
 	# --- Mass and damping from the world-scale contract. ------------------------------------------
 	mass = TableConfig.BALL_MASS
 	# 1.8, not 1.0: at the world scale here the gravity-driven roll felt FLOATY - the ball barely
-	# accelerated down-table and lingered at the top (developer: "doesn't ever get fast enough...almost
+	# accelerated down-table and lingered at the top (developer: "doesn't ever get fast
+	# enough...almost
 	# floats at the top"). The launch/kick speeds dwarf the gravity accel, so the ball zipped when
-	# struck but drifted under gravity alone. Raising ONLY the ball's gravity (not global gravity, so the
-	# flipper bats are untouched) makes it fall ~1.8x faster and read heavier. NOTE: this also slows the
-	# climb up the launch chute, so PLUNGER_STROKE_SPEED_MAX was raised to 112 (near the chute no-tunnel
-	# ceiling ~108-112) so a full plunge still clears it. 2.0 was tried first but needed even more launch
-	# speed, above what the chute tolerates. Confirm no-tunnel with the local stress test if raised again.
+	# struck but drifted under gravity alone. Raising ONLY the ball's gravity (not global gravity,
+	# so the
+	# flipper bats are untouched) makes it fall ~1.8x faster and read heavier. NOTE: this also slows
+	# the
+	# climb up the launch chute, so PLUNGER_STROKE_SPEED_MAX was raised to 112 (near the chute
+	# no-tunnel
+	# ceiling ~108-112) so a full plunge still clears it. 2.0 was tried first but needed even more
+	# launch
+	# speed, above what the chute tolerates. Confirm no-tunnel with the local stress test if raised
+	# again.
 	gravity_scale = 1.8  # base project default_gravity is 200; the table tilt is the Playfield node.
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
@@ -144,6 +151,38 @@ func launch(direction: Vector3, speed: float) -> void:
 		# Degenerate direction: fall back to "up the table" so a launch is never a no-op.
 		dir = TableConfig.up_table_local()
 	linear_velocity = dir.normalized() * speed
+
+
+## POST-CONTACT CCD-SAFE SPEED CLAMP (SLICE "Flipper physics rebuild", new safety requirement).
+##
+## WHY THIS EXISTS (physics-programmer owns; measured): a STACKED KINEMATIC hit can leave the ball
+## far
+## above the CCD-safe envelope. The uncapped worst case measured 366 u/s (a ball squeezed between a
+## full-speed swinging bat and a wall). The active kickers already clamp their own contacts
+## (active_kicker._clamp_to_ccd_safe_cap), but the new kinematic flippers have no such detector, and
+## a
+## flipper-vs-wall pinch is exactly the pathological case. This clamp is the UNIVERSAL net: it caps
+## the
+## ball's speed to TableConfig.BALL_MAX_CCD_SAFE_SPEED (120) after any contact, using the SAME
+## direction-preserving magnitude scale active_kicker uses, so a normal bounce below the cap is
+## untouched and only the pathological over-speed is scaled down.
+##
+## WHY IN _integrate_forces, GATED ON CONTACT (not a global per-frame governor):
+## - _integrate_forces runs INSIDE the physics step, so clamping state.linear_velocity here caps the
+## ball on the SAME step the over-speed is produced - there is no one-frame window where the ball
+## travels at 366 u/s (which CCD is NOT proven safe at). A flipper-side clamp could only fire the
+##     NEXT frame (its _physics_process runs before the step), leaving that unsafe window open.
+## - It fires ONLY when the ball is in contact this step (state.get_contact_count() > 0). A ball in
+## FREE FLIGHT is never slowed, so the no-tunneling stress tests that fire a 232 u/s ball at a body
+## still exercise the full worst-case APPROACH speed the CCD sweep must catch; only the POST-contact
+## result is capped. This is a NET, not a governor: it sits above every legitimate in-play speed.
+func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if state.get_contact_count() <= 0:
+		return
+	var speed: float = state.linear_velocity.length()
+	if speed > TableConfig.BALL_MAX_CCD_SAFE_SPEED:
+		var scale: float = TableConfig.BALL_MAX_CCD_SAFE_SPEED / speed
+		state.linear_velocity = state.linear_velocity * scale
 
 
 ## Current scalar speed. STABLE SIGNATURE - the tunneling test reads this.
