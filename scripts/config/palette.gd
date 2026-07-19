@@ -46,6 +46,14 @@ const RAILS: Color = Color(0.87, 0.90, 0.94)
 ## apron body in the current gray-box geometry; this entry is the contract for when one is added.
 const APRON: Color = Color(0.80, 0.84, 0.89)
 
+## Plunger / launcher HARDWARE housing (SLICE "Kenney 3D asset integration"). A neutral mid-grey
+## metal for the procedural Kenney-style launcher body + rod. WHY it lives here even though the
+## reskin allowlist deliberately never walks the plunger (table_reskin.gd): the launcher is
+## procedural and sets its OWN material in plunger.gd, so this const is the single colour source of
+## truth it reads, keeping "no scattered colour literals in element scripts" true. Darker than the
+## white frame so the launch hardware reads as a distinct mechanical object, not part of the wall.
+const HARDWARE: Color = Color(0.55, 0.57, 0.60)
+
 # --- SCORING ACCENT ------------------------------------------------------------------------------
 
 ## The "aim here" red for the SCORING furniture (targets, pop bumpers, slingshots). This is the one
