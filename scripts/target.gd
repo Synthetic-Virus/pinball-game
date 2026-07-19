@@ -65,9 +65,11 @@ const DEFLECTOR_BOUNCE: float = 0.8
 const DEFLECTOR_FRICTION: float = 0.2
 
 ## STANDUP TARGET art (SLICE "Gate 0 polish", 2026-07-19): the visible post is a custom-authored
-## BULLSEYE archery target (bullseye_target.glb) - a low disc whose top face carries concentric
-## baked RED/WHITE rings (red centre, alternating, red outer rim), instanced as a CHILD OF THE
-## DEFLECTOR so it reads as the round scoring target the ball bounces off. This REPLACES the earlier
+## BULLSEYE archery target (bullseye_target.glb) - a solid cylinder puck, authored so its scaled
+## height fills the collider's measured above-surface half (0.75 of WALL_HEIGHT), whose top face
+## carries concentric baked RED/WHITE rings (red centre, alternating, red outer rim), instanced as a
+## CHILD OF THE DEFLECTOR so it reads as the round scoring target the ball bounces off. This
+## REPLACES the earlier
 ## plain obstacle-block cylinder, which Andrew's Gate 0 play-test flagged as reading like "just
 ## round circles" rather than a real archery target. The bullseye face points +Y so the rings read
 ## clearly from the steep top-down play camera. The baked ring colours are the SAME values as the
@@ -79,7 +81,8 @@ const DEFLECTOR_FRICTION: float = 0.2
 ## same narrow carve-out it already gives the mushroom cap) so the concentric rings are NOT stomped
 ## to one solid red - see scoring_reskin.gd BAKED_VISUAL_MARKERS. VISUAL ONLY: the ball always
 ## collides with the primitive CylinderShape3D (POST_RADIUS); the art mesh is never a collider. On
-## a failed import, the gray-box cylinder on the root stays visible (the target never vanishes).
+## a failed import, the gray-box cylinder on the root stays visible (the target never vanishes); on
+## a SUCCESSFUL install the gray box is hidden so it cannot swallow the art (_install_target_art).
 ##
 ## INTEGRATION NOTE: promoted into KenneyModels.STANDUP_TARGET_MODEL (mirrors the mushroom bumper's
 ## POP_BUMPER_MODEL pattern: a custom-authored asset bound to the role const, not a raw literal), so
@@ -96,6 +99,11 @@ const TARGET_VISUAL_NODE_NAME: String = "TargetVisual"
 var _ball: RigidBody3D = null
 ## Absolute time (ms, from Time.get_ticks_msec) before which new contacts are ignored. 0 = ready.
 var _cooldown_until_ms: float = 0.0
+## The gray-box fallback cylinder built in _ready (the pre-art placeholder). Kept as a member so
+## _install_target_art can hide it once the bullseye art is fully installed - and ONLY then. Every
+## failure path leaves it visible, so a failed import never makes the target vanish (the same
+## fallback contract as pop_bumper.gd / wall_element.gd).
+var _gray_box: MeshInstance3D = null
 
 func _ready() -> void:
 	# Area3D detector setup: monitor bodies on the BALLS layer only. The Area3D does not need to
@@ -128,7 +136,12 @@ func _ready() -> void:
 	mat.albedo_color = Color(0.62, 0.24, 0.72)
 	cylinder_mesh.material = mat
 	mesh_instance.mesh = cylinder_mesh
+	# Named like the siblings' fallbacks (pop_bumper "KickerMesh", wall_element "WallGrayBox") so
+	# structural tests can resolve it, and kept as a member so _install_target_art can hide it when
+	# the real bullseye art installs.
+	mesh_instance.name = "TargetGrayBox"
 	add_child(mesh_instance)
+	_gray_box = mesh_instance
 
 	# Wire the contact signal. The area's body_entered fires when the ball enters the detector
 	# volume (which wraps the deflector), so scoring is triggered by the same physics contact.
@@ -187,11 +200,12 @@ func _build_deflector() -> void:
 	# is the sole physics shape). Done after the deflector is in the tree so the mesh AABB measures.
 	_install_target_art(deflector)
 
-## Instance the bullseye archery-target disc as the visible post under the Deflector, scaled to the
+## Instance the bullseye archery-target puck as the visible post under the Deflector, scaled to the
 ## post footprint and seated on the surface. COPIES the proven pop_bumper.gd / wall_element.gd
 ## install: load the path, bail to the gray box on any failure, instance the WHOLE subtree under a
 ## named child, scale from the merged AABB to the post diameter (DERIVED, not a literal), seat the
-## base at the surface. The art is pure mesh - it is never a collider (the Deflector cylinder is).
+## base at the surface, hide the gray box on success. The art is pure mesh - it is never a collider
+## (the Deflector cylinder is).
 func _install_target_art(deflector: StaticBody3D) -> void:
 	if TARGET_ASSET_PATH == "" or not ResourceLoader.exists(TARGET_ASSET_PATH):
 		return  ## fallback: the gray-box cylinder on the root stays visible
@@ -206,8 +220,17 @@ func _install_target_art(deflector: StaticBody3D) -> void:
 	# Seat the post BASE at the surface (the Deflector origin, Y = 0) so an off-origin mesh cannot
 	# sink below the field (the burned integration gotcha). Measured after the scale is set.
 	visual.position.y = KenneyModels.base_seat_y(visual, 0.0)
+	# The art is fully installed (instanced, scaled, seated) - NOW hide the gray-box fallback, the
+	# same step every sibling install ends with (pop_bumper.gd, slingshot.gd, wall_element.gd).
+	# WHY this hide is load-bearing, not cosmetic: the fallback cylinder is OPAQUE and shares the
+	# art's footprint (both track POST_RADIUS), so leaving it visible swallows the bullseye whole -
+	# the art renders, but INSIDE the can, and the player still sees a plain solid cylinder (the
+	# exact Gate 0 send-back bug this line fixes). Every earlier return above leaves the gray box
+	# visible, so a failed import still never makes the target vanish.
+	if _gray_box != null:
+		_gray_box.visible = false  ## the real bullseye replaces the placeholder cylinder
 
-## Uniform scale so the bullseye disc's top-down FOOTPRINT (the wider of X/Z) matches the post
+## Uniform scale so the bullseye puck's top-down FOOTPRINT (the wider of X/Z) matches the post
 ## diameter (2 * POST_RADIUS), so the visible target tracks the collider the player bounces off.
 ## Measured from the merged mesh AABB (KenneyModels.merged_aabb), never hardcoded: a re-exported
 ## model self-corrects and no scale literal is typed. The structural test asserts the footprint
