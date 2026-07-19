@@ -32,9 +32,28 @@ const LONG_PRESS_MS: float = 350.0            ## a play touch held this long als
 const HEIGHT_STEP: float = 0.4                ## how much + / - raise/lower a wire-ramp point per press
 const UNDO_DEPTH: int = 40                    ## how many edit snapshots Undo can step back through
 
-## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for button text.
+## Developer-supplied typefaces: CHLORINP for the title banner, Schwarzenberg-Italic for the
+## BUILD-mode tool panel (a developer-only surface, out of the Kenney reskin's player-facing scope -
+## see the UI CLICK SOUND WIRING note below).
 const TITLE_FONT_PATH: String = "res://assets/fonts/title.ttf"
 const BUTTON_FONT_PATH: String = "res://assets/fonts/button.ttf"
+
+# --- Kenney UI kit (SLICE "Kenney baseline COMPLETION", UX front) -------------------------------
+## Applied ONLY to the PLAYER-FACING buttons: the main-menu BUILD/PLAY buttons and the play-bar
+## MENU/RESET BALL buttons. The BUILD-mode tool panel (SAVE, grid actions, etc.) is a developer-only
+## surface and keeps the house font above, matching the existing player-facing/developer-tool split
+## already documented on the click-sound wiring. See scripts/hud.gd for the same font/asset family.
+const KENNEY_LABEL_FONT_PATH: String = "res://assets/kenney/baseline/fonts/kenney_future_narrow.ttf"
+const KENNEY_BUTTON_TEXTURE_PATH: String = "res://assets/kenney/baseline/ui/button_flat.png"
+## Pixel inset (native 192x64 art) the button's rounded corner/border occupies - measured from the
+## source texture so the 9-slice stretch never distorts the corners on the different button sizes
+## this script uses (72px tall main-menu CTAs down to 48px play-bar buttons).
+const KENNEY_BUTTON_TEXTURE_MARGIN: float = 10.0
+## normal/hover/pressed all reuse the SAME source image, tinted via StyleBoxTexture.modulate_color,
+## so one PNG covers every interactive state without shipping near-identical variant textures.
+const KENNEY_BUTTON_TINT_NORMAL: Color = Color(1.0, 1.0, 1.0, 1.0)
+const KENNEY_BUTTON_TINT_HOVER: Color = Color(1.12, 1.12, 1.12, 1.0)
+const KENNEY_BUTTON_TINT_PRESSED: Color = Color(0.78, 0.78, 0.85, 1.0)
 
 var _table: Node = null
 var _camera: Camera3D = null
@@ -722,15 +741,15 @@ func _build_main_menu() -> void:
 	build_btn.text = "BUILD"
 	build_btn.custom_minimum_size = Vector2(320.0, 72.0)
 	build_btn.add_theme_font_size_override("font_size", 44)
-	build_btn.pressed.connect(_enter_build)
-	_apply_font(build_btn, BUTTON_FONT_PATH)
+	build_btn.pressed.connect(_on_build_button_pressed)
+	_apply_kenney_button_style(build_btn)
 	col.add_child(build_btn)
 	var play_btn := Button.new()
 	play_btn.text = "PLAY"
 	play_btn.custom_minimum_size = Vector2(320.0, 72.0)
 	play_btn.add_theme_font_size_override("font_size", 44)
-	play_btn.pressed.connect(_enter_play)
-	_apply_font(play_btn, BUTTON_FONT_PATH)
+	play_btn.pressed.connect(_on_play_button_pressed)
+	_apply_kenney_button_style(play_btn)
 	col.add_child(play_btn)
 
 
@@ -849,15 +868,15 @@ func _build_play_bar() -> void:
 	menu_btn.text = "MENU"
 	menu_btn.custom_minimum_size = Vector2(120.0, 48.0)
 	menu_btn.add_theme_font_size_override("font_size", 26)
-	menu_btn.pressed.connect(_enter_menu)
-	_apply_font(menu_btn, BUTTON_FONT_PATH)
+	menu_btn.pressed.connect(_on_play_bar_menu_pressed)
+	_apply_kenney_button_style(menu_btn)
 	row.add_child(menu_btn)
 	var reset_btn := Button.new()
 	reset_btn.text = "RESET BALL"
 	reset_btn.custom_minimum_size = Vector2(160.0, 48.0)
 	reset_btn.add_theme_font_size_override("font_size", 26)
-	reset_btn.pressed.connect(_reset_stuck_ball)
-	_apply_font(reset_btn, BUTTON_FONT_PATH)
+	reset_btn.pressed.connect(_on_reset_ball_button_pressed)
+	_apply_kenney_button_style(reset_btn)
 	row.add_child(reset_btn)
 
 
@@ -865,6 +884,51 @@ func _build_play_bar() -> void:
 func _reset_stuck_ball() -> void:
 	if _table != null and _table.has_method("manual_reset_ball"):
 		_table.manual_reset_ball()
+
+
+# --- UI CLICK SOUND WIRING (SLICE "Kenney baseline COMPLETION", FRONT 3) --------------------------
+# table.gd owns and null-guards the AudioDirector forward (play_ui_click); this editor never touches
+# AudioDirector directly, it only calls the stable table.gd forwarder like every other _table.* call
+# in this file. Per the DESIGN event-to-sound map, MENU/PLAY/BUILD share the PRIMARY click voice
+# (click_001) and RESET BALL gets the SECONDARY voice (click_002) so the two button families sound
+# distinct. Only the four buttons a player actually presses in normal play (main-menu BUILD/PLAY,
+# the play-bar MENU/RESET BALL) are wired; the keyboard quick-toggle (Tab) and the boot-to-menu call
+# are NOT button presses so they stay silent, and the BUILD-panel's internal "MAIN MENU"/"PLAY"
+# shortcuts are a developer-only tool, out of this slice's player-facing scope (FRONT 3 split).
+
+
+## Main-menu BUILD button: click, then enter the editor.
+func _on_build_button_pressed() -> void:
+	_play_click(false)
+	_enter_build()
+
+
+## Main-menu PLAY button: click, then start the game. This is normally the FIRST user gesture in the
+## browser, so it also doubles as the web-audio unlock point (see table.gd play_ui_click docs).
+func _on_play_button_pressed() -> void:
+	_play_click(false)
+	_enter_play()
+
+
+## Play-bar MENU button: click, then return to the main menu.
+func _on_play_bar_menu_pressed() -> void:
+	_play_click(false)
+	_enter_menu()
+
+
+## Play-bar RESET BALL button: click (the secondary voice), then re-seat the stuck ball.
+func _on_reset_ball_button_pressed() -> void:
+	_play_click(true)
+	_reset_stuck_ball()
+
+
+## Voice a UI button click through table.gd's null-safe AudioDirector forwarder. `secondary` selects
+## the RESET BALL voice; every other wired button uses the primary MENU/PLAY/BUILD voice. Safe to
+## call before the table is wired (e.g. in a future test) since it mirrors the has_method guard used
+## everywhere else in this editor.
+func _play_click(secondary: bool = false) -> void:
+	if _table != null and _table.has_method("play_ui_click"):
+		_table.play_ui_click(secondary)
 
 
 func _add_action(parent: Node, text: String, cb: Callable) -> void:
@@ -895,6 +959,36 @@ func _apply_font(ctrl: Control, path: String) -> void:
 	var font: Resource = load(path)
 	if font is Font:
 		ctrl.add_theme_font_override("font", font)
+
+
+## Restyle a PLAYER-FACING button (main-menu BUILD/PLAY, play-bar MENU/RESET BALL) with the Kenney
+## button art + label font. Only touches the stylebox/font/font-colour theme overrides - the caller
+## sets custom_minimum_size and font_size BEFORE calling this, so the button's clickable rect (and
+## therefore any fixed on-screen coordinate a test drives) never moves.
+func _apply_kenney_button_style(btn: Button) -> void:
+	var tex: Resource = load(KENNEY_BUTTON_TEXTURE_PATH)
+	if tex is Texture2D:
+		btn.add_theme_stylebox_override("normal", _kenney_button_box(tex, KENNEY_BUTTON_TINT_NORMAL))
+		btn.add_theme_stylebox_override("hover", _kenney_button_box(tex, KENNEY_BUTTON_TINT_HOVER))
+		btn.add_theme_stylebox_override(
+			"pressed", _kenney_button_box(tex, KENNEY_BUTTON_TINT_PRESSED)
+		)
+	btn.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_pressed_color", Color(0.88, 0.93, 1.0))
+	_apply_font(btn, KENNEY_LABEL_FONT_PATH)
+
+
+## Build one tinted StyleBoxTexture state for a Kenney button (see _apply_kenney_button_style).
+func _kenney_button_box(tex: Texture2D, tint: Color) -> StyleBoxTexture:
+	var sb := StyleBoxTexture.new()
+	sb.texture = tex
+	sb.texture_margin_left = KENNEY_BUTTON_TEXTURE_MARGIN
+	sb.texture_margin_right = KENNEY_BUTTON_TEXTURE_MARGIN
+	sb.texture_margin_top = KENNEY_BUTTON_TEXTURE_MARGIN
+	sb.texture_margin_bottom = KENNEY_BUTTON_TEXTURE_MARGIN
+	sb.modulate_color = tint
+	return sb
 
 
 # --- Modes ---------------------------------------------------------------------------------------

@@ -78,13 +78,26 @@ static func _paint_rail(rail: Node3D, mat: StandardMaterial3D) -> void:
 		_paint_subtree(segments, mat)
 
 
-## Set `mat` as the material_override on EVERY MeshInstance3D under `root` (inclusive). Using
-## material_override (not mesh.material) means the reskin never edits the built mesh resource, it
-## only layers a colour on top, so the underlying geometry/collider is provably untouched. It also
-## covers the skinned Kenney wall meshes (a Border body hides its gray-box box mesh and shows the
-## wall model), so a border reads white whether it renders as the box or the imported wall.
+## Set `mat` as the material_override on every MeshInstance3D under `root` (inclusive) that is
+## still wearing a PLAIN PROCEDURAL mesh - a BoxMesh, PlaneMesh, etc. (Godot's PrimitiveMesh
+## family). That covers the gray-box fallback table_geometry.gd / wall_element.gd build for every
+## wall/rail/surface body, so a border/rail/surface still reads a solid colour if its Kenney asset
+## ever fails to import (using material_override, not mesh.material, means this never edits the
+## built mesh resource, only layers a colour on top, so the underlying geometry/collider is
+## provably untouched).
+##
+## A MeshInstance3D whose mesh is anything OTHER than a PrimitiveMesh is an imported Kenney KIT
+## mesh (block-borders.glb / narrow-block.glb skinning a Border*/LaneDivider/rail segment, an
+## ArrayMesh brought in by the glTF importer) and is left ALONE, so it renders its own imported
+## material - the colormap-textured kit look - instead of a flat palette colour painted over it.
+## WHY: painting every mesh unconditionally (the old behaviour) flat-erased the Kenney kit texture
+## on every wall/rail, which is what the developer saw as "everything is missing texture" - the kit
+## meshes were being repainted the instant they loaded. Skipping non-primitive meshes here is what
+## lets a wall render the imported kit material while the gray-box safety net still works.
 static func _paint_subtree(root: Node3D, mat: StandardMaterial3D) -> void:
 	for mesh: MeshInstance3D in _mesh_instances(root):
+		if mesh.mesh != null and not (mesh.mesh is PrimitiveMesh):
+			continue  ## a Kenney kit mesh (imported ArrayMesh) - keep its own material, don't stomp it
 		mesh.material_override = mat
 
 

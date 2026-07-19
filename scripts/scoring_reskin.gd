@@ -12,15 +12,20 @@ extends RefCounted
 ##
 ## HOW SCORING NODES ARE FOUND (structural, so table.gd needs no group bookkeeping): a scoring
 ## element is any node that owns one of the marker children a bumper / sling / target builds -
-## "BumperVisual", "SlingshotVisual", "KickerMesh" (the gray-box fallback mesh), or "Deflector" (the
-## target's solid post). The drain and oob-drain Area3Ds own none of these, so they are never
-## recoloured, and the flippers / ball are not scoring nodes, so the flipper two-tone is safe.
+## "BumperVisual" (the pop bumper cap), "KickerMesh" (the slingshot's procedural triangle AND the
+## pop bumper's gray-box fallback mesh), or "Deflector" (the target's solid post). The drain and
+## oob-drain Area3Ds own none of these, so they are never recoloured, and the flippers / ball are
+## not scoring nodes, so the flipper two-tone is safe. NOTE: the slingshot's visible mesh is named
+## "KickerMesh" by ActiveKicker (the legacy .glb "SlingshotVisual" art was retired in the Kenney 3D
+## swap), so slings carry no separate "SlingshotVisual" node - they are accented via "KickerMesh".
 ##
 ## Called by TableReskin.apply(). Standalone entry so the future editor can re-accent on its own.
 
-## Child node names that mark a node as scoring furniture (see class doc).
+## Child node names that mark a node as scoring furniture (see class doc). "SlingshotVisual" is
+## deliberately absent: no node is ever named that (the slingshot renders as "KickerMesh"), so a
+## literal for it would just be dead marker weight that matches nothing.
 const SCORING_MARKERS: Array[String] = [
-	"BumperVisual", "SlingshotVisual", "KickerMesh", "Deflector"
+	"BumperVisual", "KickerMesh", "Deflector"
 ]
 
 
@@ -31,24 +36,24 @@ static func apply(playfield: Node3D) -> void:
 	# One shared flat accent material reused across all scoring furniture.
 	var accent := Palette.flat_material(Palette.SCORING_ACCENT)
 	for node: Node3D in _scoring_nodes(playfield):
-		# DECISION 1 (gameplay-programmer, RESOLVED; behaviour updated by commit 760742a): the flat
-		# opaque accent DOES supersede the pop bumper's own idle cap colour - verified by construction,
-		# not by guess. table.gd's _build_dynamic_elements() add_child()s every pop bumper/slingshot/
-		# target under Playfield BEFORE table.gd calls TableReskin.apply(playfield) (that call is a
-		# final whole-table pass in table.gd _ready(), after both build phases, so it lands after every
-		# furniture add_child). Godot runs _ready() synchronously on add_child, so pop_bumper.gd's
-		# _install_art() has already set its own flat, opaque material_override on "BumperVisual" by
-		# the time this loop runs; _paint_subtree below sets material_override again on the same
-		# meshes, so the flat red accent is last-write and is what actually renders at rest. pop_
-		# bumper.gd is NO LONGER FROZEN (commit 760742a rewired its hit-flash): _flash_on_hit() now
-		# isolates a PRIVATE copy of the mesh's LIVE material_override (whatever ScoringReskin most
-		# recently painted there, read at flash time via meshes[0].material_override, not a stale
-		# handle captured at _ready) and pulses that copy's albedo from FLASH_PEAK_ALBEDO back to
-		# FLASH_REST_ALBEDO (Palette.SCORING_ACCENT) on the physics clock, then re-installs it as the
-		# mesh's material_override. So the flash renders correctly on top of whatever ScoringReskin
-		# painted, with zero coupling back into this file (pop_bumper.gd never touches ScoringReskin's
-		# shared accent object, only its own private duplicate) - DESIGN must-feel #4 (a hit flash must
-		# never stop flashing) is satisfied; no BACKLOG.md follow-up remains for this defect.
+		# DECISION 1 (gameplay-programmer, RESOLVED; behaviour updated by commit 760742a; CARVED OUT
+		# for the pop bumper cap by the Kenney texture-restoration slice - see _paint_owner): the flat
+		# opaque accent supersedes a scoring mesh's own idle colour for every scoring node EXCEPT the
+		# pop bumper's "BumperVisual" cap when that cap already carries its own baked material (a
+		# custom asset arriving this same slice, cap already red by design). table.gd's
+		# _build_dynamic_elements() add_child()s every pop bumper/slingshot/target under Playfield
+		# BEFORE table.gd calls TableReskin.apply(playfield) (a final whole-table pass in table.gd
+		# _ready(), after both build phases), so this loop always runs after every furniture
+		# add_child, and _paint_owner below decides per-mesh whether to overwrite it. pop_bumper.gd is
+		# NO LONGER FROZEN (commit 760742a rewired its hit-flash): _flash_on_hit() isolates a PRIVATE
+		# copy of the mesh's LIVE material_override (whatever is ACTUALLY rendered - either this
+		# reskin's shared accent, or the cap's own baked material when _paint_owner left it alone -
+		# read at flash time via meshes[0].material_override, not a stale handle captured at _ready)
+		# and pulses that copy's albedo from FLASH_PEAK_ALBEDO back to FLASH_REST_ALBEDO
+		# (Palette.SCORING_ACCENT) on the physics clock, then re-installs it as the mesh's
+		# material_override. So the flash renders correctly on top of whatever is actually visible,
+		# with zero coupling back into this file - DESIGN must-feel #4 (a hit flash must never stop
+		# flashing) is satisfied; no BACKLOG.md follow-up remains for this defect.
 		#
 		# DECISION 2 (gameplay-programmer, RESOLVED for this slice): all three scoring types keep the
 		# single shared SCORING_ACCENT. The locked design direction names one hue for "the scoring
@@ -59,8 +64,45 @@ static func apply(playfield: Node3D) -> void:
 		# adding a second entry later is cheap, unwinding one now would not be. If QA's fresh
 		# Playwright shot on the PR artifact shows targets and bumpers reading as one indistinct
 		# object, add ONE new named entry to palette.gd (e.g. Palette.TARGET_ACCENT) and point
-		# _paint_subtree at it for the target case only; never hard-code a Color here.
-		_paint_subtree(node, accent)
+		# _paint_owner at it for the target case only; never hard-code a Color here.
+		_paint_owner(node, accent)
+
+
+## Paint one scoring-furniture owner's meshes with the accent, EXCEPT the pop bumper's own
+## "BumperVisual" cap when it already carries a material of its own. The cap is a CUSTOM asset with
+## a BAKED red material (SLICE "Kenney baseline COMPLETION" front 1, the mushroom-cap bumper
+## authored this same slice - "its cap is already red" by construction), so its own
+## imported material already IS the "aim here" red; stomping it with the shared flat accent would
+## throw away the baked look for zero legibility gain. Every OTHER scoring mesh - the slingshot/
+## target "KickerMesh"/"Deflector" visuals, and the pop bumper's own gray-box "KickerMesh" fallback
+## (only visible if the cap failed to load, in which case no "BumperVisual" node exists at all) - is
+## unaffected and still gets the shared flat accent exactly as before, so "aim here" red stays
+## consistent everywhere except the one mesh that already reads red on its own.
+static func _paint_owner(owner: Node3D, mat: StandardMaterial3D) -> void:
+	var baked_cap := owner.get_node_or_null("BumperVisual") as Node3D
+	for mesh: MeshInstance3D in _mesh_instances(owner):
+		var under_baked_cap: bool = (
+			baked_cap != null and (mesh == baked_cap or baked_cap.is_ancestor_of(mesh))
+		)
+		if under_baked_cap and _has_own_material(mesh):
+			continue  # keep the cap's own baked material - it already reads red, don't stomp it
+		mesh.material_override = mat
+
+
+## True when every surface of `mesh`'s own MESH RESOURCE already carries a material, independent of
+## any material_override a reskin pass may have set (checked via surface_get_material, never
+## material_override, so this reads the BAKED material, not a previous coat of paint). An imported
+## .glb with baked colours (the mushroom-cap bumper) satisfies this; a mesh with no material of its
+## own does not. Used only as the safety net in _paint_owner: if the baked-material cap ever ships
+## with a surface missing its material, that surface still gets the flat accent so the bumper never
+## reads unpainted grey/white instead of "aim here" red.
+static func _has_own_material(mesh: MeshInstance3D) -> bool:
+	if mesh.mesh == null or mesh.mesh.get_surface_count() == 0:
+		return false
+	for i in mesh.mesh.get_surface_count():
+		if mesh.mesh.surface_get_material(i) == null:
+			return false
+	return true
 
 
 ## Collect the scoring furniture nodes under `playfield` by looking for a marker child on each
@@ -83,13 +125,6 @@ static func _has_marker_child(node: Node3D) -> bool:
 		if SCORING_MARKERS.has(c.name):
 			return true
 	return false
-
-
-## Set `mat` as material_override on every MeshInstance3D under `root` (inclusive). The override
-## layers a colour on top of the built mesh; it never edits the mesh resource or any collider.
-static func _paint_subtree(root: Node3D, mat: StandardMaterial3D) -> void:
-	for mesh: MeshInstance3D in _mesh_instances(root):
-		mesh.material_override = mat
 
 
 ## Every node under `root` (recursive, inclusive) - used to scan for scoring markers.
