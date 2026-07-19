@@ -722,14 +722,14 @@ func _build_main_menu() -> void:
 	build_btn.text = "BUILD"
 	build_btn.custom_minimum_size = Vector2(320.0, 72.0)
 	build_btn.add_theme_font_size_override("font_size", 44)
-	build_btn.pressed.connect(_enter_build)
+	build_btn.pressed.connect(_on_build_button_pressed)
 	_apply_font(build_btn, BUTTON_FONT_PATH)
 	col.add_child(build_btn)
 	var play_btn := Button.new()
 	play_btn.text = "PLAY"
 	play_btn.custom_minimum_size = Vector2(320.0, 72.0)
 	play_btn.add_theme_font_size_override("font_size", 44)
-	play_btn.pressed.connect(_enter_play)
+	play_btn.pressed.connect(_on_play_button_pressed)
 	_apply_font(play_btn, BUTTON_FONT_PATH)
 	col.add_child(play_btn)
 
@@ -849,14 +849,14 @@ func _build_play_bar() -> void:
 	menu_btn.text = "MENU"
 	menu_btn.custom_minimum_size = Vector2(120.0, 48.0)
 	menu_btn.add_theme_font_size_override("font_size", 26)
-	menu_btn.pressed.connect(_enter_menu)
+	menu_btn.pressed.connect(_on_play_bar_menu_pressed)
 	_apply_font(menu_btn, BUTTON_FONT_PATH)
 	row.add_child(menu_btn)
 	var reset_btn := Button.new()
 	reset_btn.text = "RESET BALL"
 	reset_btn.custom_minimum_size = Vector2(160.0, 48.0)
 	reset_btn.add_theme_font_size_override("font_size", 26)
-	reset_btn.pressed.connect(_reset_stuck_ball)
+	reset_btn.pressed.connect(_on_reset_ball_button_pressed)
 	_apply_font(reset_btn, BUTTON_FONT_PATH)
 	row.add_child(reset_btn)
 
@@ -865,6 +865,51 @@ func _build_play_bar() -> void:
 func _reset_stuck_ball() -> void:
 	if _table != null and _table.has_method("manual_reset_ball"):
 		_table.manual_reset_ball()
+
+
+# --- UI CLICK SOUND WIRING (SLICE "Kenney baseline COMPLETION", FRONT 3) --------------------------
+# table.gd owns and null-guards the AudioDirector forward (play_ui_click); this editor never touches
+# AudioDirector directly, it only calls the stable table.gd forwarder like every other _table.* call
+# in this file. Per the DESIGN event-to-sound map, MENU/PLAY/BUILD share the PRIMARY click voice
+# (click_001) and RESET BALL gets the SECONDARY voice (click_002) so the two button families sound
+# distinct. Only the four buttons a player actually presses in normal play (main-menu BUILD/PLAY,
+# the play-bar MENU/RESET BALL) are wired; the keyboard quick-toggle (Tab) and the boot-to-menu call
+# are NOT button presses so they stay silent, and the BUILD-panel's internal "MAIN MENU"/"PLAY"
+# shortcuts are a developer-only tool, out of this slice's player-facing scope (FRONT 3 split).
+
+
+## Main-menu BUILD button: click, then enter the editor.
+func _on_build_button_pressed() -> void:
+	_play_click(false)
+	_enter_build()
+
+
+## Main-menu PLAY button: click, then start the game. This is normally the FIRST user gesture in the
+## browser, so it also doubles as the web-audio unlock point (see table.gd play_ui_click docs).
+func _on_play_button_pressed() -> void:
+	_play_click(false)
+	_enter_play()
+
+
+## Play-bar MENU button: click, then return to the main menu.
+func _on_play_bar_menu_pressed() -> void:
+	_play_click(false)
+	_enter_menu()
+
+
+## Play-bar RESET BALL button: click (the secondary voice), then re-seat the stuck ball.
+func _on_reset_ball_button_pressed() -> void:
+	_play_click(true)
+	_reset_stuck_ball()
+
+
+## Voice a UI button click through table.gd's null-safe AudioDirector forwarder. `secondary` selects
+## the RESET BALL voice; every other wired button uses the primary MENU/PLAY/BUILD voice. Safe to
+## call before the table is wired (e.g. in a future test) since it mirrors the has_method guard used
+## everywhere else in this editor.
+func _play_click(secondary: bool = false) -> void:
+	if _table != null and _table.has_method("play_ui_click"):
+		_table.play_ui_click(secondary)
 
 
 func _add_action(parent: Node, text: String, cb: Callable) -> void:
