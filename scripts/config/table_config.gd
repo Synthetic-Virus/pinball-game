@@ -76,14 +76,22 @@ const LANE_WIDTH: float = HALF_WIDTH - LANE_INNER_X  ## +HALF_WIDTH minus the di
 
 ## The launch-lane DIVIDER's up-table (top) endpoint (playfield-local Z; up-table is -Z). The divider
 ## (scripts/table_geometry.gd:_build_borders, the "LaneDivider" segment) runs from here down to the
-## lane pocket, forming the physical channel wall between the launch lane and the open field; it
-## STOPS short of the very top so the lane is open there and a launched ball curves into the field.
+## lane pocket, forming the physical channel wall between the launch lane and the open field.
 ## This is the SINGLE source of truth for that endpoint: table_geometry.gd reads it when building the
-## wall (previously a bare -HALF_LENGTH + 9.0 literal duplicated only there), and
-## LAUNCH_REACHED_PLAY_Z (below) derives the soft-lock watchdog's "the ball has genuinely left the
-## lane" line from it, so the two never drift out of sync again the way BALL_START.z and
-## LAUNCH_REACHED_PLAY_Z did (see the WHY on LAUNCH_REACHED_PLAY_Z).
-const LANE_DIVIDER_TOP_Z: float = -HALF_LENGTH + 9.0
+## wall (previously a bare literal duplicated only there).
+##
+## SLICE "Lower-third rebuild" (Item 2, connected launch): raised the top from -HALF_LENGTH + 9.0
+## (-16.0) to -HALF_LENGTH + 8.0 (-17.0) = the ARCH BASE (arch_base_z = -HALF_LENGTH + 8 in
+## table_geometry._build_borders). The lane wall now reaches the frame top and reads CONTINUOUS with
+## it instead of stopping dead in mid-field. The launch ball rises at x ~ lane center (12), 1.0 unit
+## OUTBOARD of the divider (x = 11), so the extension never touches the launch path; the ball still
+## exits up-and-over through the gap between the divider top (11, -17) and the arch, as before (no
+## trap). Re-verified in-engine per the slice checklist.
+##
+## BUG-054 hygiene: an earlier note here claimed "LAUNCH_REACHED_PLAY_Z derives the watchdog line
+## from this constant". That is STALE. LAUNCH_REACHED_PLAY_Z now derives from BALL_START.z - 6.0
+## (see its own WHY), NOT from LANE_DIVIDER_TOP_Z, so changing this value does NOT move that line.
+const LANE_DIVIDER_TOP_Z: float = -HALF_LENGTH + 8.0  ## -17.0: up to the arch base (Item 2).
 
 ## ---- ARCH (rounded top) ------------------------------------------------------------------------
 ## A half-arch across the top turns the ball launched up the lane back over into the playfield.
@@ -283,6 +291,57 @@ const OOB_DRAIN_Y: float = -20.0
 ## face at LANE_POCKET_FACE_Z and give it a small thickness; it stands WALL_HEIGHT tall.
 const LANE_POCKET_FACE_Z: float = HALF_LENGTH - 0.5  ## Inner (up-table) face of the pocket wall.
 const LANE_POCKET_THICKNESS: float = WALL_THICKNESS  ## Same stock as the perimeter walls.
+
+## ---- LOWER GUTTER / OUTHOLE (SLICE "Lower-third rebuild", Item 1) ------------------------------
+## The bottom of the table has NO bottom wall (the center drain lives over the open mouth). Before
+## this slice a ball that slipped down a side channel rolled off the open edge and was caught by
+## the OOB failsafe (the "invisible quirk"). These build a VISIBLE two-sided funnel outhole
+## that collects any ball past the flippers, feeds it to the EXISTING center drain, plus one narrow
+## outlane divider per side so the outer channel reads as a drain-risk gutter, the inner channel as
+## a save inlane. Read by TableGeometry._build_lower_gutter, which _add_border_segment's each pair
+## as a static wall on STATIC_OBSTACLES (the same box-wall class as the perimeter). Endpoints are
+## playfield-local Vector2(x, z); +Z is down-table (drain). NO mechanic change: the drain Area3D and
+## every DRAIN_* constant are untouched; this geometry only FRAMES the mouth.
+##
+## OUTHOLE FUNNEL: four segments forming a wide V into the center drain. The two OUTLANE segments
+## (outer, steep) catch a ball on either side; the two FLOOR segments (inner, below the flippers)
+## sweep it to the center drain mouth, which is left OPEN between x -1.8 and +1.8 (just outside the
+## drain half-width 1.47) so the ball still drops in. Bat clearance (independent oracle): the FLOOR
+## segments only enter the bat x-range [-4.5, +4.5] at z >= 24.3 (at x = +/-4.5, z ~= 24.41), above
+## FLIPPER_BAT_MAX_Z (23.66) by more than DRAIN_BAT_CLEARANCE (0.6), so they never intrude on the
+## flipper catch/cradle zone; the OUTLANE segments live entirely outboard of the pivots (x <= -6 /
+## >= 6), where there is no bat at all.
+const OUTHOLE_LEFT_OUTLANE_A: Vector2 = Vector2(-13.0, 20.0)  ## off the left side wall
+const OUTHOLE_LEFT_OUTLANE_B: Vector2 = Vector2(-6.0, 24.3)   ## outboard of left pivot (-4.5)
+const OUTHOLE_LEFT_FLOOR_A: Vector2 = Vector2(-6.0, 24.3)     ## V vertex, hands to the floor sweep
+const OUTHOLE_LEFT_FLOOR_B: Vector2 = Vector2(-1.8, 24.6)     ## left lip of the open drain mouth
+const OUTHOLE_RIGHT_OUTLANE_A: Vector2 = Vector2(11.0, 20.0)  ## off the launch-lane divider (x=11)
+const OUTHOLE_RIGHT_OUTLANE_B: Vector2 = Vector2(6.0, 24.3)   ## outboard of right pivot (+4.5)
+const OUTHOLE_RIGHT_FLOOR_A: Vector2 = Vector2(6.0, 24.3)     ## V vertex, hands to the floor sweep
+const OUTHOLE_RIGHT_FLOOR_B: Vector2 = Vector2(1.8, 24.6)     ## right lip of the open drain mouth
+##
+## OUTLANE DIVIDERS: two walls splitting each side into an outer OUTLANE and inner INLANE. LEFT
+## outlane = x[-13,-11] (width 2.0), RIGHT outlane = x[9,11] (width 2.0): symmetric drain-risk
+## gutters. A ball outboard of a divider rides the funnel to the drain (risk); a ball inboard rides
+## the inlane to the flipper (save). Each divider top (z 16.5) sits below its sling's bottom post
+## (z ~15.1-15.7); it is x-clear of the sling outer post (LEFT 3.4, RIGHT 1.4, both > ball diameter
+## 1.2), so there is no static seam. NOT named
+## "LaneDivider" so _wall_model_for skins them with the default perimeter wall model.
+##
+## SEAM FIX (BUG-058): the divider bottom is RAISED to z 19.0 (was 20.5) so it ENDS above the
+## funnel OUTLANE wall's up-table z-band (which begins at z 20). That ENDS the z-overlap: at 20.5
+## the divider dipped into that band while diverging in x from the funnel wall, and with the
+## segment half-thickness end extension (WALL_THICKNESS 0.35) plus the ball radius (0.6) the
+## concave corner between the divider bottom-outboard face and the funnel wall pinched BELOW the
+## ball diameter (1.2) near z ~20.4. An outlane ball wedged there for good (rest x -11.775 / z
+## 19.84 left, x 9.775 / z 20.03 right, never reaching the drain). Raised, the clear gap from the
+## divider bottom-outboard corner to the funnel up-table face is ~1.48 (left) / ~1.64 (right),
+## both > ball diameter 1.2, so an outlane ball rides the funnel to the drain. The divider still
+## splits outlane from inlane where it matters (alongside the slings, z 16.5-19.0).
+const OUTLANE_DIVIDER_LEFT_A: Vector2 = Vector2(-11.0, 16.5)
+const OUTLANE_DIVIDER_LEFT_B: Vector2 = Vector2(-11.0, 19.0)  ## BUG-058: raised from 20.5.
+const OUTLANE_DIVIDER_RIGHT_A: Vector2 = Vector2(9.0, 16.5)
+const OUTLANE_DIVIDER_RIGHT_B: Vector2 = Vector2(9.0, 19.0)  ## BUG-058: raised from 20.5.
 
 ## ---- LAUNCH / PLUNGER --------------------------------------------------------------------------
 ## Ball rest position at the bottom of the launch lane (local playfield coords). It sits just
@@ -597,13 +656,14 @@ const POP_BUMPER_CAP_OVERHANG: float = 0.18
 ## HALF_WIDTH - POP_BUMPER_RADIUS = 16 - 2 = 14, far outside +/-6, so the bigger bumpers do not foul
 ## a wall (asserted by test_shot_geometry + table_viz). Still up-table of the flippers and below the
 ## arch base, so a flipped ball can feed the cluster.
-# MARKUP (docs/REFERENCE_LAYOUT.md): 3-bumper triangle from the developer's hand-drawn plan,
-# homography-measured from the bottom-up render. Two high (z-8.3), one low-center (z-4.0), apex down.
-# First furniture piece re-added onto the post-reset flat play area.
+# SYMMETRIC TRIANGLE (SLICE "Lower-third rebuild", Item 3): an apex-down triangle. Two high at
+# z -9.7 spread +/-3.6, one low-center at z -5.2 pointing back at the flippers. Radius 1.6 -> outer
+# edge +/-5.2, far inside +/-13 and clear of the arch base (z -17). Surface gaps: high-to-high 4.0,
+# high-to-apex 2.56 (both > ball diameter 1.2). Reachable/feedable by a flip or the mini flipper.
 const POP_BUMPER_POSITIONS: Array[Vector3] = [
-	Vector3(-3.3, 0.0, -9.7),
-	Vector3(2.5, 0.0, -9.7),
-	Vector3(-0.4, 0.0, -5.3),
+	Vector3(-3.6, 0.0, -9.7),
+	Vector3(3.6, 0.0, -9.7),
+	Vector3(0.0, 0.0, -5.2),
 ]
 
 ## ---- SLINGSHOTS (active kickers above each flipper) --------------------------------------------
@@ -624,11 +684,17 @@ const POP_BUMPER_POSITIONS: Array[Vector3] = [
 # to that center below. So: absolute corner = SLINGSHOT_*_POS + SLINGSHOT_*_CORNERS[i]. Keeping the
 # corners relative means placing the node moves the whole triangle (the tests place it at the origin
 # and fire a ball at it). POS = centroid of the absolute corners.
-# DEVELOPER'S FIRST DRAFT (2026-06-22, dragged in the in-game editor, pinball_layout.json): slings
-# placed by hand. Still outboard of the flipper pivots (+/-4.5) and inside the walls, so the world-
-# scale pins hold. Asymmetric on purpose - it is a rough first pass to iterate from in the editor.
-const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-7.08, 0.0, 13.97)
-const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(5.14, 0.0, 14.02)  ## developer's 11:32 draft (asymmetric)
+# SYMMETRIC PAIR (SLICE "Lower-third rebuild", Item 3): the developer's hand-dragged draft was
+# asymmetric (left -7.08, right +5.14); this slice makes the pair a clean mirror at x = +/-6.5,
+# z = 14.0. The corner offsets (SLINGSHOT_*_CORNERS) and kick dirs (SLINGSHOT_*_KICK_DIR) are
+# UNCHANGED, so no kick is redirected. With the LEFT corners the absolute posts become
+# top(-7.2, 11.2), outer(-7.6, 15.1), inner(-4.7, 15.7): the outer post (x -7.6) clears the new left
+# outlane divider (x -11) by 3.4. RIGHT mirrors it: top(7.2, 11.2), outer(7.6, 15.1), inner(4.7,
+# 15.7); the outer post (x 7.6) clears the new right outlane divider (x 9.0) by 1.4 (> ball diameter
+# 1.2), so there is no static-body seam (the BUG-024 class). Both stay outboard of the flipper
+# pivots (+/-4.5) and inside the +/-13 side walls.
+const SLINGSHOT_LEFT_POS: Vector3 = Vector3(-6.5, 0.0, 14.0)
+const SLINGSHOT_RIGHT_POS: Vector3 = Vector3(6.5, 0.0, 14.0)
 
 ## SLINGSHOT CORNERS - the THREE rubber-post positions RELATIVE to SLINGSHOT_*_POS (x, z). The
 ## triangle is built EXACTLY from these (slingshot.gd _raw_corners), so each post lands exactly at
@@ -692,23 +758,20 @@ const SLINGSHOT_SCORE: int = 50
 ## well"), while every target stays inside the makeable window (between the flipper-tip reach and
 ## arch base) - asserted by test_shot_geometry + table_viz. Z unchanged (the widen does not move the
 ## makeable window in Z). The individual target POST size is raised in scripts/target.gd (gameplay).
-# FAITHFUL RECREATION (docs/REFERENCE_LAYOUT.md): FIVE standups in a row HIGH up-table (z-16.4, just
-# below the top orbit), measured from the reference top-down. Still inside the makeable window
-# (down-table of the arch base), so test_shot_geometry stays green; reached via the orbit/upper field.
-# MARKUP (docs/REFERENCE_LAYOUT.md): the developer's purple target marks, homography-measured. An
-# upper PAIR beside the bumpers, a RIGHT vertical BANK of 4 (x ~ 8.5, tightly spaced), and a LEFT
-# single. Small posts (target.gd POST_RADIUS 0.7) so the bank does not overlap.
-# From the developer's PINK guide (homography-measured off the calibrated grid), kept clear of the
-# +/-11.5 wall and the right lane (x < ~9): a TOP standup bank, a LEFT vertical target, and a RIGHT
-# vertical bank.
-# The top row is NOT targets - those are CHUTES (rollover lanes); see _build_top_lanes in
-# table_geometry. These are the actual standup targets: a LEFT vertical target and a RIGHT vertical
-# bank (pink).
+# THREE-TARGET VERTICAL BANK (SLICE "Lower-third rebuild", Item 4, BUG-053): exactly THREE standup
+# targets, per DESIGN.md's locked "3 targets" scope. A layout drift added a 4th; two targets
+# whose centers are closer than 2 * (POST_RADIUS + BALL_RADIUS) = 2 * (0.7 + 0.6) = 2.6 have
+# OVERLAPPING Area3D detectors (the BUG-041 double-score exploit). This is a clean vertical bank on
+# the right-center at x 7.5, z -3 / -6 / -9: every pair is 3.0 apart (> the 2.6 detector-overlap
+# threshold), so the double-score is geometrically IMPOSSIBLE. Placement: a left-flipper cross-field
+# shot or a right-flipper up-shot reaches it (a deliberate makeable shot). Clear of everything: the
+# nearest bumper (3.6, -9.7) is 3.9 away (radii sum 2.9); the right sling (6.5, 14) and outlane
+# divider (x 9) are z-far. On the RIGHT so it does not collide with the upper-left mini flipper
+# (-7.5, -2). The 2.6 spacing boundary is checked by the GUT count+spacing test (BUG-053/041).
 const STANDUP_BANK_POSITIONS: Array[Vector3] = [
-	Vector3(-7.69, 0.0, -8.41),  ## left single target (developer's 11:32 draft)
-	Vector3(9.32, 0.0, -4.48),   ## right vertical bank (clears the lane, x < 11)
-	Vector3(9.41, 0.0, -2.83),
-	Vector3(9.21, 0.0, -0.76),
+	Vector3(7.5, 0.0, -3.0),
+	Vector3(7.5, 0.0, -6.0),
+	Vector3(7.5, 0.0, -9.0),
 ]
 
 ## ---- INLANE / OUTLANE GUIDES -------------------------------------------------------------------
@@ -849,28 +912,38 @@ func placeable_asset(asset_id: String) -> Dictionary:
 ## playfield-local (x, z). table.gd seeds these as editable EditRail nodes; the developer can drag,
 ## add, or delete them and SAVE a new layout that overrides this default. Returned by a function (not
 ## a const) so each call hands back fresh, independent data. See [[in-game-layout-editor]].
-## DEVELOPER'S DEFAULT rails (2026-06-22 11:32, dragged in the in-game editor, pinball_layout.json).
-## Baked faithfully from the developer's save - left/right are NOT mirrored here (it is a rough
-## work-in-progress); a symmetry pass can be run on request.
+## SLICE "Lower-third rebuild" (Item 2) DEFAULT rails: the developer's 12-entry asymmetric draft
+## (top chutes, an upper-right diagonal, a multi-point right orbit, left lane walls, old asymmetric
+## inlane/return guides) is replaced by this clean, symmetric, BASIC set of 3 guide rails. The
+## containment those rails gave is now covered by the perimeter + the new outlane dividers + funnel
+## outhole + slingshots. NOTE (localStorage): a saved browser layout SHADOWS this default, so the
+## developer must RESET the saved layout in-browser to see the new default.
 func default_rails() -> Array:
 	return [
-		# Inlane guides (curved).
-		{"kind": "guide", "smooth": true, "points": [Vector2(-10.42, 13.8), Vector2(-9.82, 18.57), Vector2(-5.25, 19.8)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(8.69, 13.68), Vector2(8.71, 18.77), Vector2(5.22, 20.04)]},
-		# Return guides (curved).
-		{"kind": "guide", "smooth": true, "points": [Vector2(10.12, -4.57), Vector2(9.77, -6.62), Vector2(7.38, -10.53)]},
-		{"kind": "guide", "smooth": true, "points": [Vector2(-10.34, -1.87), Vector2(-9.06, -7.51), Vector2(-7.34, -9.78)]},
-		# Top chutes (straight).
-		{"kind": "wall", "smooth": false, "points": [Vector2(-3.97, -17.36), Vector2(-4.0, -14.24)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(-0.69, -17.04), Vector2(-0.67, -13.74)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(2.66, -17.46), Vector2(2.71, -14.04)]},
-		# Upper-right side wall (straight diagonal).
-		{"kind": "wall", "smooth": false, "points": [Vector2(10.62, -15.57), Vector2(7.25, -10.53)]},
-		# Left side: a short guide + a vertical wall forming a lane.
-		{"kind": "guide", "smooth": true, "points": [Vector2(-7.15, -9.69), Vector2(-7.65, -13.34), Vector2(-10.73, -11.77)]},
-		{"kind": "wall", "smooth": false, "points": [Vector2(-10.65, -11.68), Vector2(-10.35, -1.47)]},
-		# Right side: a multi-point orbit/lane wall.
-		{"kind": "wall", "smooth": false, "points": [Vector2(9.97, -4.57), Vector2(10.11, -4.46), Vector2(10.12, -0.24), Vector2(9.25, 1.81), Vector2(7.28, 3.77), Vector2(10.93, 8.4)]},
-		# Left lower guide.
-		{"kind": "guide", "smooth": true, "points": [Vector2(-12.81, 8.67), Vector2(-10.05, 5.64), Vector2(-12.88, 1.37)]},
+		# 1. LANE-EXIT RETURN GUIDE (right): the connection + one-way bias. Its first point (11, -17)
+		# is exactly the raised divider top (LANE_INNER_X, LANE_DIVIDER_TOP_Z), so the lane visibly
+		# JOINS the field. A ball off the arch (moving down-left) is caught near (8.5, -19) and
+		# channeled to (5.5, -18); a field ball drifting toward the lane rides the guide's outer face
+		# and is turned back (a geometry one-way BIAS, not a sprung gate: a gate would be a new
+		# mechanic, out of scope). Max x is 11 (left of the x ~ 12 launch path), so it never blocks
+		# the launch, and it is down-table of the arch everywhere (no orbit foul).
+		{
+			"kind": "guide",
+			"smooth": true,
+			"points": [Vector2(11.0, -17.0), Vector2(8.5, -19.0), Vector2(5.5, -18.0)],
+		},
+		# 2. LEFT INLANE RETURN GUIDE: steers an inlane ball down toward the left flipper base (near
+		# pivot -4.5) so the inlane reads as a save lane; inboard of the left outlane divider (x -11).
+		{
+			"kind": "guide",
+			"smooth": true,
+			"points": [Vector2(-9.8, 16.0), Vector2(-8.0, 18.5), Vector2(-5.5, 19.8)],
+		},
+		# 3. RIGHT INLANE RETURN GUIDE: mirror role on the right, kept inboard of the right outlane
+		# divider (x 9) and clear of the right sling outer post (7.6). Feel, not correctness.
+		{
+			"kind": "guide",
+			"smooth": true,
+			"points": [Vector2(8.0, 16.8), Vector2(7.0, 18.6), Vector2(5.2, 19.8)],
+		},
 	]
