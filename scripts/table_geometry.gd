@@ -30,6 +30,10 @@ const SHOW_COORD_GRID: bool = true
 static func build(playfield: Node3D) -> void:
 	_build_surface(playfield)
 	_build_borders(playfield)
+	# The lower gutter/outhole (funnel + outlane dividers) is built HERE, right after the borders, so
+	# it always exists headlessly: the plunger-lane tests build TableGeometry directly and the bottom
+	# of the table must collect a drained ball into the center drain instead of leaving it open.
+	_build_lower_gutter(playfield)
 	# The inlane/return GUIDES and top CHUTES are NOT built here anymore - they are editor-managed
 	# EditRail elements (scripts/edit_rail.gd) created by table.gd so the developer can draw/reshape
 	# them. table.gd seeds the same default shapes via TableConfig.DEFAULT_RAILS. The surface, outer
@@ -261,6 +265,65 @@ static func _build_borders(parent: Node3D) -> void:
 		Vector3(li, 0.0, hl - 2.0),
 		"LaneDivider"
 	)
+
+
+## Build the lower gutter / outhole (SLICE "Lower-third rebuild", Item 1): a two-sided funnel that
+## visibly collects any ball past the flippers and feeds it to the EXISTING center drain, plus one
+## narrow outlane divider per side. Every segment is a static wall built with _add_border_segment
+## (the same box-wall class, STATIC_OBSTACLES layer, and Kenney skin as the perimeter). The gutter
+## always exists even in the headless plunger-lane tests that build TableGeometry directly. The
+## center drain mouth (x in [-1.8, 1.8]) is left OPEN so the drain Area3D still catches the ball; NO
+## drain mechanic changes. Endpoint constants live in TableConfig (OUTHOLE_* / OUTLANE_DIVIDER_*).
+static func _build_lower_gutter(parent: Node3D) -> void:
+	# Four funnel segments: two steep OUTLANE catches (outer) plus two FLOOR sweeps (inner, below the
+	# flippers) that hand the ball to the open center drain mouth. The paired endpoints meet at the
+	# V vertex on each side (OUTLANE_B == FLOOR_A), so the joint has no gap.
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTHOLE_LEFT_OUTLANE_A),
+		_v3(TableConfig.OUTHOLE_LEFT_OUTLANE_B),
+		"OutholeLeftOutlane"
+	)
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTHOLE_LEFT_FLOOR_A),
+		_v3(TableConfig.OUTHOLE_LEFT_FLOOR_B),
+		"OutholeLeftFloor"
+	)
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTHOLE_RIGHT_OUTLANE_A),
+		_v3(TableConfig.OUTHOLE_RIGHT_OUTLANE_B),
+		"OutholeRightOutlane"
+	)
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTHOLE_RIGHT_FLOOR_A),
+		_v3(TableConfig.OUTHOLE_RIGHT_FLOOR_B),
+		"OutholeRightFloor"
+	)
+	# Two outlane dividers: short walls splitting each side into an outer outlane (drain-risk) and an
+	# inner inlane (save). NOT named "LaneDivider", so _wall_model_for skins them with the perimeter
+	# wall model rather than the narrow launch-lane model.
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTLANE_DIVIDER_LEFT_A),
+		_v3(TableConfig.OUTLANE_DIVIDER_LEFT_B),
+		"OutlaneDividerLeft"
+	)
+	_add_border_segment(
+		parent,
+		_v3(TableConfig.OUTLANE_DIVIDER_RIGHT_A),
+		_v3(TableConfig.OUTLANE_DIVIDER_RIGHT_B),
+		"OutlaneDividerRight"
+	)
+
+
+## Convert a playfield-local Vector2(x, z) endpoint (the explicit-corner style the gutter constants
+## use) to the Vector3(x, 0.0, z) that _add_border_segment expects. Y is 0: walls stand on the
+## surface top; _add_border_segment lifts the box to WALL_HEIGHT/2 itself.
+static func _v3(p: Vector2) -> Vector3:
+	return Vector3(p.x, 0.0, p.y)
 
 
 ## One border line: a thin white wall box from a to b, standing WALL_HEIGHT tall, yawed along the
