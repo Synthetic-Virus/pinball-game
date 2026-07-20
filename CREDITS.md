@@ -6,18 +6,16 @@ goes into assets/ without a line in this file.
 
 ## 3D models
 
-### Custom low-poly element family (assets/models/)
-Files: `flipper_bat.glb`, `mini_flipper.glb`, `pop_bumper.glb`, `launcher.glb`, `wall.glb`.
-- Source: original low-poly models created in Blender for this project (the matched stylized
-  flat-shaded blue-cap family). They REPLACE the earlier borrowed art (the vbousquet/pinball-parts
-  flipper bat and the older bumper_body.glb, both removed from the repo).
+### Custom low-poly element family - REMOVED FROM THE REPO
+Files (no longer present): `flipper_bat.glb`, `mini_flipper.glb`, `pop_bumper.glb`, `launcher.glb`,
+`wall.glb`.
+- History: original low-poly models created in Blender for this project (the matched stylized
+  flat-shaded blue-cap family). They replaced the earlier borrowed art (the vbousquet/pinball-parts
+  flipper bat and the older bumper_body.glb), and were themselves removed in the Kenney art swap
+  (2026-07): the visible table now uses the Kenney baseline packs plus the custom Kenney-style
+  assets listed below, and the flippers render procedurally in code. The files remain recoverable
+  via git history; no shipped build contains them.
 - License: original project work; no third-party attribution required.
-- Modified: exported to glTF 2.0 .glb. The art carries NO collision geometry: every element's collider
-  is a primitive shape built in code (the flipper / mini-flipper convex hull, the pop bumper
-  CylinderShape3D, the wall BoxShape3D) or, for the launcher, the AnimatableBody3D strike face. Object
-  names: flipper_bat (Flipper_Bat, Flipper_Rubber); mini_flipper (Flipper_Bat_Mini, Flipper_Rubber_Mini);
-  pop_bumper (Bumper_Base, Bumper_Body, Bumper_Cap); launcher (Box_* housing +
-  Plunger_Anim{Rod,Tip,Clip} + Plunger_Spring); wall (Wall_Body, Wall_Cap).
 
 ### Kenney asset packs (assets/kenney/baseline/)
 Files: every model, texture, UI image, font, and audio clip under `assets/kenney/baseline/`
