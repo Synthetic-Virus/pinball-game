@@ -1,8 +1,10 @@
 # Pinball (working title)
 
 A physics-first 3D pinball game in Godot 4 (GDScript), targeting a commercial Steam release. The
-current build is a playable gray-box prototype with an in-browser table editor: you build the table
-yourself by placing parts on a grid, then switch to Play.
+current build is a playable prototype in a stylized low-poly look built on Kenney's CC0 asset packs
+(models, textures, UI, fonts, audio) plus custom models authored in the same style, with an
+in-browser table editor: you build the table yourself by placing parts on a grid, then switch to
+Play.
 
 ## Screenshots
 
@@ -72,5 +74,8 @@ homelab (label `godot`) does every build and test. The laptop never holds Godot 
 
 ## Credits
 
-Third-party assets and their licenses are listed in `CREDITS.md`. Some pop-bumper and flipper models
+Third-party assets and their licenses are listed in `CREDITS.md`. The art, UI, fonts, and audio are
+mostly from [Kenney](https://kenney.nl) asset packs (CC0), with the remaining scoring furniture
+(mushroom pop bumper, slingshot wedges, bullseye targets) modelled from scratch for this project in
+the same style. Some editor-placeable parts (wire guides, rails, lane guides, drop/react targets)
 are derived from vbousquet/pinball-parts (CC BY-SA 4.0).

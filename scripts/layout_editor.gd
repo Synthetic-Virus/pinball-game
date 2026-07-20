@@ -55,6 +55,14 @@ const KENNEY_BUTTON_TINT_NORMAL: Color = Color(1.0, 1.0, 1.0, 1.0)
 const KENNEY_BUTTON_TINT_HOVER: Color = Color(1.12, 1.12, 1.12, 1.0)
 const KENNEY_BUTTON_TINT_PRESSED: Color = Color(0.78, 0.78, 0.85, 1.0)
 
+## MUSIC ON/OFF play-bar toggle (Gate 0 play-test follow-up - Andrew: "the music is fine but we need
+## to be able to toggle it off"). Kenney "Game Icons" pack, White variant, so the silhouette reads
+## clearly against the same blue KENNEY_BUTTON_TEXTURE_PATH background every other player-facing
+## button here uses. Copied unmodified from the read-only Kenney bundle into
+## assets/kenney/baseline/ui/ (source: Icons/Game Icons/PNG/White/2x/musicOn.png and musicOff.png).
+const MUSIC_ON_ICON_PATH: String = "res://assets/kenney/baseline/ui/music_on.png"
+const MUSIC_OFF_ICON_PATH: String = "res://assets/kenney/baseline/ui/music_off.png"
+
 var _table: Node = null
 var _camera: Camera3D = null
 var _playfield: Node3D = null
@@ -82,6 +90,8 @@ var _hud: CanvasLayer = null
 var _menu: Control = null          ## the main menu (Build / Play), shown at boot
 var _play_bar: Control = null      ## the small "Menu" button shown while playing
 var _panel: PanelContainer = null  ## the BUILD-mode editor panel
+var _music_toggle_btn: Button = null  ## play-bar MUSIC ON/OFF button; its icon swaps with _music_on
+var _music_on: bool = true            ## mirrors AudioDirector's saved preference (seeded at boot)
 var _header: Label = null
 var _hud_dragging: bool = false
 var _status: Label = null
@@ -860,7 +870,10 @@ func _build_play_bar() -> void:
 	bg.bg_color = Color(0.0, 0.0, 0.0, 0.6)
 	_play_bar.add_theme_stylebox_override("panel", bg)
 	_hud.add_child(_play_bar)
-	# A row: MENU (back to main menu) + RESET (re-seat a stuck ball, no ball spent - "just in case").
+	# A row: MENU (back to main menu) + RESET (re-seat a stuck ball, no ball spent - "just in case")
+	# + MUSIC ON/OFF (Gate 0 play-test follow-up). The toggle is APPENDED after the existing two
+	# buttons so MENU and RESET BALL keep their exact on-screen position - this row only grows to the
+	# right, it is never reflowed.
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	_play_bar.add_child(row)
@@ -878,6 +891,20 @@ func _build_play_bar() -> void:
 	reset_btn.pressed.connect(_on_reset_ball_button_pressed)
 	_apply_kenney_button_style(reset_btn)
 	row.add_child(reset_btn)
+	# MUSIC ON/OFF: an icon-only square button (same 48px row height), seeded from the AudioDirector's
+	# persisted preference so a reload shows the correct state immediately, not a flash of the default.
+	_music_on = _read_music_enabled()
+	var music_btn := Button.new()
+	music_btn.custom_minimum_size = Vector2(48.0, 48.0)
+	music_btn.expand_icon = true              ## icon fills the square button (keeping its aspect)
+	music_btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	music_btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+	music_btn.tooltip_text = "Toggle music"
+	music_btn.pressed.connect(_on_music_toggle_pressed)
+	_apply_kenney_button_style(music_btn)
+	_music_toggle_btn = music_btn
+	row.add_child(music_btn)
+	_refresh_music_icon()
 
 
 ## Play-bar RESET BALL: re-seat the live ball in the launch lane (no ball spent) in case it got stuck.
@@ -886,15 +913,69 @@ func _reset_stuck_ball() -> void:
 		_table.manual_reset_ball()
 
 
+# --- MUSIC TOGGLE (play-bar, Gate 0 play-test follow-up) -----------------------------------------
+# Every OTHER _table.* call in this file (see below) goes through a stable table.gd forwarder like
+# play_ui_click or manual_reset_ball. The music toggle deliberately does NOT add one: table.gd is a
+# different front's file this slice, so instead this reads/writes table.gd's existing PUBLIC
+# `audio_director` Node var directly, through Object.get()/has_method() rather than a static member
+# access - _table is only typed as a bare Node here, so the compiler cannot see AudioDirector's
+# methods, and duck-typed access is the same defensive pattern this file already uses everywhere
+# (has_method guards before every _table.* call). If a future slice adds a proper forwarder on
+# table.gd, this can switch to it with no change to the button wiring below.
+
+
+## The live AudioDirector, reached via table.gd's public `audio_director` var. Returns null before
+## setup() has wired a real table (matches every other _table-reaching helper in this file).
+func _audio_director() -> Object:
+	if _table == null:
+		return null
+	return _table.get("audio_director")
+
+
+## Whether music is currently enabled, read from the AudioDirector's persisted preference. Defaults
+## true (AudioDirector's own default) if the director is not reachable yet, so the button never
+## starts in a wrong or crashed state.
+func _read_music_enabled() -> bool:
+	var director: Object = _audio_director()
+	if director != null and director.has_method("is_music_enabled"):
+		return bool(director.is_music_enabled())
+	return true
+
+
+## Swap the play-bar toggle's icon to match _music_on. Safe to call before the button exists.
+func _refresh_music_icon() -> void:
+	if _music_toggle_btn == null:
+		return
+	var path: String = MUSIC_ON_ICON_PATH if _music_on else MUSIC_OFF_ICON_PATH
+	var tex: Resource = load(path)
+	if tex is Texture2D:
+		_music_toggle_btn.icon = tex as Texture2D
+
+
+## Play-bar MUSIC ON/OFF button: click (the SECONDARY voice, same family as RESET BALL - this is a
+## utility control, not a primary navigation action), flip the remembered state, forward it to the
+## AudioDirector (which stops/restarts the bed and persists the choice to user://), then redraw the
+## icon.
+func _on_music_toggle_pressed() -> void:
+	_play_click(true)
+	_music_on = not _music_on
+	var director: Object = _audio_director()
+	if director != null and director.has_method("set_music_enabled"):
+		director.set_music_enabled(_music_on)
+	_refresh_music_icon()
+
+
 # --- UI CLICK SOUND WIRING (SLICE "Kenney baseline COMPLETION", FRONT 3) --------------------------
 # table.gd owns and null-guards the AudioDirector forward (play_ui_click); this editor never touches
-# AudioDirector directly, it only calls the stable table.gd forwarder like every other _table.* call
-# in this file. Per the DESIGN event-to-sound map, MENU/PLAY/BUILD share the PRIMARY click voice
-# (click_001) and RESET BALL gets the SECONDARY voice (click_002) so the two button families sound
-# distinct. Only the four buttons a player actually presses in normal play (main-menu BUILD/PLAY,
-# the play-bar MENU/RESET BALL) are wired; the keyboard quick-toggle (Tab) and the boot-to-menu call
-# are NOT button presses so they stay silent, and the BUILD-panel's internal "MAIN MENU"/"PLAY"
-# shortcuts are a developer-only tool, out of this slice's player-facing scope (FRONT 3 split).
+# AudioDirector directly for the CLICK VOICE, it only calls the stable table.gd forwarder like every
+# other _table.* call in this file (the MUSIC TOGGLE above is the one documented exception - see its
+# section comment). Per the DESIGN event-to-sound map, MENU/PLAY/BUILD share the PRIMARY click voice
+# (click_001) and RESET BALL/the music toggle get the SECONDARY voice (click_002) so the navigation
+# and utility button families sound distinct. Only the buttons a player actually presses in normal
+# play (main-menu BUILD/PLAY, the play-bar MENU/RESET BALL/MUSIC toggle) are wired; the keyboard
+# quick-toggle (Tab) and the boot-to-menu call are NOT button presses so they stay silent, and the
+# BUILD-panel's internal "MAIN MENU"/"PLAY" shortcuts are a developer-only tool, out of this slice's
+# player-facing scope (FRONT 3 split).
 
 
 ## Main-menu BUILD button: click, then enter the editor.

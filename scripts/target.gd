@@ -41,9 +41,9 @@ signal scored(points: int)
 ##
 ## SIZE (MARKUP rebuild, 2026-06-21): 0.7. The developer's plan places targets in tight groups (a
 ## right vertical BANK of 4 about 1.4 apart, plus an upper pair and a left single), so a small post
-## is needed - a 2.0-radius post would overlap its neighbours into one blob. Small standup posts also
-## read distinctly from the radius-2 pop bumpers. The detector shell and the solid deflector below
-## both read from this constant, so they stay in sync automatically.
+## is needed - a 2.0-radius post would overlap its neighbours into one blob. Small standup posts
+## also read distinctly from the radius-2 pop bumpers. The detector shell and the solid deflector
+## below both read from this constant, so they stay in sync automatically.
 const POST_RADIUS: float = 0.7
 
 ## Re-trigger cooldown (seconds). After a hit, this target ignores further contacts briefly so a
@@ -64,17 +64,34 @@ const DEFLECTOR_BOUNCE: float = 0.8
 ## A post should turn the ball away, not grip it like a flipper bat.
 const DEFLECTOR_FRICTION: float = 0.2
 
-## STANDUP TARGET art (SLICE "Kenney 3D asset integration", 2026-07-19): the visible post is the
-## Kenney Minigolf-Kit obstacle-block.glb (KenneyModels.STANDUP_TARGET_MODEL), the designer's locked
-## standup-bank role mesh, instanced as a CHILD OF THE DEFLECTOR so it reads as the solid post the
-## ball bounces off. The architecture handoff keeps the "Deflector" scoring MARKER unchanged (no new
-## "*Visual" marker name) so ScoringReskin still finds the target and paints the whole subtree - the
-## obstacle-block included - the red scoring accent. VISUAL ONLY: the ball always collides with the
-## primitive CylinderShape3D (POST_RADIUS); it is never a collider. On a failed import, the gray-box
-## cylinder on the Area3D root stays visible (the target never vanishes).
+## STANDUP TARGET art (SLICE "Gate 0 polish", 2026-07-19): the visible post is a custom-authored
+## BULLSEYE archery target (bullseye_target.glb) - a solid cylinder puck, authored so its scaled
+## height fills the collider's measured above-surface half (0.75 of WALL_HEIGHT), whose top face
+## carries concentric baked RED/WHITE rings (red centre, alternating, red outer rim), instanced as a
+## CHILD OF THE DEFLECTOR so it reads as the round scoring target the ball bounces off. This
+## REPLACES the earlier
+## plain obstacle-block cylinder, which Andrew's Gate 0 play-test flagged as reading like "just
+## round circles" rather than a real archery target. The bullseye face points +Y so the rings read
+## clearly from the steep top-down play camera. The baked ring colours are the SAME values as the
+## mushroom pop bumper (red 0.86/0.16/0.16 == Palette.SCORING_ACCENT, white 0.95/0.95/0.96), so the
+## target and the bumper read as one matched scoring set in-engine.
+##
+## The "Deflector" scoring MARKER is UNCHANGED (no new marker name) so ScoringReskin still finds the
+## target. ScoringReskin now EXEMPTS this baked "TargetVisual" subtree from its flat accent (the
+## same narrow carve-out it already gives the mushroom cap) so the concentric rings are NOT stomped
+## to one solid red - see scoring_reskin.gd BAKED_VISUAL_MARKERS. VISUAL ONLY: the ball always
+## collides with the primitive CylinderShape3D (POST_RADIUS); the art mesh is never a collider. On
+## a failed import, the gray-box cylinder on the root stays visible (the target never vanishes); on
+## a SUCCESSFUL install the gray box is hidden so it cannot swallow the art (_install_target_art).
+##
+## INTEGRATION NOTE: promoted into KenneyModels.STANDUP_TARGET_MODEL (mirrors the mushroom bumper's
+## POP_BUMPER_MODEL pattern: a custom-authored asset bound to the role const, not a raw literal), so
+## every mesh choice still lives in one place. See kenney_models.gd's BULLSEYE_TARGET.
 const TARGET_ASSET_PATH: String = KenneyModels.STANDUP_TARGET_MODEL
 
-## The node name the imported obstacle-block visual is instanced under (child of the Deflector).
+## The node name the imported bullseye visual is instanced under (child of the Deflector). This is
+## also the marker ScoringReskin.BAKED_VISUAL_MARKERS reads to spare the baked rings from the
+## accent.
 const TARGET_VISUAL_NODE_NAME: String = "TargetVisual"
 
 @export var points: int = 100  ## Flat value per hit (placeholder, DESIGN.md scoring).
@@ -82,6 +99,11 @@ const TARGET_VISUAL_NODE_NAME: String = "TargetVisual"
 var _ball: RigidBody3D = null
 ## Absolute time (ms, from Time.get_ticks_msec) before which new contacts are ignored. 0 = ready.
 var _cooldown_until_ms: float = 0.0
+## The gray-box fallback cylinder built in _ready (the pre-art placeholder). Kept as a member so
+## _install_target_art can hide it once the bullseye art is fully installed - and ONLY then. Every
+## failure path leaves it visible, so a failed import never makes the target vanish (the same
+## fallback contract as pop_bumper.gd / wall_element.gd).
+var _gray_box: MeshInstance3D = null
 
 func _ready() -> void:
 	# Area3D detector setup: monitor bodies on the BALLS layer only. The Area3D does not need to
@@ -114,7 +136,12 @@ func _ready() -> void:
 	mat.albedo_color = Color(0.62, 0.24, 0.72)
 	cylinder_mesh.material = mat
 	mesh_instance.mesh = cylinder_mesh
+	# Named like the siblings' fallbacks (pop_bumper "KickerMesh", wall_element "WallGrayBox") so
+	# structural tests can resolve it, and kept as a member so _install_target_art can hide it when
+	# the real bullseye art installs.
+	mesh_instance.name = "TargetGrayBox"
 	add_child(mesh_instance)
+	_gray_box = mesh_instance
 
 	# Wire the contact signal. The area's body_entered fires when the ball enters the detector
 	# volume (which wraps the deflector), so scoring is triggered by the same physics contact.
@@ -169,15 +196,16 @@ func _build_deflector() -> void:
 
 	add_child(deflector)
 
-	# Swap in the Kenney obstacle-block cap as the visible post (VISUAL ONLY - the collider above is
-	# the sole physics shape). Done after the deflector is in the tree so the mesh AABB measures.
+	# Swap in the bullseye archery-target disc as the visible post (VISUAL ONLY - the collider above
+	# is the sole physics shape). Done after the deflector is in the tree so the mesh AABB measures.
 	_install_target_art(deflector)
 
-## Instance the Kenney obstacle-block as the visible post under the Deflector, scaled to the post
-## footprint and seated on the surface. COPIES the proven pop_bumper.gd / wall_element.gd install:
-## load the path, bail to the gray box on any failure, instance the WHOLE subtree under a named
-## child, scale from the merged AABB to the post diameter (DERIVED, not a literal), seat the base at
-## the surface. The art is pure mesh - it is never a collider (the Deflector's CylinderShape3D is).
+## Instance the bullseye archery-target puck as the visible post under the Deflector, scaled to the
+## post footprint and seated on the surface. COPIES the proven pop_bumper.gd / wall_element.gd
+## install: load the path, bail to the gray box on any failure, instance the WHOLE subtree under a
+## named child, scale from the merged AABB to the post diameter (DERIVED, not a literal), seat the
+## base at the surface, hide the gray box on success. The art is pure mesh - it is never a collider
+## (the Deflector cylinder is).
 func _install_target_art(deflector: StaticBody3D) -> void:
 	if TARGET_ASSET_PATH == "" or not ResourceLoader.exists(TARGET_ASSET_PATH):
 		return  ## fallback: the gray-box cylinder on the root stays visible
@@ -192,9 +220,18 @@ func _install_target_art(deflector: StaticBody3D) -> void:
 	# Seat the post BASE at the surface (the Deflector origin, Y = 0) so an off-origin mesh cannot
 	# sink below the field (the burned integration gotcha). Measured after the scale is set.
 	visual.position.y = KenneyModels.base_seat_y(visual, 0.0)
+	# The art is fully installed (instanced, scaled, seated) - NOW hide the gray-box fallback, the
+	# same step every sibling install ends with (pop_bumper.gd, slingshot.gd, wall_element.gd).
+	# WHY this hide is load-bearing, not cosmetic: the fallback cylinder is OPAQUE and shares the
+	# art's footprint (both track POST_RADIUS), so leaving it visible swallows the bullseye whole -
+	# the art renders, but INSIDE the can, and the player still sees a plain solid cylinder (the
+	# exact Gate 0 send-back bug this line fixes). Every earlier return above leaves the gray box
+	# visible, so a failed import still never makes the target vanish.
+	if _gray_box != null:
+		_gray_box.visible = false  ## the real bullseye replaces the placeholder cylinder
 
-## Uniform scale so the obstacle-block's top-down FOOTPRINT (the wider of X/Z) matches the post
-## diameter (2 * POST_RADIUS), so the visible post tracks the collider the player bounces off.
+## Uniform scale so the bullseye puck's top-down FOOTPRINT (the wider of X/Z) matches the post
+## diameter (2 * POST_RADIUS), so the visible target tracks the collider the player bounces off.
 ## Measured from the merged mesh AABB (KenneyModels.merged_aabb), never hardcoded: a re-exported
 ## model self-corrects and no scale literal is typed. The structural test asserts the footprint
 ## tracks POST_RADIUS.

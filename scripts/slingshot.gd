@@ -36,24 +36,51 @@ extends "res://scripts/active_kicker.gd"
 const CORNER_RADIUS: float = TableConfig.SLINGSHOT_LENGTH * 0.18
 const CORNER_SEGMENTS: int = 4
 
-## SLICE "Kenney 3D asset integration" (2026-07-19): the slingshot is now PROCEDURAL Kenney-style.
-## The rounded triangle KickerMesh (_make_mesh, restyled via Palette.SLINGSHOT_ACCENT) is the
-## primary and only visual. The imported left/right_slingshot.glb were RETIRED with the rest of the
-## legacy .glb art, and the loader / negative-scale mirror / flex-anim code that drove them is
-## removed (dead once _install_art stopped being called). VESTIGES KEPT ON PURPOSE (below):
-## `_asset_path_override` and `_visual` are the test seams the decoupling + fallback oracles read
-## (now inert - "" / null - so those oracles skip cleanly), and `_play_flex` stays a decoupled no-op
-## so the "the anim never moves the ball" oracle still has a slot to toggle. The ball ALWAYS hits
-## the procedural ConvexPolygonShape3D hull (_make_body_shape); the visual is never a collider.
+## SLICE "Gate 0 polish" (2026-07-19): the slingshot renders a SOLID authored Kenney-style wedge
+## (DESIGN "saved by the slings"; developer note: "rebuild them as solid models instead of the
+## design I had originally"). The previous build read as an open truss - raised corner posts plus
+## thin rubber bands with a see-through middle; this replaces that with a filled, slightly-domed
+## triangular body whose FOOTPRINT TRACES the collider outline, so the visible face sits exactly
+## where the ball bounces. Two separately-authored, PRE-MIRRORED glbs (left_slingshot.glb /
+## right_slingshot.glb, baked in Blender with outward-recalculated normals) are the primary visual,
+## loaded per handedness in _install_art and seated base-at-Y=0. WHY two baked glbs and not one
+## negative-X-scaled at runtime: a negative scale REFLECTS the mesh, flipping its normals so
+## the right sling shades dark/inside-out (the mirror gotcha); a pre-mirrored glb keeps a positive-
+## determinant transform. The ball ALWAYS hits the frozen ConvexPolygonShape3D hull (_make_body_
+## shape); the wedge is never a collider (art is never a collider). If a glb fails to import (an
+## LFS-less run), the solid gray-box prism from _make_mesh stays visible so the sling still shows.
 
-## VESTIGE (test seam): the imported-asset override the fallback oracle sets. Now inert (no .glb
-## loader reads it); kept so that oracle's `if "_asset_path_override" in sling` branch resolves.
+## The two pre-mirrored wedge assets, one per handedness. _install_art loads by _mirrored.
+const LEFT_ASSET_PATH: String = "res://assets/models/left_slingshot.glb"
+const RIGHT_ASSET_PATH: String = "res://assets/models/right_slingshot.glb"
+## The imported visual's node name (the "art is never a collider" structural oracle resolves it).
+const VISUAL_NODE_NAME: String = "SlingshotVisual"
+
+## ON-HIT JAB (restored feedback). When the kick fires the visible wedge briefly lunges along the
+## kick direction (the solenoid firing), then eases back to its AUTHORED rest. Cosmetic ONLY - it
+## moves the visual node, NEVER the ball or the collider (the decoupling oracle proves the ball's
+## outgoing velocity is byte-for-byte identical with the jab wired or stripped).
+const JAB_DISTANCE: float = 0.28   ## world units the wedge lunges along the kick direction
+const JAB_OUT_S: float = 0.045     ## snap-out time (fast, like a solenoid firing)
+const JAB_BACK_S: float = 0.13     ## ease-back time to the authored rest
+
+## Test seam (fallback oracle): force a bad asset path to drive the gray-box fallback. Read by
+## _install_art (mirrors pop_bumper.gd's seam); "" means load the real per-side asset.
 var _asset_path_override: String = ""
 
-## VESTIGE (test seam): the imported .glb visual root. Now always null (the .glb art was retired),
-## so the visual-mesh oracles skip cleanly on `_visual == null` and the procedural KickerMesh is the
-## visible slingshot. Kept because the decoupling/visual oracles read `_sling._visual` directly.
+## The imported wedge visual root (set by _install_art on a successful load, else null). The
+## structural / mirror / derived-scale oracles read `_sling._visual` directly. Null when the glb did
+## not import (an LFS-less run) - which is exactly the fallback oracle's asserted post-condition.
 var _visual: Node3D = null
+
+## The node the on-hit jab moves and the AUTHORED rest position it always returns to. Captured ONCE
+## at install time and never re-read live mid-tween (QA BUG-044: a live read latches a mid-tween
+## position as the new rest and makes the wedge drift). Defaults to the gray-box KickerMesh so the
+## feedback still plays if the glb did not load.
+var _jab_node: Node3D = null
+var _visual_rest_pos: Vector3 = Vector3.ZERO
+## The live jab tween, killed before a new jab so overlapping kicks never fight over the position.
+var _jab_tween: Tween = null
 
 ## Box dimensions of the kicker face, from TableConfig (resolved in configure()).
 var _length: float = TableConfig.SLINGSHOT_LENGTH
@@ -267,48 +294,77 @@ func _make_mesh() -> MeshInstance3D:
 	mesh_instance.mesh = _build_triangle_mesh(_triangle_outline(), _height)
 	# The solid body is yawed by _body_yaw() in the base; yaw the visible mesh the same so they agree.
 	mesh_instance.transform = Transform3D(Basis(Vector3(0.0, 1.0, 0.0), _body_yaw()), Vector3.ZERO)
-	# A real slingshot is THREE rubber posts with bands stretched between them. Add those as children
-	# of the (yawed) mesh so they inherit its orientation and sit exactly on the collider's corners.
-	_add_posts_and_rubber(mesh_instance)
+	# This is now the FALLBACK gray-box only: a SOLID triangular prism (no truss). On a normal run
+	# _install_art hides it and shows the authored wedge glb; if that glb fails to import this solid
+	# prism stays visible so the sling never vanishes. The old raised-post + rubber-band truss (the
+	# "see-through middle" the developer flagged) is removed - a solid model replaces it.
 	return mesh_instance
 
 
-## Build the visible 3-post-and-rubber assembly (posts at the triangle corners, bands along the
-## edges) as children of the yawed mesh. PURELY visual - the collider and active kick are unchanged,
-## so this gives the slingshot its real look without touching the proven physics.
-func _add_posts_and_rubber(parent: Node3D) -> void:
-	var corners: PackedVector2Array = _raw_corners()
-	# The rubber posts + bands share the Palette scoring accent (single colour source, no literal),
-	# matching the triangle face and the ScoringReskin accent so the whole slingshot reads as one red
-	# scoring object; the raised posts give the shape its read, not a separate colour.
-	var rubber: StandardMaterial3D = Palette.flat_material(Palette.SLINGSHOT_ACCENT)
-	var post_r: float = _thickness * 0.6
-	# Posts: short cylinders standing a little taller than the rubber band, one per corner.
-	for c: Vector2 in corners:
-		var post := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = post_r
-		cyl.bottom_radius = post_r
-		cyl.height = _height * 1.15
-		cyl.material = rubber
-		post.mesh = cyl
-		post.position = Vector3(c.x, 0.0, c.y)
-		parent.add_child(post)
-	# Rubber bands: a thin bar along each edge, between consecutive posts, at mid height.
-	for i: int in range(corners.size()):
-		var a: Vector2 = corners[i]
-		var b: Vector2 = corners[(i + 1) % corners.size()]
-		var edge: Vector2 = b - a
-		var mid: Vector2 = (a + b) * 0.5
-		var band := MeshInstance3D.new()
-		var bar := BoxMesh.new()
-		bar.size = Vector3(edge.length(), _height * 0.55, post_r * 0.8)
-		bar.material = rubber
-		band.mesh = bar
-		band.position = Vector3(mid.x, 0.0, mid.y)
-		# Align the bar's local +X with the edge direction (about +Y): X -> (cos, 0, -sin).
-		band.rotation.y = atan2(-edge.y, edge.x)
-		parent.add_child(band)
+## Load the SOLID authored wedge glb (per handedness) as the visible art, scale it to trace the
+## collider outline, seat its base at Y=0, and hide the gray-box prism. Any load failure leaves the
+## gray-box visible and _visual null (the sling never vanishes - the fallback oracle asserts this).
+## Mirrors pop_bumper.gd._install_art. The imported subtree is VISUAL ONLY (never a collider).
+func _install_art() -> void:
+	var default_path: String = RIGHT_ASSET_PATH if _mirrored else LEFT_ASSET_PATH
+	var path: String = default_path if _asset_path_override == "" else _asset_path_override
+	var scene: Resource = load(path)
+	if scene == null or not (scene is PackedScene):
+		return  ## fallback: the solid gray-box prism from _make_mesh stays visible, _visual stays null
+	var visual: Node3D = (scene as PackedScene).instantiate()
+	visual.name = VISUAL_NODE_NAME
+	add_child(visual)
+	# Scale DERIVED from the frozen collider outline (never hardcoded): fit the glb footprint to the
+	# rounded-triangle hull the ball actually bounces off, so the visible face traces the collider.
+	_fit_to_collider(visual)
+	# Seat the wedge BASE on the surface (element origin, Y = 0) so an off-origin mesh cannot sink
+	# below the field. Measured after the scale is set, never hardcoded (KenneyModels.base_seat_y).
+	visual.position.y = KenneyModels.base_seat_y(visual, 0.0)
+	# Flat scoring-red accent (Palette single colour source) so a standalone sling reads red before
+	# the whole-table ScoringReskin pass re-asserts the same accent. Flat albedo only (web-safe).
+	_apply_accent(visual)
+	# Hide the gray-box prism; the solid wedge replaces it. KickerMesh STAYS present (hidden) as the
+	# ScoringReskin marker, which is found by name, not by visibility.
+	var gray_box: Node3D = get_node_or_null("KickerMesh") as Node3D
+	if gray_box != null:
+		gray_box.visible = false
+	# The wedge is now the visual and the jab target; capture its AUTHORED rest ONCE (QA BUG-044).
+	_visual = visual
+	_jab_node = visual
+	_visual_rest_pos = visual.position
+
+
+## Derive the visual's per-axis scale from the collider outline (the anti-magic-number oracle): fit
+## the glb's footprint AABB to the frozen rounded-triangle outline the ball bounces off, and
+## its height to _height. Positive on every axis (the pre-mirrored glbs need no negative scale), so
+## the transform determinant stays > 0 (no reflected/inside-out normals - the mirror gotcha). A
+## degenerate model leaves the scale at 1 so a bad asset never divides by ~0.
+func _fit_to_collider(visual: Node3D) -> void:
+	var box: AABB = KenneyModels.merged_aabb(visual)
+	if box.size.x < 0.0001 or box.size.y < 0.0001 or box.size.z < 0.0001:
+		return
+	var outline: PackedVector2Array = _triangle_outline()
+	var min_x: float = INF
+	var max_x: float = -INF
+	var min_z: float = INF
+	var max_z: float = -INF
+	for p: Vector2 in outline:
+		min_x = minf(min_x, p.x)
+		max_x = maxf(max_x, p.x)
+		min_z = minf(min_z, p.y)
+		max_z = maxf(max_z, p.y)
+	var target_w: float = max_x - min_x
+	var target_d: float = max_z - min_z
+	visual.scale = Vector3(target_w / box.size.x, _height / box.size.y, target_d / box.size.z)
+
+
+## Paint the imported wedge with the flat scoring-red accent (Palette single colour source, no
+## scattered literal) so a standalone sling reads red before ScoringReskin's whole-table pass. Flat
+## albedo only (must-feel: no emission - invisible in the web build; no transparency).
+func _apply_accent(root: Node3D) -> void:
+	var mat: StandardMaterial3D = Palette.flat_material(Palette.SLINGSHOT_ACCENT)
+	for mi: MeshInstance3D in KenneyModels.mesh_instances(root):
+		mi.material_override = mat
 
 
 ## The triangle footprint in the body's LOCAL X-Z plane (before _body_yaw). The long KICKING FACE is
@@ -484,32 +540,56 @@ func _body_yaw() -> float:
 
 
 # ==================================================================================================
-# SLICE "Kenney 3D asset integration" (2026-07-19): the slingshot is PROCEDURAL Kenney-style. The
-# rounded triangle KickerMesh (built by the base from _make_mesh, restyled via Palette.SLINGSHOT_
-# ACCENT) is the primary and only visual. The imported left/right_slingshot.glb were RETIRED, so the
-# loader / negative-scale mirror / flex-anim code that drove them is REMOVED (it was dead once
-# _install_art stopped being called). The collider / kick / score / cooldown are the frozen active-
-# kick base - untouched. `_play_flex` stays a wired, decoupled no-op (below) so the behavioral
-# decoupling oracle still has a slot to toggle and re-adding juice on a future authored model is a
-# one-function change.
+# SLICE "Gate 0 polish" (2026-07-19): the SOLID authored wedge (left/right_slingshot.glb) is the
+# primary visual (see the header note + _install_art). _ready swaps it in over the gray-box fallback
+# and wires the on-hit jab (_play_flex). The collider / kick / score / cooldown are the frozen
+# active-kick base - untouched; the wedge and the jab are VISUAL ONLY (the ball is never touched).
 # ==================================================================================================
 
 
-## Wire the cosmetic (now no-op) flex slot to the kick signal. super._ready() first so the base
-## builds the body / detector / procedural triangle "KickerMesh" - the visible slingshot now that
-## the imported .glb art is retired (it is never hidden). The collider / kick / score / cooldown are
-## UNTOUCHED (the frozen active-kick base).
+## super._ready() first so the base builds the frozen body / detector / gray-box "KickerMesh". Then
+## swap in the solid authored wedge (_install_art) and wire the on-hit jab. The collider / kick /
+## score / cooldown are UNTOUCHED (the frozen active-kick base).
 func _ready() -> void:
 	super._ready()
-	kicked.connect(_play_flex)
+	# Default the jab target to the gray-box fallback so the on-hit feedback still plays even if the
+	# wedge glb fails to import; _install_art overrides these to the wedge on a successful load.
+	var gray_box: Node3D = get_node_or_null("KickerMesh") as Node3D
+	if gray_box != null:
+		_jab_node = gray_box
+		_visual_rest_pos = gray_box.position
+	_install_art()
+	if not kicked.is_connected(_play_flex):
+		kicked.connect(_play_flex)
 
 
-## Cosmetic flex hook - a DECOUPLED NO-OP since the imported slingshot .glb (which carried the
-## Kicker_Finger / Kicker_Tip / Sling_Rubber_Ring flex nodes) was retired this slice and the
-## procedural triangle has no flex nodes. Kept wired to `kicked` so the behavioral decoupling oracle
-## (ball velocity identical with the anim wired or stripped) still has a slot to toggle, and so
-## re-adding juice on a future authored model is a one-function change. It NEVER reads or writes the
-## ball - purely cosmetic. The `direction` arg matches the kicked(direction: Vector3) signature (a
-## zero-arg slot would fail to connect; Godot 4 does not drop unconsumed signal args).
-func _play_flex(_direction: Vector3) -> void:
-	return
+## ON-HIT JAB (restored feedback): lunge the visible wedge briefly ALONG the kick direction (the
+## solenoid firing), then ease it back to its AUTHORED rest. PURELY COSMETIC - it moves only the
+## visual node, NEVER the ball or the collider, so the decoupling oracle measures a byte-for-byte
+## identical outgoing velocity whether this slot is wired or stripped. The tween runs on the PHYSICS
+## clock so its progress is deterministic under the headless GUT physics-frame sampler.
+##
+## QA BUG-044 GUARD: the ease-back target is _visual_rest_pos, captured ONCE at install, NOT the
+## node's live position read here - a live read during an in-flight jab would latch a mid-tween
+## position as the new "rest" and make the wedge drift out of place over repeated hits.
+##
+## The `direction` arg matches the kicked(direction: Vector3) signature (a zero-arg slot fails to
+## connect; Godot 4 does not drop unconsumed signal args). It is the FIXED kick direction in the
+## sling's local X-Z (the sling root carries no rotation), so it is the jab axis directly.
+func _play_flex(direction: Vector3) -> void:
+	if _jab_node == null:
+		return
+	var dir: Vector3 = direction
+	dir.y = 0.0  ## jab in the surface plane only (no vertical hop)
+	if dir.length() < 0.0001:
+		return
+	dir = dir.normalized()
+	# Kill any in-flight jab so overlapping kicks never fight over the node's position; the new jab
+	# always ENDS at the authored rest, so no drift accumulates regardless of when it is interrupted.
+	if _jab_tween != null and _jab_tween.is_valid():
+		_jab_tween.kill()
+	var jabbed: Vector3 = _visual_rest_pos + dir * JAB_DISTANCE
+	_jab_tween = create_tween()
+	_jab_tween.set_process_mode(Tween.TWEEN_PROCESS_PHYSICS)
+	_jab_tween.tween_property(_jab_node, "position", jabbed, JAB_OUT_S)
+	_jab_tween.tween_property(_jab_node, "position", _visual_rest_pos, JAB_BACK_S)
